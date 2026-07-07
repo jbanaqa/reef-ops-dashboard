@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+export const dynamic = "force-dynamic";
 
 function parseJsonArray(value: string | null | undefined): string[] {
   if (!value) return [];
