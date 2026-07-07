@@ -1,0 +1,230 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model FeedbackItem {
+  id String @id @default(cuid())
+
+  source            String
+  sourceUrl         String?
+  customerReference String?
+  feedbackText      String
+  staffNote         String?
+
+  aiSentiment             String
+  aiIssueTypes            String
+  aiSeverity              String
+  aiValidityEstimate      String
+  aiSuggestedStatus       String
+  aiConfidence            Float
+  aiSummary               String
+  aiSuggestedNextAction   String
+  aiSuggestedResponse     String?
+  aiMissingInformation    String
+
+  status String @default("New")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ScanResult {
+  id String @id @default(cuid())
+
+  source     String @default("Brave Search")
+  query      String
+  title      String
+  url        String @unique
+  domain     String?
+  description String?
+  age        String?
+  sourceName String?
+  sourceUrl  String?
+
+  status String @default("New")
+  // New     = discovered but not reviewed yet
+  // Saved   = staff wants to keep it for later AI analysis / feedback workflow
+  // Ignored = staff reviewed it and does not want it shown again
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model InventorySnapshot {
+  id String @id @default(cuid())
+
+  shop String
+
+  productId       String?
+  variantId       String?
+  inventoryItemId String
+  locationId      String
+
+  sku          String?
+  productTitle String?
+  variantTitle String?
+  locationName  String?
+
+  available Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, inventoryItemId, locationId])
+  @@index([shop])
+  @@index([inventoryItemId])
+  @@index([variantId])
+  @@index([locationId])
+}
+
+model RawInventoryUpdate {
+  id String @id @default(cuid())
+
+  shop String
+
+  inventoryItemId String
+  locationId      String
+
+  available Int
+  rawPayload String?
+
+  receivedAt DateTime @default(now())
+
+  @@index([shop])
+  @@index([inventoryItemId])
+  @@index([locationId])
+  @@index([receivedAt])
+}
+
+model InventoryMovementWindow {
+  id String @id @default(cuid())
+
+  shop String
+
+  productId       String?
+  variantId       String?
+  inventoryItemId String
+  locationId      String
+
+  sku          String?
+  productTitle String?
+  variantTitle String?
+  locationName  String?
+
+  startingAvailable Int
+  latestAvailable   Int
+  netDelta          Int
+
+  firstChangeAt DateTime
+  lastChangeAt  DateTime
+  finalizeAfter DateTime
+
+  status String @default("Pending")
+  // Pending   = still inside the settling window
+  // Finalized = already converted into an InventoryEvent
+  // Ignored   = net-zero or not useful to report
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+  @@index([inventoryItemId])
+  @@index([variantId])
+  @@index([locationId])
+  @@index([status])
+  @@index([finalizeAfter])
+}
+
+model InventoryEvent {
+  id String @id @default(cuid())
+
+  shop String
+
+  productId       String?
+  variantId       String?
+  inventoryItemId String
+  locationId      String
+
+  sku          String?
+  productTitle String?
+  variantTitle String?
+  locationName  String?
+
+  startingAvailable Int
+  endingAvailable   Int
+  netDelta          Int
+
+  matchedOrderQuantity  Int @default(0)
+  unknownChangeQuantity Int @default(0)
+
+  eventType String
+  // SaleMatched
+  // UnknownDecrement
+  // PartialUnknownDecrement
+  // Increase
+  // IgnoredNetZero
+
+  matchedOrderIds   String?
+  matchedOrderNames String?
+
+  reviewStatus String @default("Unreviewed")
+  // Unreviewed
+  // Reviewed
+  // ConfirmedLoss
+  // CountCorrection
+  // Ignored
+
+  ownerNote String?
+
+  detectedAt DateTime @default(now())
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+  @@index([inventoryItemId])
+  @@index([variantId])
+  @@index([locationId])
+  @@index([eventType])
+  @@index([reviewStatus])
+  @@index([detectedAt])
+}
+
+model OrderInventoryClaim {
+  id String @id @default(cuid())
+
+  shop String
+
+  orderId   String
+  orderName String?
+
+  productId       String?
+  variantId       String?
+  inventoryItemId String?
+
+  sku          String?
+  productTitle String?
+  variantTitle String?
+
+  quantitySold    Int
+  claimedQuantity Int @default(0)
+
+  orderCreatedAt DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([shop])
+  @@index([orderId])
+  @@index([variantId])
+  @@index([inventoryItemId])
+  @@index([orderCreatedAt])
+}
