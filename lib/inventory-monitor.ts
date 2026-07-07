@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 
 const SETTLING_WINDOW_MINUTES =
-  Number(process.env.INVENTORY_MONITOR_SETTLING_MINUTES) || 5;
+  Number(process.env.INVENTORY_MONITOR_SETTLING_MINUTES) || 0;
 
 type ProcessInventoryUpdateInput = {
   shop?: string;
