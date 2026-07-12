@@ -16,16 +16,16 @@ model FeedbackItem {
   feedbackText      String
   staffNote         String?
 
-  aiSentiment             String
-  aiIssueTypes            String
-  aiSeverity              String
-  aiValidityEstimate      String
-  aiSuggestedStatus       String
-  aiConfidence            Float
-  aiSummary               String
-  aiSuggestedNextAction   String
-  aiSuggestedResponse     String?
-  aiMissingInformation    String
+  aiSentiment           String
+  aiIssueTypes          String
+  aiSeverity            String
+  aiValidityEstimate    String
+  aiSuggestedStatus     String
+  aiConfidence          Float
+  aiSummary             String
+  aiSuggestedNextAction String
+  aiSuggestedResponse   String?
+  aiMissingInformation  String
 
   status String @default("New")
 
@@ -36,20 +36,17 @@ model FeedbackItem {
 model ScanResult {
   id String @id @default(cuid())
 
-  source     String @default("Brave Search")
-  query      String
-  title      String
-  url        String @unique
-  domain     String?
+  source      String @default("Brave Search")
+  query       String
+  title       String
+  url         String @unique
+  domain      String?
   description String?
-  age        String?
-  sourceName String?
-  sourceUrl  String?
+  age         String?
+  sourceName  String?
+  sourceUrl   String?
 
   status String @default("New")
-  // New     = discovered but not reviewed yet
-  // Saved   = staff wants to keep it for later AI analysis / feedback workflow
-  // Ignored = staff reviewed it and does not want it shown again
 
   firstSeenAt DateTime @default(now())
   lastSeenAt  DateTime @default(now())
@@ -71,7 +68,7 @@ model InventorySnapshot {
   sku          String?
   productTitle String?
   variantTitle String?
-  locationName  String?
+  locationName String?
 
   available Int
 
@@ -93,7 +90,7 @@ model RawInventoryUpdate {
   inventoryItemId String
   locationId      String
 
-  available Int
+  available  Int
   rawPayload String?
 
   receivedAt DateTime @default(now())
@@ -117,7 +114,7 @@ model InventoryMovementWindow {
   sku          String?
   productTitle String?
   variantTitle String?
-  locationName  String?
+  locationName String?
 
   startingAvailable Int
   latestAvailable   Int
@@ -128,9 +125,6 @@ model InventoryMovementWindow {
   finalizeAfter DateTime
 
   status String @default("Pending")
-  // Pending   = still inside the settling window
-  // Finalized = already converted into an InventoryEvent
-  // Ignored   = net-zero or not useful to report
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -156,7 +150,7 @@ model InventoryEvent {
   sku          String?
   productTitle String?
   variantTitle String?
-  locationName  String?
+  locationName String?
 
   startingAvailable Int
   endingAvailable   Int
@@ -166,21 +160,11 @@ model InventoryEvent {
   unknownChangeQuantity Int @default(0)
 
   eventType String
-  // SaleMatched
-  // UnknownDecrement
-  // PartialUnknownDecrement
-  // Increase
-  // IgnoredNetZero
 
   matchedOrderIds   String?
   matchedOrderNames String?
 
   reviewStatus String @default("Unreviewed")
-  // Unreviewed
-  // Reviewed
-  // ConfirmedLoss
-  // CountCorrection
-  // Ignored
 
   ownerNote String?
 
@@ -227,4 +211,82 @@ model OrderInventoryClaim {
   @@index([variantId])
   @@index([inventoryItemId])
   @@index([orderCreatedAt])
+}
+
+// -----------------------------------------------------------------------------
+// REORDER PLANNER
+// -----------------------------------------------------------------------------
+
+model SupplierItem {
+  id String @id @default(cuid())
+
+  supplierCode           String @unique
+  supplierName           String
+  normalizedSupplierName String
+
+  latestAvailableQty Int?
+  lastSeenAt         DateTime?
+
+  reorderMapping ReorderMapping?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([supplierName])
+  @@index([normalizedSupplierName])
+  @@index([lastSeenAt])
+}
+
+model ReorderMapping {
+  id String @id @default(cuid())
+
+  supplierItemId String?       @unique
+  supplierItem   SupplierItem? @relation(fields: [supplierItemId], references: [id], onDelete: SetNull)
+
+  supplierCode String? @unique
+
+  supplierName           String
+  normalizedSupplierName String @unique
+
+  targetStockQuantity Int
+  isActive           Boolean @default(true)
+
+  variants ReorderVariantMapping[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([supplierCode])
+  @@index([supplierName])
+  @@index([isActive])
+}
+
+model ReorderVariantMapping {
+  id String @id @default(cuid())
+
+  mappingId String
+  mapping   ReorderMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  shop String @default("corals-anonymous.myshopify.com")
+
+  productId       String?
+  variantId       String
+  inventoryItemId String?
+
+  productTitle String
+  variantTitle String?
+  sku          String?
+
+  unitsPerVariant Int @default(1)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mappingId, shop, variantId])
+  @@index([mappingId])
+  @@index([variantId])
+  @@index([inventoryItemId])
+  @@index([isActive])
 }

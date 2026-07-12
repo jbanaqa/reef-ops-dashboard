@@ -15,6 +15,7 @@ const navItems = [
   { label: "Shipments", href: "#" },
   { label: "Inventory", href: "#" },
   { label: "Inventory Monitor", href: "/inventory-monitor" },
+  { label: "Reorder Planner", href: "/reorder-planner" },
   { label: "Reports", href: "#" },
   { label: "Settings", href: "#" },
 ];
@@ -31,13 +32,18 @@ export default function RootLayout({
           <aside className="sidebar">
             <p className="sidebar-brand-label">Corals Anonymous</p>
             <h1 className="sidebar-title">Reef Ops</h1>
+
             <p className="sidebar-description">
               Internal tools for feedback, inventory, shipments, and operations.
             </p>
 
             <nav className="sidebar-nav">
               {navItems.map((item) => (
-                <Link key={item.label} href={item.href} className="sidebar-link">
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="sidebar-link"
+                >
                   {item.label}
                 </Link>
               ))}
@@ -46,7 +52,9 @@ export default function RootLayout({
 
           <main className="main-area">
             <div className="topbar">
-              <p className="topbar-text">Internal Operations Platform</p>
+              <p className="topbar-text">
+                Internal Operations Platform
+              </p>
             </div>
 
             <div className="page-container">{children}</div>

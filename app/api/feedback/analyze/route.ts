@@ -1,10 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 const allowedSources = [
   "Google Review",
   "Reddit",
@@ -17,32 +13,61 @@ const allowedSources = [
   "Other",
 ];
 
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error(
+      "Missing OPENAI_API_KEY environment variable.",
+    );
+  }
+
+  return new OpenAI({
+    apiKey,
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
 
     const source = String(body.source || "").trim();
     const sourceUrl = String(body.sourceUrl || "").trim();
-    const customerReference = String(body.customerReference || "").trim();
-    const feedbackText = String(body.feedbackText || "").trim();
+    const customerReference = String(
+      body.customerReference || "",
+    ).trim();
+    const feedbackText = String(
+      body.feedbackText || "",
+    ).trim();
     const staffNote = String(body.staffNote || "").trim();
 
     if (!feedbackText) {
       return NextResponse.json(
-        { error: "Feedback text is required." },
-        { status: 400 }
+        {
+          error: "Feedback text is required.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
     if (source && !allowedSources.includes(source)) {
       return NextResponse.json(
-        { error: "Invalid feedback source." },
-        { status: 400 }
+        {
+          error: "Invalid feedback source.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
+    const client = getOpenAIClient();
+
     const response = await client.responses.create({
       model: "gpt-5.2",
+
       instructions: `
 You are an internal company feedback analyst for a reef livestock e-commerce company.
 
@@ -56,12 +81,15 @@ Important rules:
 - Return only valid JSON.
 - The JSON must match the requested schema exactly.
       `,
+
       input: `
 Analyze this feedback item.
 
 Source: ${source || "Unknown"}
 Source URL: ${sourceUrl || "Not provided"}
-Customer / Order Reference: ${customerReference || "Not provided"}
+Customer / Order Reference: ${
+        customerReference || "Not provided"
+      }
 Internal Staff Note: ${staffNote || "Not provided"}
 
 Feedback Text:
@@ -85,7 +113,7 @@ Return JSON with this exact shape:
 
     const rawText = response.output_text;
 
-    let analysis;
+    let analysis: unknown;
 
     try {
       analysis = JSON.parse(rawText);
@@ -95,17 +123,40 @@ Return JSON with this exact shape:
           error: "AI returned invalid JSON.",
           rawText,
         },
-        { status: 500 }
+        {
+          status: 500,
+        },
       );
     }
 
-    return NextResponse.json({ analysis });
+    return NextResponse.json({
+      analysis,
+    });
   } catch (error) {
     console.error("Feedback analysis error:", error);
 
+    if (
+      error instanceof Error &&
+      error.message.includes("OPENAI_API_KEY")
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Feedback analysis is not configured because OPENAI_API_KEY is missing.",
+        },
+        {
+          status: 503,
+        },
+      );
+    }
+
     return NextResponse.json(
-      { error: "Failed to analyze feedback." },
-      { status: 500 }
+      {
+        error: "Failed to analyze feedback.",
+      },
+      {
+        status: 500,
+      },
     );
   }
 }

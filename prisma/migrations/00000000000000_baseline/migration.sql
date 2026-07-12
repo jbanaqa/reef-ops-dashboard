@@ -1,6 +1,55 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
+-- CreateTable
+CREATE TABLE "FeedbackItem" (
+    "id" TEXT NOT NULL,
+    "source" TEXT NOT NULL,
+    "sourceUrl" TEXT,
+    "customerReference" TEXT,
+    "feedbackText" TEXT NOT NULL,
+    "staffNote" TEXT,
+    "aiSentiment" TEXT NOT NULL,
+    "aiIssueTypes" TEXT NOT NULL,
+    "aiSeverity" TEXT NOT NULL,
+    "aiValidityEstimate" TEXT NOT NULL,
+    "aiSuggestedStatus" TEXT NOT NULL,
+    "aiConfidence" DOUBLE PRECISION NOT NULL,
+    "aiSummary" TEXT NOT NULL,
+    "aiSuggestedNextAction" TEXT NOT NULL,
+    "aiSuggestedResponse" TEXT,
+    "aiMissingInformation" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'New',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "FeedbackItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ScanResult" (
+    "id" TEXT NOT NULL,
+    "source" TEXT NOT NULL DEFAULT 'Brave Search',
+    "query" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "url" TEXT NOT NULL,
+    "domain" TEXT,
+    "description" TEXT,
+    "age" TEXT,
+    "sourceName" TEXT,
+    "sourceUrl" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'New',
+    "firstSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ScanResult_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateTable
 CREATE TABLE "InventorySnapshot" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
     "productId" TEXT,
     "variantId" TEXT,
@@ -11,24 +60,28 @@ CREATE TABLE "InventorySnapshot" (
     "variantTitle" TEXT,
     "locationName" TEXT,
     "available" INTEGER NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "InventorySnapshot_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RawInventoryUpdate" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
     "inventoryItemId" TEXT NOT NULL,
     "locationId" TEXT NOT NULL,
     "available" INTEGER NOT NULL,
     "rawPayload" TEXT,
-    "receivedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "receivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RawInventoryUpdate_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "InventoryMovementWindow" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
     "productId" TEXT,
     "variantId" TEXT,
@@ -41,17 +94,19 @@ CREATE TABLE "InventoryMovementWindow" (
     "startingAvailable" INTEGER NOT NULL,
     "latestAvailable" INTEGER NOT NULL,
     "netDelta" INTEGER NOT NULL,
-    "firstChangeAt" DATETIME NOT NULL,
-    "lastChangeAt" DATETIME NOT NULL,
-    "finalizeAfter" DATETIME NOT NULL,
+    "firstChangeAt" TIMESTAMP(3) NOT NULL,
+    "lastChangeAt" TIMESTAMP(3) NOT NULL,
+    "finalizeAfter" TIMESTAMP(3) NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'Pending',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "InventoryMovementWindow_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "InventoryEvent" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
     "productId" TEXT,
     "variantId" TEXT,
@@ -71,15 +126,17 @@ CREATE TABLE "InventoryEvent" (
     "matchedOrderNames" TEXT,
     "reviewStatus" TEXT NOT NULL DEFAULT 'Unreviewed',
     "ownerNote" TEXT,
-    "detectedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "reviewedAt" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "detectedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "reviewedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "InventoryEvent_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "OrderInventoryClaim" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
     "orderId" TEXT NOT NULL,
     "orderName" TEXT,
@@ -91,10 +148,15 @@ CREATE TABLE "OrderInventoryClaim" (
     "variantTitle" TEXT,
     "quantitySold" INTEGER NOT NULL,
     "claimedQuantity" INTEGER NOT NULL DEFAULT 0,
-    "orderCreatedAt" DATETIME NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "orderCreatedAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "OrderInventoryClaim_pkey" PRIMARY KEY ("id")
 );
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ScanResult_url_key" ON "ScanResult"("url");
 
 -- CreateIndex
 CREATE INDEX "InventorySnapshot_shop_idx" ON "InventorySnapshot"("shop");
