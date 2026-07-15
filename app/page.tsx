@@ -4,17 +4,20 @@ const stats = [
   {
     label: "Needs Attention",
     value: "0",
-    description: "Urgent or high-severity feedback.",
+    description:
+      "Urgent or high-severity feedback.",
   },
   {
     label: "Needs Investigation",
     value: "0",
-    description: "Items requiring order or staff review.",
+    description:
+      "Items requiring order or staff review.",
   },
   {
     label: "Needs Response",
     value: "0",
-    description: "Feedback that may need a reply.",
+    description:
+      "Feedback that may need a reply.",
   },
   {
     label: "Resolved",
@@ -27,21 +30,36 @@ export default function DashboardPage() {
   return (
     <div className="page-stack">
       <section>
-        <p className="page-header-eyebrow">Dashboard</p>
-        <h2 className="page-title">Reef Ops Dashboard</h2>
+        <p className="page-header-eyebrow">
+          Dashboard
+        </p>
+
+        <h2 className="page-title">
+          Reef Ops Dashboard
+        </h2>
 
         <p className="page-description">
-          A centralized internal dashboard for customer feedback,
-          reputation intelligence, inventory workflows, shipments,
-          and operational decisions.
+          A centralized internal dashboard for customer
+          feedback, reputation intelligence, inventory
+          workflows, shipments, merchandising, and
+          operational decisions.
         </p>
       </section>
 
       <section className="stats-grid">
         {stats.map((stat) => (
-          <div key={stat.label} className="card stat-card">
-            <p className="stat-label">{stat.label}</p>
-            <p className="stat-value">{stat.value}</p>
+          <div
+            key={stat.label}
+            className="card stat-card"
+          >
+            <p className="stat-label">
+              {stat.label}
+            </p>
+
+            <p className="stat-value">
+              {stat.value}
+            </p>
+
             <p className="stat-description">
               {stat.description}
             </p>
@@ -55,9 +73,10 @@ export default function DashboardPage() {
         </h3>
 
         <p className="card-description">
-          Enter reviews, forum posts, customer complaints, and
-          staff observations. The AI turns unstructured feedback
-          into operational insights and recommended actions.
+          Enter reviews, forum posts, customer
+          complaints, and staff observations. The AI
+          turns unstructured feedback into operational
+          insights and recommended actions.
         </p>
 
         <div className="action-row">
@@ -78,11 +97,13 @@ export default function DashboardPage() {
       </section>
 
       <section className="card card-padded">
-        <h3 className="card-title">Inventory Monitor</h3>
+        <h3 className="card-title">
+          Inventory Monitor
+        </h3>
 
         <p className="card-description">
-          Review inventory decreases that could not be fully
-          matched to Shopify orders.
+          Review inventory decreases that could not be
+          fully matched to Shopify orders.
         </p>
 
         <div className="action-row">
@@ -96,12 +117,14 @@ export default function DashboardPage() {
       </section>
 
       <section className="card card-padded">
-        <h3 className="card-title">Reorder Planner</h3>
+        <h3 className="card-title">
+          Reorder Planner
+        </h3>
 
         <p className="card-description">
           Configure reorder thresholds, standard order
-          quantities, and Shopify variant mappings for supplier
-          livestock.
+          quantities, and Shopify variant mappings for
+          supplier livestock.
         </p>
 
         <div className="action-row">
@@ -110,6 +133,28 @@ export default function DashboardPage() {
             className="button button-primary"
           >
             Open Reorder Planner
+          </Link>
+        </div>
+      </section>
+
+      <section className="card card-padded">
+        <h3 className="card-title">
+          Collection Rotation
+        </h3>
+
+        <p className="card-description">
+          Preview and apply a shared random product
+          order to Shopify collections so products
+          buried near the bottom receive more
+          storefront exposure.
+        </p>
+
+        <div className="action-row">
+          <Link
+            href="/collection-rotation"
+            className="button button-primary"
+          >
+            Open Collection Rotation
           </Link>
         </div>
       </section>

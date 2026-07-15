@@ -4,18 +4,32 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Reef Ops Dashboard",
-  description: "Internal operations dashboard for reef e-commerce workflows.",
+  description:
+    "Internal operations dashboard for reef e-commerce workflows.",
 };
 
 const navItems = [
   { label: "Dashboard", href: "/" },
-  { label: "Feedback Intelligence", href: "/feedback" },
+  {
+    label: "Feedback Intelligence",
+    href: "/feedback",
+  },
   { label: "Add Feedback", href: "/feedback/new" },
   { label: "Monitoring", href: "/monitoring" },
   { label: "Shipments", href: "#" },
   { label: "Inventory", href: "#" },
-  { label: "Inventory Monitor", href: "/inventory-monitor" },
-  { label: "Reorder Planner", href: "/reorder-planner" },
+  {
+    label: "Inventory Monitor",
+    href: "/inventory-monitor",
+  },
+  {
+    label: "Reorder Planner",
+    href: "/reorder-planner",
+  },
+  {
+    label: "Collection Rotation",
+    href: "/collection-rotation",
+  },
   { label: "Reports", href: "#" },
   { label: "Settings", href: "#" },
 ];
@@ -30,11 +44,17 @@ export default function RootLayout({
       <body>
         <div className="app-shell">
           <aside className="sidebar">
-            <p className="sidebar-brand-label">Corals Anonymous</p>
-            <h1 className="sidebar-title">Reef Ops</h1>
+            <p className="sidebar-brand-label">
+              Corals Anonymous
+            </p>
+
+            <h1 className="sidebar-title">
+              Reef Ops
+            </h1>
 
             <p className="sidebar-description">
-              Internal tools for feedback, inventory, shipments, and operations.
+              Internal tools for feedback, inventory,
+              shipments, and operations.
             </p>
 
             <nav className="sidebar-nav">
@@ -57,7 +77,9 @@ export default function RootLayout({
               </p>
             </div>
 
-            <div className="page-container">{children}</div>
+            <div className="page-container">
+              {children}
+            </div>
           </main>
         </div>
       </body>

@@ -36,10 +36,10 @@ model FeedbackItem {
 model ScanResult {
   id String @id @default(cuid())
 
-  source      String @default("Brave Search")
+  source      String  @default("Brave Search")
   query       String
   title       String
-  url         String @unique
+  url         String  @unique
   domain      String?
   description String?
   age         String?
@@ -168,7 +168,7 @@ model InventoryEvent {
 
   ownerNote String?
 
-  detectedAt DateTime @default(now())
+  detectedAt DateTime  @default(now())
   reviewedAt DateTime?
 
   createdAt DateTime @default(now())
@@ -249,7 +249,7 @@ model ReorderMapping {
   normalizedSupplierName String @unique
 
   targetStockQuantity Int
-  isActive           Boolean @default(true)
+  isActive            Boolean @default(true)
 
   variants ReorderVariantMapping[]
 
@@ -289,4 +289,124 @@ model ReorderVariantMapping {
   @@index([variantId])
   @@index([inventoryItemId])
   @@index([isActive])
+}
+
+// -----------------------------------------------------------------------------
+// COLLECTION ROTATION
+// -----------------------------------------------------------------------------
+
+model CollectionRotation {
+  id String @id @default(cuid())
+
+  shop String
+
+  shopifyCollectionId String
+  collectionTitle     String
+  collectionHandle    String?
+
+  isEnabled Boolean @default(false)
+  isStarred Boolean @default(false)
+
+  controlledTopCount Int @default(0)
+
+  lastShuffledAt DateTime?
+  lastStatus     String?
+  lastError      String?
+
+  runs               CollectionRotationRun[]
+  controlledProducts CollectionControlledProduct[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, shopifyCollectionId])
+  @@index([shop])
+  @@index([shopifyCollectionId])
+  @@index([isEnabled])
+  @@index([isStarred])
+  @@index([controlledTopCount])
+  @@index([lastShuffledAt])
+}
+
+model CollectionRotationRun {
+  id String @id @default(cuid())
+
+  rotationId String
+  rotation   CollectionRotation @relation(fields: [rotationId], references: [id], onDelete: Cascade)
+
+  shop                String
+  shopifyCollectionId String
+  collectionTitle     String
+
+  triggerType String @default("Manual")
+  status      String @default("Pending")
+
+  productCount Int @default(0)
+
+  previousProductIds Json
+  shuffledProductIds Json?
+
+  shopifyJobIds Json?
+
+  errorMessage String?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  undoneAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([rotationId])
+  @@index([shop])
+  @@index([shopifyCollectionId])
+  @@index([triggerType])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model CollectionControlledProduct {
+  id String @id @default(cuid())
+
+  rotationId String
+  rotation   CollectionRotation @relation(fields: [rotationId], references: [id], onDelete: Cascade)
+
+  shopifyProductId String
+  productTitle     String
+  productHandle    String?
+  imageUrl         String?
+
+  position Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([rotationId, position])
+  @@unique([rotationId, shopifyProductId])
+  @@index([rotationId])
+  @@index([shopifyProductId])
+}
+
+model CollectionRotationScheduleRun {
+  id String @id @default(cuid())
+
+  scheduledFor DateTime @unique
+
+  status String @default("Running")
+
+  enabledCount   Int @default(0)
+  completedCount Int @default(0)
+  failedCount    Int @default(0)
+
+  results Json?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scheduledFor])
+  @@index([status])
+  @@index([startedAt])
 }
