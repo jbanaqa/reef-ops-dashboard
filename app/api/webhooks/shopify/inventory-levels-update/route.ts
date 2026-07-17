@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { processInventoryUpdate } from "@/lib/inventory-monitor";
+import { processProductRestockWaitlist } from "@/lib/product-restock-waitlist";
 import { getInventoryItemDetails } from "@/lib/shopify";
 
 function verifyShopifyWebhook(rawBody: string, hmacHeader: string | null) {
@@ -86,11 +87,34 @@ export async function POST(request: Request) {
       rawPayload: payload,
     });
 
+    let restockWaitlist = null;
+
+    try {
+      restockWaitlist = await processProductRestockWaitlist({
+        shop: shopHeader || process.env.SHOPIFY_SHOP_DOMAIN || "unknown-shop",
+        productId: details?.productId || null,
+        productHandle: details?.productHandle || null,
+        productTitle: details?.productTitle || null,
+        previousAvailable: result.previousAvailable,
+        newAvailable: result.newAvailable,
+      });
+    } catch (error) {
+      console.error("Failed to process product restock waitlist:", error);
+      restockWaitlist = {
+        action: "restock_waitlist_error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to process product restock waitlist.",
+      };
+    }
+
     return NextResponse.json({
       ok: true,
       topic: "inventory_levels/update",
       enriched: Boolean(details),
       details,
+      restockWaitlist,
       ...result,
     });
   } catch (error) {

@@ -104,6 +104,7 @@ type InventoryItemDetailsResponse = {
           id: string;
           legacyResourceId: string;
           title: string;
+          handle: string;
         };
       } | null;
     } | null;
@@ -124,6 +125,7 @@ const INVENTORY_ITEM_DETAILS_QUERY = `
           id
           legacyResourceId
           title
+          handle
         }
       }
     }
@@ -167,5 +169,6 @@ export async function getInventoryItemDetails(inventoryItemId: string) {
       ? String(variant.product.legacyResourceId)
       : null,
     productTitle: variant?.product?.title || null,
+    productHandle: variant?.product?.handle || null,
   };
 }

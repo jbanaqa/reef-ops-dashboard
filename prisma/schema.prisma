@@ -213,6 +213,34 @@ model OrderInventoryClaim {
   @@index([orderCreatedAt])
 }
 
+model ProductRestockWaitlist {
+  id String @id @default(cuid())
+
+  shop String
+
+  productId     String
+  productHandle String?
+  productTitle  String?
+
+  email String
+
+  status String @default("Waiting")
+
+  subscribedAt     DateTime  @default(now())
+  notifiedAt       DateTime?
+  unsubscribedAt   DateTime?
+  unsubscribeToken String    @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+  @@index([productId])
+  @@index([email])
+  @@index([status])
+  @@index([subscribedAt])
+}
+
 // -----------------------------------------------------------------------------
 // REORDER PLANNER
 // -----------------------------------------------------------------------------

@@ -23,6 +23,10 @@ const navItems = [
     href: "/inventory-monitor",
   },
   {
+    label: "Restock Waitlist",
+    href: "/restock-waitlist",
+  },
+  {
     label: "Reorder Planner",
     href: "/reorder-planner",
   },

@@ -118,6 +118,26 @@ export default function DashboardPage() {
 
       <section className="card card-padded">
         <h3 className="card-title">
+          Restock Waitlist
+        </h3>
+
+        <p className="card-description">
+          Track product-level email alerts for customers
+          waiting on out-of-stock Shopify products.
+        </p>
+
+        <div className="action-row">
+          <Link
+            href="/restock-waitlist"
+            className="button button-primary"
+          >
+            Open Restock Waitlist
+          </Link>
+        </div>
+      </section>
+
+      <section className="card card-padded">
+        <h3 className="card-title">
           Reorder Planner
         </h3>
 

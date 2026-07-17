@@ -1,0 +1,105 @@
+{% comment %}
+  Product-level restock waitlist form.
+  Replace RESTOCK_WAITLIST_ENDPOINT with:
+  https://reef-ops-dashboard-production.up.railway.app/api/restock-waitlist
+{% endcomment %}
+
+{% if product.available == false %}
+  <div class="restock-waitlist" data-restock-waitlist>
+    <h3>Notify me when available</h3>
+    <p>Enter your email and we will let you know when this product is back.</p>
+
+    <form data-restock-waitlist-form>
+      <input
+        type="hidden"
+        name="shop"
+        value="{{ shop.permanent_domain | escape }}"
+      >
+      <input
+        type="hidden"
+        name="productId"
+        value="{{ product.id }}"
+      >
+      <input
+        type="hidden"
+        name="productHandle"
+        value="{{ product.handle | escape }}"
+      >
+      <input
+        type="hidden"
+        name="productTitle"
+        value="{{ product.title | escape }}"
+      >
+      <div
+        aria-hidden="true"
+        style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;"
+      >
+        <label>
+          Company
+          <input
+            type="text"
+            name="company"
+            tabindex="-1"
+            autocomplete="off"
+          >
+        </label>
+      </div>
+      <label>
+        <span class="visually-hidden">Email address</span>
+        <input
+          type="email"
+          name="email"
+          autocomplete="email"
+          placeholder="Email address"
+          required
+        >
+      </label>
+      <button type="submit">Notify me</button>
+      <p data-restock-waitlist-message role="status"></p>
+    </form>
+  </div>
+
+  <script>
+    (() => {
+      const root = document.currentScript.previousElementSibling;
+      const form = root?.querySelector("[data-restock-waitlist-form]");
+      const message = root?.querySelector("[data-restock-waitlist-message]");
+      const endpoint = "RESTOCK_WAITLIST_ENDPOINT";
+
+      if (!form || !message || endpoint === "RESTOCK_WAITLIST_ENDPOINT") {
+        return;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        message.textContent = "Saving...";
+
+        const submitButton = form.querySelector("button[type='submit']");
+        submitButton?.setAttribute("disabled", "disabled");
+
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            body: new FormData(form),
+          });
+          const data = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(data.error || "Could not save your request.");
+          }
+
+          form.reset();
+          message.textContent =
+            "You are on the list. We will email you when it is available.";
+        } catch (error) {
+          message.textContent =
+            error instanceof Error
+              ? error.message
+              : "Could not save your request.";
+        } finally {
+          submitButton?.removeAttribute("disabled");
+        }
+      });
+    })();
+  </script>
+{% endif %}
