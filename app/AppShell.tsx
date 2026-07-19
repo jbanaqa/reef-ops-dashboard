@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ReefIcon } from "./ReefIcon";
+
+type Theme = "dark" | "light";
 
 const navigation = [
   { label: "Overview", items: [{ href: "/", label: "Dashboard", icon: "dashboard" }] },
@@ -29,7 +31,22 @@ function routeIsActive(pathname: string, href: string) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>("dark");
   const title = pageTitles[pathname] || "Reef Ops";
+
+  useEffect(() => {
+    const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    queueMicrotask(() => setTheme(current));
+  }, []);
+
+  function toggleTheme() {
+    const nextTheme: Theme = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = nextTheme;
+    document.documentElement.style.colorScheme = nextTheme;
+    localStorage.setItem("reef-ops-theme", nextTheme);
+    setTheme(nextTheme);
+  }
+
   return (
     <div className="reef-shell">
       <button className={`reef-backdrop ${menuOpen ? "is-visible" : ""}`} aria-label="Close navigation" onClick={() => setMenuOpen(false)} />
@@ -60,7 +77,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button className="reef-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><ReefIcon name="menu" /></button>
             <div><span className="reef-topbar-context">Reef Ops</span><strong>{title}</strong></div>
           </div>
-          <div className="reef-topbar-status"><span className="reef-live-dot" /> Shopify operations</div>
+          <div className="reef-topbar-actions">
+            <div className="reef-topbar-status"><span className="reef-live-dot" /> Shopify operations</div>
+            <button
+              className="reef-theme-toggle"
+              type="button"
+              role="switch"
+              aria-checked={theme === "light"}
+              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+              title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+              onClick={toggleTheme}
+            >
+              <span className="reef-theme-icon reef-theme-sun" aria-hidden="true">☀</span>
+              <span className="reef-theme-track"><i /></span>
+              <span className="reef-theme-icon reef-theme-moon" aria-hidden="true">◐</span>
+            </button>
+          </div>
         </header>
         <main className="reef-content">{children}</main>
       </div>
