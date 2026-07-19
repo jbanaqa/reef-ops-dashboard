@@ -1,6 +1,17 @@
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { manuallySendProductRestockWaitlistEntry } from "@/lib/product-restock-waitlist";
+import { RestockWaitlistRowActions } from "./row-actions";
 
 export const dynamic = "force-dynamic";
+
+type RestockWaitlistPageProps = {
+  searchParams?: Promise<{
+    result?: string;
+    message?: string;
+  }>;
+};
 
 function formatDate(date: Date | null) {
   if (!date) {
@@ -16,32 +27,130 @@ function formatDate(date: Date | null) {
   }).format(date);
 }
 
-export default async function RestockWaitlistPage() {
-  const [totalCount, waitingCount, notifiedCount, unsubscribedCount, recent] =
-    await Promise.all([
-      prisma.productRestockWaitlist.count(),
-      prisma.productRestockWaitlist.count({
+function getResultUrl(
+  result: "success" | "error",
+  message: string
+) {
+  const params = new URLSearchParams({
+    result,
+    message,
+  });
+
+  return `/restock-waitlist?${params.toString()}`;
+}
+
+async function sendWaitlistEmail(formData: FormData) {
+  "use server";
+
+  const entryId = String(
+    formData.get("entryId") || ""
+  );
+
+  let result: "success" | "error" = "success";
+  let message = "Restock email sent and status changed to Notified.";
+
+  try {
+    const sendResult =
+      await manuallySendProductRestockWaitlistEntry(
+        entryId
+      );
+
+    if (
+      sendResult.action ===
+      "manual_send_skipped_not_waiting"
+    ) {
+      result = "error";
+      message =
+        "This signup is no longer waiting, so no email was sent.";
+    }
+  } catch (error) {
+    result = "error";
+    message =
+      error instanceof Error
+        ? error.message
+        : "The restock email could not be sent.";
+  }
+
+  revalidatePath("/restock-waitlist");
+  redirect(getResultUrl(result, message));
+}
+
+async function deleteWaitlistEntry(formData: FormData) {
+  "use server";
+
+  const entryId = String(
+    formData.get("entryId") || ""
+  );
+
+  let result: "success" | "error" = "success";
+  let message = "Waitlist signup deleted.";
+
+  try {
+    if (!entryId) {
+      throw new Error(
+        "The waitlist signup could not be identified."
+      );
+    }
+
+    const deletion =
+      await prisma.productRestockWaitlist.deleteMany({
         where: {
-          status: "Waiting",
+          id: entryId,
         },
-      }),
-      prisma.productRestockWaitlist.count({
-        where: {
-          status: "Notified",
-        },
-      }),
-      prisma.productRestockWaitlist.count({
-        where: {
-          status: "Unsubscribed",
-        },
-      }),
-      prisma.productRestockWaitlist.findMany({
-        orderBy: {
-          subscribedAt: "desc",
-        },
-        take: 50,
-      }),
-    ]);
+      });
+
+    if (deletion.count === 0) {
+      throw new Error(
+        "This waitlist signup was already removed."
+      );
+    }
+  } catch (error) {
+    result = "error";
+    message =
+      error instanceof Error
+        ? error.message
+        : "The waitlist signup could not be deleted.";
+  }
+
+  revalidatePath("/restock-waitlist");
+  redirect(getResultUrl(result, message));
+}
+
+export default async function RestockWaitlistPage({
+  searchParams,
+}: RestockWaitlistPageProps) {
+  const resolvedSearchParams = await searchParams;
+
+  const [
+    totalCount,
+    waitingCount,
+    notifiedCount,
+    unsubscribedCount,
+    recent,
+  ] = await Promise.all([
+    prisma.productRestockWaitlist.count(),
+    prisma.productRestockWaitlist.count({
+      where: {
+        status: "Waiting",
+      },
+    }),
+    prisma.productRestockWaitlist.count({
+      where: {
+        status: "Notified",
+      },
+    }),
+    prisma.productRestockWaitlist.count({
+      where: {
+        status: "Unsubscribed",
+      },
+    }),
+    prisma.productRestockWaitlist.findMany({
+      orderBy: {
+        subscribedAt: "desc",
+      },
+      take: 50,
+    }),
+  ]);
 
   return (
     <div className="page-stack">
@@ -60,6 +169,20 @@ export default async function RestockWaitlistPage() {
           again across any variant.
         </p>
       </section>
+
+      {resolvedSearchParams?.message ? (
+        <section className="card card-padded">
+          <p
+            className={
+              resolvedSearchParams.result === "success"
+                ? "success-message"
+                : "error-message"
+            }
+          >
+            {resolvedSearchParams.message}
+          </p>
+        </section>
+      ) : null}
 
       <section className="stats-grid">
         <div className="card stat-card">
@@ -118,6 +241,7 @@ export default async function RestockWaitlistPage() {
               Recent Signups
             </h3>
             <p className="card-description">
+              Send a waiting customer’s email manually or delete test entries.
               Showing the latest 50 product-level waitlist entries.
             </p>
           </div>
@@ -143,6 +267,7 @@ export default async function RestockWaitlistPage() {
                   <th>Status</th>
                   <th>Subscribed</th>
                   <th>Notified</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -166,6 +291,14 @@ export default async function RestockWaitlistPage() {
                     </td>
                     <td>{formatDate(entry.subscribedAt)}</td>
                     <td>{formatDate(entry.notifiedAt)}</td>
+                    <td>
+                      <RestockWaitlistRowActions
+                        entryId={entry.id}
+                        status={entry.status}
+                        sendAction={sendWaitlistEmail}
+                        deleteAction={deleteWaitlistEntry}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>

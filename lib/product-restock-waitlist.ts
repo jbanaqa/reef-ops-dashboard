@@ -222,6 +222,76 @@ export async function unsubscribeProductRestockWaitlist(
   });
 }
 
+export async function manuallySendProductRestockWaitlistEntry(
+  entryId: string
+) {
+  const subscription =
+    await prisma.productRestockWaitlist.findUnique({
+      where: {
+        id: entryId,
+      },
+    });
+
+  if (!subscription) {
+    throw new Error("This waitlist signup could not be found.");
+  }
+
+  if (subscription.status !== WAITLIST_STATUS_WAITING) {
+    return {
+      action: "manual_send_skipped_not_waiting",
+      subscription,
+    };
+  }
+
+  if (!isRestockEmailConfigured()) {
+    throw new Error(
+      "Restock email delivery is not configured."
+    );
+  }
+
+  const productTitle =
+    subscription.productTitle ||
+    "A product you requested";
+
+  const productHandle =
+    subscription.productHandle;
+
+  const emailResult = await sendRestockEmail({
+    subscriptionId: subscription.id,
+    to: subscription.email,
+    productTitle,
+    productUrl:
+      buildStoreProductUrl(productHandle),
+    unsubscribeUrl: buildUnsubscribeUrl(
+      subscription.unsubscribeToken
+    ),
+  });
+
+  if (!emailResult.sent) {
+    throw new Error(
+      "The restock email could not be sent."
+    );
+  }
+
+  const updatedSubscription =
+    await prisma.productRestockWaitlist.update({
+      where: {
+        id: subscription.id,
+      },
+      data: {
+        status: WAITLIST_STATUS_NOTIFIED,
+        notifiedAt: new Date(),
+        productHandle,
+        productTitle,
+      },
+    });
+
+  return {
+    action: "manual_notification_sent",
+    subscription: updatedSubscription,
+  };
+}
+
 export async function processProductRestockWaitlist(
   input: ProcessRestockInput
 ) {
