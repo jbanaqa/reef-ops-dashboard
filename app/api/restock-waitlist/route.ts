@@ -82,7 +82,7 @@ export async function POST(request: Request) {
     }
 
     const result = await createProductRestockWaitlistSignup({
-      shop: String(payload.shop || process.env.SHOPIFY_SHOP_DOMAIN || ""),
+      shop: String(process.env.SHOPIFY_SHOP_DOMAIN || ""),
       productId: String(payload.productId || payload.product_id || ""),
       productHandle: String(payload.productHandle || payload.product_handle || ""),
       productTitle: String(payload.productTitle || payload.product_title || ""),

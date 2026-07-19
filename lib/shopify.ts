@@ -172,3 +172,66 @@ export async function getInventoryItemDetails(inventoryItemId: string) {
     productHandle: variant?.product?.handle || null,
   };
 }
+
+type ProductInventoryDetailsResponse = {
+  data?: {
+    product?: {
+      id: string;
+      legacyResourceId: string;
+      title: string;
+      handle: string;
+      totalInventory: number;
+      status: string;
+      tracksInventory: boolean;
+    } | null;
+  };
+};
+
+const PRODUCT_INVENTORY_DETAILS_QUERY = `
+  query ProductInventoryDetails($id: ID!) {
+    product(id: $id) {
+      id
+      legacyResourceId
+      title
+      handle
+      totalInventory
+      status
+      tracksInventory
+    }
+  }
+`;
+
+function toProductGid(productId: string) {
+  if (productId.startsWith("gid://shopify/Product/")) {
+    return productId;
+  }
+
+  return `gid://shopify/Product/${productId}`;
+}
+
+export async function getProductInventoryDetails(
+  productId: string
+) {
+  const response =
+    await shopifyGraphql<ProductInventoryDetailsResponse>(
+      PRODUCT_INVENTORY_DETAILS_QUERY,
+      {
+        id: toProductGid(productId),
+      }
+    );
+
+  const product = response.data?.product;
+
+  if (!product) {
+    return null;
+  }
+
+  return {
+    productId: String(product.legacyResourceId),
+    productTitle: product.title,
+    productHandle: product.handle,
+    totalAvailable: product.totalInventory,
+    status: product.status,
+    tracksInventory: product.tracksInventory,
+  };
+}

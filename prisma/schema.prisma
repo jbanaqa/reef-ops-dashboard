@@ -213,6 +213,28 @@ model OrderInventoryClaim {
   @@index([orderCreatedAt])
 }
 
+model ProductInventoryState {
+  id String @id @default(cuid())
+
+  shop String
+
+  productId     String
+  productHandle String?
+  productTitle  String?
+
+  totalAvailable Int
+  initializedAt DateTime @default(now())
+  checkedAt     DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, productId])
+  @@index([shop])
+  @@index([productId])
+  @@index([totalAvailable])
+}
+
 model ProductRestockWaitlist {
   id String @id @default(cuid())
 
