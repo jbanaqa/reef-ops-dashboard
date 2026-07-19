@@ -22,12 +22,15 @@ type ProcessRestockInput = {
   productId?: string | null;
   productHandle?: string | null;
   productTitle?: string | null;
-  previousAvailable: number | null;
-  newAvailable: number;
+  currentProductTotal: number | null;
 };
 
 function normalizeOptionalString(value: unknown) {
-  if (value === undefined || value === null || value === "") {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
     return null;
   }
 
@@ -55,14 +58,20 @@ function isUniqueConstraintError(error: unknown) {
   );
 }
 
-function buildStoreProductUrl(productHandle?: string | null) {
-  const storeUrl = process.env.SHOPIFY_STORE_PUBLIC_URL;
+function buildStoreProductUrl(
+  productHandle?: string | null
+) {
+  const storeUrl =
+    process.env.SHOPIFY_STORE_PUBLIC_URL;
 
   if (!storeUrl || !productHandle) {
     return null;
   }
 
-  return `${storeUrl.replace(/\/$/, "")}/products/${productHandle}`;
+  return `${storeUrl.replace(
+    /\/$/,
+    ""
+  )}/products/${productHandle}`;
 }
 
 function buildUnsubscribeUrl(token: string) {
@@ -77,34 +86,46 @@ function buildUnsubscribeUrl(token: string) {
   return `${appBaseUrl.replace(
     /\/$/,
     ""
-  )}/api/restock-waitlist/unsubscribe?token=${encodeURIComponent(token)}`;
+  )}/api/restock-waitlist/unsubscribe?token=${encodeURIComponent(
+    token
+  )}`;
 }
 
 function createUnsubscribeToken() {
   return crypto.randomBytes(32).toString("hex");
 }
 
-export async function createProductRestockWaitlistSignup(input: SignupInput) {
+export async function createProductRestockWaitlistSignup(
+  input: SignupInput
+) {
   const shop = normalizeShop(input.shop);
   const email = normalizeEmail(input.email);
-  const productId = normalizeOptionalString(input.productId);
+  const productId = normalizeOptionalString(
+    input.productId
+  );
 
   if (!productId) {
     throw new Error("Missing productId.");
   }
 
-  if (!email || !email.includes("@")) {
-    throw new Error("Please enter a valid email address.");
+  if (
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    email.length > 254
+  ) {
+    throw new Error(
+      "Please enter a valid email address."
+    );
   }
 
-  const existing = await prisma.productRestockWaitlist.findFirst({
-    where: {
-      shop,
-      productId,
-      email,
-      status: WAITLIST_STATUS_WAITING,
-    },
-  });
+  const existing =
+    await prisma.productRestockWaitlist.findFirst({
+      where: {
+        shop,
+        productId,
+        email,
+        status: WAITLIST_STATUS_WAITING,
+      },
+    });
 
   if (existing) {
     return {
@@ -114,35 +135,49 @@ export async function createProductRestockWaitlistSignup(input: SignupInput) {
   }
 
   try {
-    const subscription = await prisma.productRestockWaitlist.create({
-      data: {
-        shop,
-        productId,
-        productHandle: normalizeOptionalString(input.productHandle),
-        productTitle: normalizeOptionalString(input.productTitle),
-        email,
-        status: WAITLIST_STATUS_WAITING,
-        unsubscribeToken: createUnsubscribeToken(),
-      },
-    });
+    const subscription =
+      await prisma.productRestockWaitlist.create({
+        data: {
+          shop,
+          productId,
+          productHandle: normalizeOptionalString(
+            input.productHandle
+          ),
+          productTitle: normalizeOptionalString(
+            input.productTitle
+          ),
+          email,
+          status: WAITLIST_STATUS_WAITING,
+          unsubscribeToken:
+            createUnsubscribeToken(),
+        },
+      });
 
     return {
       subscription,
       created: true,
     };
   } catch (error) {
+    /*
+      The database has a partial unique index that
+      allows only one Waiting record for the same
+      shop, product, and email.
+    */
     if (!isUniqueConstraintError(error)) {
       throw error;
     }
 
-    const subscription = await prisma.productRestockWaitlist.findFirstOrThrow({
-      where: {
-        shop,
-        productId,
-        email,
-        status: WAITLIST_STATUS_WAITING,
-      },
-    });
+    const subscription =
+      await prisma.productRestockWaitlist.findFirstOrThrow(
+        {
+          where: {
+            shop,
+            productId,
+            email,
+            status: WAITLIST_STATUS_WAITING,
+          },
+        }
+      );
 
     return {
       subscription,
@@ -151,22 +186,28 @@ export async function createProductRestockWaitlistSignup(input: SignupInput) {
   }
 }
 
-export async function unsubscribeProductRestockWaitlist(token: string) {
+export async function unsubscribeProductRestockWaitlist(
+  token: string
+) {
   if (!token) {
     return null;
   }
 
-  const subscription = await prisma.productRestockWaitlist.findUnique({
-    where: {
-      unsubscribeToken: token,
-    },
-  });
+  const subscription =
+    await prisma.productRestockWaitlist.findUnique({
+      where: {
+        unsubscribeToken: token,
+      },
+    });
 
   if (!subscription) {
     return null;
   }
 
-  if (subscription.status === WAITLIST_STATUS_UNSUBSCRIBED) {
+  if (
+    subscription.status ===
+    WAITLIST_STATUS_UNSUBSCRIBED
+  ) {
     return subscription;
   }
 
@@ -184,75 +225,150 @@ export async function unsubscribeProductRestockWaitlist(token: string) {
 export async function processProductRestockWaitlist(
   input: ProcessRestockInput
 ) {
-  const productId = normalizeOptionalString(input.productId);
+  const productId = normalizeOptionalString(
+    input.productId
+  );
+  const currentProductTotal =
+    input.currentProductTotal;
 
-  if (!productId || input.previousAvailable === null) {
+  /*
+    We cannot safely detect a product-level transition
+    without a product ID and Shopify's current total.
+  */
+  if (
+    !productId ||
+    currentProductTotal === null ||
+    !Number.isFinite(currentProductTotal)
+  ) {
     return {
-      action: "skipped_missing_product_or_previous_quantity",
+      action: "skipped_missing_product_inventory",
       previousProductTotal: null,
-      currentProductTotal: null,
+      currentProductTotal,
       waitingCount: 0,
       notifiedCount: 0,
+      failedCount: 0,
       skippedEmailCount: 0,
     };
   }
 
-  const currentProductTotalResult = await prisma.inventorySnapshot.aggregate({
+  const existingState =
+    await prisma.productInventoryState.findUnique({
+      where: {
+        shop_productId: {
+          shop: input.shop,
+          productId,
+        },
+      },
+    });
+
+  /*
+    The first observation establishes a baseline.
+    It must not send emails because no prior state
+    exists to prove that a restock occurred.
+  */
+  if (!existingState) {
+    await prisma.productInventoryState.create({
+      data: {
+        shop: input.shop,
+        productId,
+        productHandle: normalizeOptionalString(
+          input.productHandle
+        ),
+        productTitle: normalizeOptionalString(
+          input.productTitle
+        ),
+        totalAvailable: currentProductTotal,
+        checkedAt: new Date(),
+      },
+    });
+
+    return {
+      action: "initialized_product_inventory_state",
+      previousProductTotal: null,
+      currentProductTotal,
+      waitingCount: 0,
+      notifiedCount: 0,
+      failedCount: 0,
+      skippedEmailCount: 0,
+    };
+  }
+
+  const previousProductTotal =
+    existingState.totalAvailable;
+
+  await prisma.productInventoryState.update({
     where: {
-      shop: input.shop,
-      productId,
+      id: existingState.id,
     },
-    _sum: {
-      available: true,
+    data: {
+      productHandle:
+        normalizeOptionalString(
+          input.productHandle
+        ) ?? existingState.productHandle,
+      productTitle:
+        normalizeOptionalString(
+          input.productTitle
+        ) ?? existingState.productTitle,
+      totalAvailable: currentProductTotal,
+      checkedAt: new Date(),
     },
   });
 
-  const currentProductTotal =
-    currentProductTotalResult._sum.available ?? input.newAvailable;
-  const previousProductTotal =
-    currentProductTotal - input.newAvailable + input.previousAvailable;
-
-  if (previousProductTotal > 0 || currentProductTotal <= 0) {
+  /*
+    Only an unavailable-to-available transition
+    should notify customers.
+  */
+  if (
+    previousProductTotal > 0 ||
+    currentProductTotal <= 0
+  ) {
     return {
       action: "no_product_restock_crossing",
       previousProductTotal,
       currentProductTotal,
       waitingCount: 0,
       notifiedCount: 0,
+      failedCount: 0,
       skippedEmailCount: 0,
     };
   }
 
-  const waitingSubscriptions = await prisma.productRestockWaitlist.findMany({
-    where: {
-      shop: input.shop,
-      productId,
-      status: WAITLIST_STATUS_WAITING,
-    },
-    orderBy: {
-      subscribedAt: "asc",
-    },
-  });
+  const waitingSubscriptions =
+    await prisma.productRestockWaitlist.findMany({
+      where: {
+        shop: input.shop,
+        productId,
+        status: WAITLIST_STATUS_WAITING,
+      },
+      orderBy: {
+        subscribedAt: "asc",
+      },
+    });
 
   if (waitingSubscriptions.length === 0) {
     return {
-      action: "restock_detected_no_waiting_subscriptions",
+      action:
+        "restock_detected_no_waiting_subscriptions",
       previousProductTotal,
       currentProductTotal,
       waitingCount: 0,
       notifiedCount: 0,
+      failedCount: 0,
       skippedEmailCount: 0,
     };
   }
 
   if (!isRestockEmailConfigured()) {
     return {
-      action: "restock_detected_email_not_configured",
+      action:
+        "restock_detected_email_not_configured",
       previousProductTotal,
       currentProductTotal,
       waitingCount: waitingSubscriptions.length,
       notifiedCount: 0,
-      skippedEmailCount: waitingSubscriptions.length,
+      failedCount: 0,
+      skippedEmailCount:
+        waitingSubscriptions.length,
     };
   }
 
@@ -263,17 +379,26 @@ export async function processProductRestockWaitlist(
     try {
       const productTitle =
         subscription.productTitle ||
-        normalizeOptionalString(input.productTitle) ||
+        normalizeOptionalString(
+          input.productTitle
+        ) ||
         "A product you requested";
+
       const productHandle =
-        subscription.productHandle || normalizeOptionalString(input.productHandle);
+        subscription.productHandle ||
+        normalizeOptionalString(
+          input.productHandle
+        );
 
       await sendRestockEmail({
         subscriptionId: subscription.id,
         to: subscription.email,
         productTitle,
-        productUrl: buildStoreProductUrl(productHandle),
-        unsubscribeUrl: buildUnsubscribeUrl(subscription.unsubscribeToken),
+        productUrl:
+          buildStoreProductUrl(productHandle),
+        unsubscribeUrl: buildUnsubscribeUrl(
+          subscription.unsubscribeToken
+        ),
       });
 
       await prisma.productRestockWaitlist.update({
@@ -291,15 +416,20 @@ export async function processProductRestockWaitlist(
       notifiedCount += 1;
     } catch (error) {
       failedCount += 1;
-      console.error("Failed to notify restock waitlist subscription:", {
-        subscriptionId: subscription.id,
-        error,
-      });
+
+      console.error(
+        "Failed to notify restock waitlist subscription:",
+        {
+          subscriptionId: subscription.id,
+          error,
+        }
+      );
     }
   }
 
   return {
-    action: "restock_detected_notifications_processed",
+    action:
+      "restock_detected_notifications_processed",
     previousProductTotal,
     currentProductTotal,
     waitingCount: waitingSubscriptions.length,

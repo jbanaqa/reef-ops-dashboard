@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { createProductRestockWaitlistSignup } from "@/lib/product-restock-waitlist";
+import { prisma } from "@/lib/prisma";
+import { getProductInventoryDetails } from "@/lib/shopify";
 
 function getAllowedOrigin() {
   return process.env.RESTOCK_WAITLIST_ALLOWED_ORIGIN || "";
 }
 
-function getCorsHeaders(origin: string | null): Record<string, string> {
+function getCorsHeaders(
+  origin: string | null
+): Record<string, string> {
   const allowedOrigin = getAllowedOrigin();
 
   if (!allowedOrigin || origin !== allowedOrigin) {
@@ -31,7 +35,8 @@ function isAllowedOrigin(origin: string | null) {
 }
 
 async function readSignupPayload(request: Request) {
-  const contentType = request.headers.get("content-type") || "";
+  const contentType =
+    request.headers.get("content-type") || "";
 
   if (contentType.includes("application/json")) {
     return request.json();
@@ -70,6 +75,10 @@ export async function POST(request: Request) {
   try {
     const payload = await readSignupPayload(request);
 
+    /*
+      This hidden field is a simple bot trap.
+      Real customers leave it empty.
+    */
     if (String(payload.company || "").trim()) {
       return NextResponse.json(
         {
@@ -81,13 +90,97 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await createProductRestockWaitlistSignup({
-      shop: String(process.env.SHOPIFY_SHOP_DOMAIN || ""),
-      productId: String(payload.productId || payload.product_id || ""),
-      productHandle: String(payload.productHandle || payload.product_handle || ""),
-      productTitle: String(payload.productTitle || payload.product_title || ""),
-      email: String(payload.email || ""),
+    const shop = process.env.SHOPIFY_SHOP_DOMAIN;
+
+    if (!shop) {
+      throw new Error(
+        "Shopify store configuration is missing."
+      );
+    }
+
+    const submittedProductId = String(
+      payload.productId ||
+        payload.product_id ||
+        ""
+    ).trim();
+
+    /*
+      Shopify Liquid supplies the numeric legacy
+      product ID. Reject arbitrary text and GIDs
+      submitted directly to this public endpoint.
+    */
+    if (!/^\d+$/.test(submittedProductId)) {
+      throw new Error("The product ID is invalid.");
+    }
+
+    /*
+      Retrieve the authoritative product information
+      from Shopify. Do not trust the title, handle,
+      inventory, or shop submitted by the browser.
+    */
+    const product =
+      await getProductInventoryDetails(
+        submittedProductId
+      );
+
+    if (!product) {
+      throw new Error(
+        "This Shopify product could not be found."
+      );
+    }
+
+    if (product.status !== "ACTIVE") {
+      throw new Error(
+        "This product is not currently active."
+      );
+    }
+
+    /*
+      Customers should only join this waitlist while
+      the entire product is unavailable.
+    */
+    if (product.totalAvailable > 0) {
+      throw new Error(
+        "This product is already available."
+      );
+    }
+
+    /*
+      Remember the product's current unavailable state.
+      A later Shopify webhook can compare this zero
+      value with the new product-level total.
+    */
+    await prisma.productInventoryState.upsert({
+      where: {
+        shop_productId: {
+          shop,
+          productId: product.productId,
+        },
+      },
+      create: {
+        shop,
+        productId: product.productId,
+        productHandle: product.productHandle,
+        productTitle: product.productTitle,
+        totalAvailable: product.totalAvailable,
+        checkedAt: new Date(),
+      },
+      update: {
+        productHandle: product.productHandle,
+        productTitle: product.productTitle,
+        totalAvailable: product.totalAvailable,
+        checkedAt: new Date(),
+      },
     });
+
+    const result =
+      await createProductRestockWaitlistSignup({
+        shop,
+        productId: product.productId,
+        productHandle: product.productHandle,
+        productTitle: product.productTitle,
+        email: String(payload.email || ""),
+      });
 
     return NextResponse.json(
       {
