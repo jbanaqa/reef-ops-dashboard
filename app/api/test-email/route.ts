@@ -21,7 +21,7 @@ export async function GET() {
 
   const { data, error } = await resend.emails.send({
     from: fromEmail,
-    to: "YOUR_EMAIL_HERE",
+    to: "jadenbanawa@gmail.com",
     subject: "Reef Ops Resend test",
     html: `
       <h2>Reef Ops email test</h2>
