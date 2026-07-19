@@ -8,7 +8,7 @@ type SendRestockEmailInput = {
 
 function getEmailConfig() {
   const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESTOCK_EMAIL_FROM;
+  const from = process.env.RESEND_FROM_EMAIL;
   const appBaseUrl = process.env.APP_BASE_URL;
 
   if (!apiKey || !from || !appBaseUrl) {
