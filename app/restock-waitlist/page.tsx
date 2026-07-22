@@ -1,279 +1,180 @@
+import Link from "next/link";
+import type { Prisma } from "@/app/generated/prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { manuallySendProductRestockWaitlistEntry } from "@/lib/product-restock-waitlist";
-import { PrintableWaitlist } from "./printable-waitlist";
+import { RestockWaitlistWorkspace } from "./restock-waitlist-workspace";
+import styles from "./restock-waitlist.module.css";
 
 export const dynamic = "force-dynamic";
 
-type RestockWaitlistPageProps = {
-  searchParams?: Promise<{
-    result?: string;
-    message?: string;
-  }>;
-};
+const PAGE_SIZES = [25, 50, 100] as const;
+const FILTERS = ["waiting", "notified", "handled", "canceled", "all"] as const;
+const SORTS = ["subscribedAt", "productTitle", "email", "status", "notifiedAt"] as const;
 
-function formatDate(date: Date | null) {
-  if (!date) {
-    return "Not yet";
-  }
+type Filter = (typeof FILTERS)[number];
+type Sort = (typeof SORTS)[number];
+type SearchParams = { result?:string; message?:string; filter?:string; q?:string; sort?:string; dir?:string; page?:string; pageSize?:string };
+type PageProps = { searchParams?: Promise<SearchParams> };
 
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+function oneOf<T extends readonly string[]>(value:string|undefined, values:T, fallback:T[number]):T[number] {
+  return values.includes(value as T[number]) ? value as T[number] : fallback;
 }
 
-function getResultUrl(
-  result: "success" | "error",
-  message: string
-) {
-  const params = new URLSearchParams({
-    result,
-    message,
-  });
-
-  return `/restock-waitlist?${params.toString()}`;
+function positiveInt(value:string|undefined, fallback:number) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
 }
 
-async function sendWaitlistEmail(formData: FormData) {
+function statusWhere(filter:Filter):Prisma.ProductRestockWaitlistWhereInput {
+  if (filter === "all") return {};
+  if (filter === "canceled") return { status: "Unsubscribed" };
+  return { status: filter[0].toUpperCase() + filter.slice(1) };
+}
+
+function safeReturnTo(value:FormDataEntryValue|null) {
+  const path = String(value || "/restock-waitlist");
+  return path.startsWith("/restock-waitlist") && !path.startsWith("//") ? path : "/restock-waitlist";
+}
+
+function resultUrl(returnTo:string, result:"success"|"error", message:string) {
+  const url = new URL(returnTo, "https://reef-ops.local");
+  url.searchParams.set("result", result);
+  url.searchParams.set("message", message);
+  return `${url.pathname}?${url.searchParams.toString()}`;
+}
+
+async function sendWaitlistEmail(formData:FormData) {
   "use server";
-
-  const entryId = String(
-    formData.get("entryId") || ""
-  );
-
-  let result: "success" | "error" = "success";
-  let message = "Restock email sent and status changed to Notified.";
-
+  const id = String(formData.get("entryId") || "");
+  const returnTo = safeReturnTo(formData.get("returnTo"));
+  let result:"success"|"error" = "success";
+  let message = "Restock email sent. The request is now Notified.";
   try {
-    const sendResult =
-      await manuallySendProductRestockWaitlistEntry(
-        entryId
-      );
-
-    if (
-      sendResult.action ===
-      "manual_send_skipped_not_waiting"
-    ) {
-      result = "error";
-      message =
-        "This signup is no longer waiting, so no email was sent.";
-    }
+    const response = await manuallySendProductRestockWaitlistEntry(id);
+    if (response.action === "manual_send_skipped_not_waiting") throw new Error("This request is no longer waiting, so no email was sent.");
   } catch (error) {
     result = "error";
-    message =
-      error instanceof Error
-        ? error.message
-        : "The restock email could not be sent.";
+    message = error instanceof Error ? error.message : "The restock email could not be sent.";
   }
-
   revalidatePath("/restock-waitlist");
-  redirect(getResultUrl(result, message));
+  redirect(resultUrl(returnTo, result, message));
 }
 
-async function deleteWaitlistEntry(formData: FormData) {
+async function markHandled(formData:FormData) {
   "use server";
-
-  const entryId = String(
-    formData.get("entryId") || ""
-  );
-
-  let result: "success" | "error" = "success";
-  let message = "Waitlist signup deleted.";
-
+  const ids = String(formData.get("entryIds") || formData.get("entryId") || "").split(",").map((id) => id.trim()).filter(Boolean).slice(0, 100);
+  const returnTo = safeReturnTo(formData.get("returnTo"));
+  let result:"success"|"error" = "success";
+  let message = "Request marked Handled. It will no longer receive an automatic restock email.";
   try {
-    if (!entryId) {
-      throw new Error(
-        "The waitlist signup could not be identified."
-      );
-    }
-
-    const deletion =
-      await prisma.productRestockWaitlist.deleteMany({
-        where: {
-          id: entryId,
-        },
-      });
-
-    if (deletion.count === 0) {
-      throw new Error(
-        "This waitlist signup was already removed."
-      );
-    }
+    if (!ids.length) throw new Error("Select at least one waiting request.");
+    const update = await prisma.productRestockWaitlist.updateMany({ where:{ id:{ in:ids }, status:"Waiting" }, data:{ status:"Handled" } });
+    if (!update.count) throw new Error("The selected requests were already completed or removed.");
+    message = `${update.count} ${update.count === 1 ? "request" : "requests"} marked Handled.`;
   } catch (error) {
     result = "error";
-    message =
-      error instanceof Error
-        ? error.message
-        : "The waitlist signup could not be deleted.";
+    message = error instanceof Error ? error.message : "The selected requests could not be updated.";
   }
-
   revalidatePath("/restock-waitlist");
-  redirect(getResultUrl(result, message));
+  redirect(resultUrl(returnTo, result, message));
 }
 
-export default async function RestockWaitlistPage({
-  searchParams,
-}: RestockWaitlistPageProps) {
-  const resolvedSearchParams = await searchParams;
+async function deleteWaitlistEntry(formData:FormData) {
+  "use server";
+  const id = String(formData.get("entryId") || "");
+  const returnTo = safeReturnTo(formData.get("returnTo"));
+  let result:"success"|"error" = "success";
+  let message = "Waitlist record permanently deleted.";
+  try {
+    const deletion = await prisma.productRestockWaitlist.deleteMany({ where:{ id } });
+    if (!deletion.count) throw new Error("This waitlist record was already removed.");
+  } catch (error) {
+    result = "error";
+    message = error instanceof Error ? error.message : "The waitlist record could not be deleted.";
+  }
+  revalidatePath("/restock-waitlist");
+  redirect(resultUrl(returnTo, result, message));
+}
 
-  const [
-    totalCount,
-    waitingCount,
-    notifiedCount,
-    unsubscribedCount,
-    recent,
-  ] = await Promise.all([
+function hrefFor(current:SearchParams, updates:Record<string,string|number|undefined>) {
+  const params = new URLSearchParams();
+  for (const [key,value] of Object.entries({ ...current, ...updates })) {
+    if (value !== undefined && value !== "" && key !== "message" && key !== "result") params.set(key,String(value));
+  }
+  return `/restock-waitlist${params.size ? `?${params}` : ""}`;
+}
+
+export default async function RestockWaitlistPage({ searchParams }:PageProps) {
+  const raw = await searchParams || {};
+  const filter = oneOf(raw.filter, FILTERS, "waiting") as Filter;
+  const sort = oneOf(raw.sort, SORTS, "subscribedAt") as Sort;
+  const dir = raw.dir === "asc" ? "asc" : "desc";
+  const pageSize = PAGE_SIZES.includes(Number(raw.pageSize) as typeof PAGE_SIZES[number]) ? Number(raw.pageSize) : 25;
+  const requestedPage = positiveInt(raw.page, 1);
+  const query = String(raw.q || "").trim().slice(0, 120);
+  const where:Prisma.ProductRestockWaitlistWhereInput = {
+    ...statusWhere(filter),
+    ...(query ? { OR:[
+      { productTitle:{ contains:query, mode:"insensitive" } },
+      { productHandle:{ contains:query, mode:"insensitive" } },
+      { email:{ contains:query, mode:"insensitive" } },
+    ] } : {}),
+  };
+
+  const [totalCount, waitingCount, notifiedCount, handledCount, canceledCount, filteredCount] = await Promise.all([
     prisma.productRestockWaitlist.count(),
-    prisma.productRestockWaitlist.count({
-      where: {
-        status: "Waiting",
-      },
-    }),
-    prisma.productRestockWaitlist.count({
-      where: {
-        status: "Notified",
-      },
-    }),
-    prisma.productRestockWaitlist.count({
-      where: {
-        status: "Unsubscribed",
-      },
-    }),
-    prisma.productRestockWaitlist.findMany({
-      orderBy: {
-        subscribedAt: "desc",
-      },
-      take: 50,
-    }),
+    prisma.productRestockWaitlist.count({ where:{ status:"Waiting" } }),
+    prisma.productRestockWaitlist.count({ where:{ status:"Notified" } }),
+    prisma.productRestockWaitlist.count({ where:{ status:"Handled" } }),
+    prisma.productRestockWaitlist.count({ where:{ status:"Unsubscribed" } }),
+    prisma.productRestockWaitlist.count({ where }),
   ]);
+  const pageCount = Math.max(1, Math.ceil(filteredCount / pageSize));
+  const page = Math.min(requestedPage, pageCount);
+  const entries = await prisma.productRestockWaitlist.findMany({
+    where,
+    orderBy: sort === "notifiedAt" ? [{ notifiedAt:dir },{ subscribedAt:"desc" }] : [{ [sort]:dir },{ subscribedAt:"desc" }],
+    skip:(page - 1) * pageSize,
+    take:pageSize,
+  });
+  const currentParams:SearchParams = { filter, q:query || undefined, sort, dir, page:String(page), pageSize:String(pageSize) };
 
-  return (
-    <div className="page-stack">
-      <section>
-        <p className="page-header-eyebrow">
-          Product Demand
-        </p>
+  const cards = [
+    { key:"waiting", label:"Waiting", value:waitingCount, note:"Needs attention", tone:"mint", icon:"◷" },
+    { key:"notified", label:"Notified", value:notifiedCount, note:"Restock emails sent", tone:"blue", icon:"✓" },
+    { key:"handled", label:"Handled", value:handledCount, note:"Completed manually", tone:"gold", icon:"◇" },
+    { key:"canceled", label:"Canceled", value:canceledCount, note:"Customer opted out", tone:"slate", icon:"×" },
+  ] as const;
 
-        <h2 className="page-title">
-          Restock Waitlist
-        </h2>
+  return <div className={styles.page}>
+    <section className={styles.hero}>
+      <div className={styles.heroGlow}/><div className={styles.heroGrid}/>
+      <div className={styles.heroCopy}>
+        <p className={styles.eyebrow}><span/> Customer demand command center</p>
+        <h1>Restock <em>Waitlist</em></h1>
+        <p>Find the customers who need attention, send precise restock updates, and hand off a clean follow-up sheet without losing the history behind it.</p>
+        <div className={styles.heroMeta}><span><i/> Live queue</span><span>{totalCount} lifetime signups</span><span>Pacific Time</span></div>
+      </div>
+      <div className={styles.orbit} aria-hidden="true"><div className={styles.orbitOuter}/><div className={styles.orbitInner}/><div className={styles.orbitCore}><strong>{waitingCount}</strong><span>waiting now</span></div><i/><i/></div>
+    </section>
 
-        <p className="page-description">
-          Product-level customer email alerts for out-of-stock Shopify products.
-          Customers are notified when total product inventory becomes available
-          again across any variant.
-        </p>
-      </section>
+    <section className={styles.metricGrid} aria-label="Waitlist summary">
+      {cards.map((card) => <Link key={card.key} href={hrefFor(currentParams,{ filter:card.key, page:1 })} className={`${styles.metricCard} ${styles[card.tone]} ${filter === card.key ? styles.metricActive : ""}`}>
+        <div><span className={styles.metricIcon}>{card.icon}</span><span className={styles.metricLabel}>{card.label}</span></div>
+        <strong>{card.value}</strong><p>{card.note}</p>
+      </Link>)}
+    </section>
 
-      {resolvedSearchParams?.message ? (
-        <section className="card card-padded">
-          <p
-            className={
-              resolvedSearchParams.result === "success"
-                ? "success-message"
-                : "error-message"
-            }
-          >
-            {resolvedSearchParams.message}
-          </p>
-        </section>
-      ) : null}
-
-      <section className="stats-grid">
-        <div className="card stat-card">
-          <p className="stat-label">
-            Total Signups
-          </p>
-          <p className="stat-value">
-            {totalCount}
-          </p>
-          <p className="stat-description">
-            All restock waitlist records.
-          </p>
-        </div>
-
-        <div className="card stat-card">
-          <p className="stat-label">
-            Waiting
-          </p>
-          <p className="stat-value">
-            {waitingCount}
-          </p>
-          <p className="stat-description">
-            Customers still waiting for restock.
-          </p>
-        </div>
-
-        <div className="card stat-card">
-          <p className="stat-label">
-            Notified
-          </p>
-          <p className="stat-value">
-            {notifiedCount}
-          </p>
-          <p className="stat-description">
-            Alerts sent after product restock.
-          </p>
-        </div>
-
-        <div className="card stat-card">
-          <p className="stat-label">
-            Unsubscribed
-          </p>
-          <p className="stat-value">
-            {unsubscribedCount}
-          </p>
-          <p className="stat-description">
-            Customers who opted out.
-          </p>
-        </div>
-      </section>
-
-      <section className="card feedback-table-card">
-        <div className="feedback-table-header">
-          <div>
-            <h3 className="card-title">
-              Recent Signups
-            </h3>
-            <p className="card-description">
-              Send a waiting customer’s email manually or delete test entries.
-              Showing the latest 50 product-level waitlist entries.
-            </p>
-          </div>
-        </div>
-
-        {recent.length === 0 ? (
-          <div className="empty-state">
-            <h4 className="empty-state-title">
-              No waitlist signups yet
-            </h4>
-            <p className="empty-state-text">
-              Customer submissions from the Shopify product form will appear
-              here.
-            </p>
-          </div>
-        ) : (
-          <PrintableWaitlist
-            entries={recent.map((entry) => ({
-              id: entry.id,
-              productId: entry.productId,
-              productHandle: entry.productHandle,
-              productTitle: entry.productTitle,
-              email: entry.email,
-              status: entry.status,
-              subscribedLabel: formatDate(entry.subscribedAt),
-              notifiedLabel: formatDate(entry.notifiedAt),
-            }))}
-            sendAction={sendWaitlistEmail}
-            deleteAction={deleteWaitlistEntry}
-          />
-        )}
-      </section>
-    </div>
-  );
+    <RestockWaitlistWorkspace
+      entries={entries.map((entry) => ({ ...entry, subscribedAt:entry.subscribedAt.toISOString(), notifiedAt:entry.notifiedAt?.toISOString() || null }))}
+      counts={{ all:totalCount, waiting:waitingCount, notified:notifiedCount, handled:handledCount, canceled:canceledCount }}
+      state={{ filter, query, sort, dir, page, pageSize, pageCount, filteredCount }}
+      message={raw.message ? { type:raw.result === "success" ? "success" : "error", text:raw.message } : null}
+      sendAction={sendWaitlistEmail}
+      handledAction={markHandled}
+      deleteAction={deleteWaitlistEntry}
+    />
+  </div>;
 }
