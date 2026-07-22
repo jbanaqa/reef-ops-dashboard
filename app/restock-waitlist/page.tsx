@@ -2,7 +2,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { manuallySendProductRestockWaitlistEntry } from "@/lib/product-restock-waitlist";
-import { RestockWaitlistRowActions } from "./row-actions";
+import { PrintableWaitlist } from "./printable-waitlist";
 
 export const dynamic = "force-dynamic";
 
@@ -258,52 +258,20 @@ export default async function RestockWaitlistPage({
             </p>
           </div>
         ) : (
-          <div className="feedback-table-wrap">
-            <table className="feedback-table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Subscribed</th>
-                  <th>Notified</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recent.map((entry) => (
-                  <tr key={entry.id}>
-                    <td className="feedback-summary-cell">
-                      <p className="feedback-summary">
-                        {entry.productTitle || "Untitled product"}
-                      </p>
-                      <p className="feedback-original-preview">
-                        {entry.productHandle
-                          ? `/${entry.productHandle}`
-                          : entry.productId}
-                      </p>
-                    </td>
-                    <td>{entry.email}</td>
-                    <td>
-                      <span className="badge badge-status">
-                        {entry.status}
-                      </span>
-                    </td>
-                    <td>{formatDate(entry.subscribedAt)}</td>
-                    <td>{formatDate(entry.notifiedAt)}</td>
-                    <td>
-                      <RestockWaitlistRowActions
-                        entryId={entry.id}
-                        status={entry.status}
-                        sendAction={sendWaitlistEmail}
-                        deleteAction={deleteWaitlistEntry}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <PrintableWaitlist
+            entries={recent.map((entry) => ({
+              id: entry.id,
+              productId: entry.productId,
+              productHandle: entry.productHandle,
+              productTitle: entry.productTitle,
+              email: entry.email,
+              status: entry.status,
+              subscribedLabel: formatDate(entry.subscribedAt),
+              notifiedLabel: formatDate(entry.notifiedAt),
+            }))}
+            sendAction={sendWaitlistEmail}
+            deleteAction={deleteWaitlistEntry}
+          />
         )}
       </section>
     </div>
