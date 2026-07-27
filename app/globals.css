@@ -2428,3 +2428,230 @@ body{background:#fff!important;color:#17212b!important}.reef-sidebar,.reef-topba
 .waitlist-print-sheet{display:block!important;font-family:Arial,Helvetica,sans-serif}.waitlist-print-header{display:flex;align-items:flex-end;justify-content:space-between;padding-bottom:16px;border-bottom:3px solid #0f766e}.waitlist-print-header p{margin:0 0 5px;color:#0f766e;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.waitlist-print-header h1{margin:0;color:#102a43;font-size:28px;letter-spacing:-.03em}.waitlist-print-count{display:flex;align-items:baseline;gap:6px;color:#475569}.waitlist-print-count strong{color:#0f766e;font-size:24px}.waitlist-print-count span{font-size:11px;font-weight:700}.waitlist-print-instructions{margin:12px 0 18px;color:#64748b;font-size:10px}
 .waitlist-print-sheet table{width:100%;border-collapse:collapse;table-layout:fixed}.waitlist-print-sheet th{padding:9px 10px;border:1px solid #cbd5e1!important;background:#e8f5f3!important;color:#334155!important;font-size:9px;letter-spacing:.05em;text-align:left;text-transform:uppercase}.waitlist-print-sheet td{padding:12px 10px;border:1px solid #cbd5e1!important;background:#fff!important;color:#17212b!important;font-size:10px;line-height:1.35;overflow-wrap:anywhere}.waitlist-print-sheet tr{break-inside:avoid}.waitlist-print-sheet th:nth-child(2){width:31%}.waitlist-print-sheet th:nth-child(3){width:36%}.waitlist-print-sheet th:nth-child(4){width:25%}.waitlist-print-done{width:8%;text-align:center!important}.waitlist-print-done span{display:inline-block;width:13px;height:13px;border:1.5px solid #64748b;border-radius:2px}.waitlist-print-sheet footer{margin-top:12px;color:#94a3b8;font-size:8px;text-align:right}
 }
+
+/* Weighted collection rotation */
+.rotation-strategy {
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--accent) 14%, transparent), transparent 34%),
+    var(--panel);
+}
+
+.rotation-strategy-collection {
+  min-width: min(100%, 340px);
+}
+
+.rotation-strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.rotation-strategy-option {
+  display: grid;
+  gap: 7px;
+  min-height: 132px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent) 8%);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.rotation-strategy-option:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.rotation-strategy-option.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.rotation-strategy-option strong {
+  font-size: 14px;
+}
+
+.rotation-strategy-option span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rotation-weight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.rotation-weight-input {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.rotation-weight-input input {
+  min-width: 0;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 800;
+}
+
+.rotation-weight-input span {
+  padding-right: 12px;
+  color: var(--muted);
+}
+
+.rotation-weight-input:has(input:disabled) {
+  opacity: 0.72;
+}
+
+.rotation-data-bar {
+  display: grid;
+  grid-template-columns: minmax(180px, 250px) 1fr auto;
+  align-items: end;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 86%, var(--accent) 14%);
+}
+
+.rotation-data-bar p {
+  align-self: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rotation-strategy-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.rotation-score-preview {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.rotation-score-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.rotation-score-heading h4,
+.rotation-score-heading p {
+  margin: 0;
+}
+
+.rotation-score-heading p,
+.rotation-score-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rotation-confidence {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #e2a93b 18%, var(--surface));
+  color: #c28a1a;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.rotation-confidence.is-high {
+  background: color-mix(in srgb, #2fbf84 18%, var(--surface));
+  color: #26a570;
+}
+
+.rotation-confidence.is-low {
+  background: color-mix(in srgb, #e45b66 18%, var(--surface));
+  color: #d34a58;
+}
+
+.rotation-score-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.rotation-score-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.rotation-score-table th,
+.rotation-score-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.rotation-score-table th {
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rotation-score-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.rotation-score-note {
+  margin: 10px 0 0;
+}
+
+@media (max-width: 1050px) {
+  .rotation-strategy-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rotation-weight-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .rotation-strategy-grid,
+  .rotation-weight-grid,
+  .rotation-data-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .rotation-strategy-option {
+    min-height: 0;
+  }
+
+  .rotation-strategy-actions,
+  .rotation-score-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

@@ -7,6 +7,11 @@ import {
   useState,
 } from "react";
 
+import {
+  STRATEGY_LABELS,
+  type RotationStrategy,
+} from "@/lib/collection-rotation-scoring";
+
 type CollectionSummary = {
   id: string;
   title: string;
@@ -14,9 +19,16 @@ type CollectionSummary = {
   productsCount: number;
   isStarred: boolean;
   isEnabled: boolean;
+  strategy: string;
   controlledTopCount: number;
   controlledAssignedCount: number;
 };
+
+function strategyLabel(strategy: string) {
+  return (
+    STRATEGY_LABELS[strategy as RotationStrategy] ?? "Balanced"
+  );
+}
 
 type AutomationStatus = {
   serverNow: string;
@@ -616,7 +628,7 @@ export default function CollectionAutomationPanel({
                       {collection.controlledTopCount >
                       0
                         ? ` · Top ${collection.controlledTopCount} controlled · ${collection.controlledAssignedCount} assigned`
-                        : " · Fully random"}
+                        : ` · ${strategyLabel(collection.strategy)}`}
                     </p>
                   </div>
 

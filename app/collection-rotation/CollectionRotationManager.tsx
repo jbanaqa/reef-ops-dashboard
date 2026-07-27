@@ -1,11 +1,17 @@
 "use client";
 import CollectionAutomationPanel from "./CollectionAutomationPanel";
+import CollectionStrategyPanel from "./CollectionStrategyPanel";
 import {
   useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
+
+import {
+  STRATEGY_LABELS,
+  type RotationStrategy,
+} from "@/lib/collection-rotation-scoring";
 
 type CollectionSummary = {
   id: string;
@@ -16,6 +22,7 @@ type CollectionSummary = {
   productsCount: number;
   isStarred: boolean;
   isEnabled: boolean;
+  strategy: string;
   controlledTopCount: number;
   controlledAssignedCount: number;
   lastShuffledAt: string | null;
@@ -23,6 +30,12 @@ type CollectionSummary = {
   lastError: string | null;
   canUndo: boolean;
 };
+
+function strategyLabel(strategy: string) {
+  return (
+    STRATEGY_LABELS[strategy as RotationStrategy] ?? "Balanced"
+  );
+}
 
 type BatchResult = {
   collectionId: string;
@@ -221,6 +234,14 @@ export default function CollectionRotationManager() {
     successMessage,
     setSuccessMessage,
   ] = useState("");
+
+  const [
+    previewSeed,
+    setPreviewSeed,
+  ] = useState<{
+    collectionId: string;
+    seed: string;
+  } | null>(null);
 
   const loadCollections =
     useCallback(async () => {
@@ -1059,12 +1080,19 @@ export default function CollectionRotationManager() {
           1
             ? ""
             : "s"
-        }?\n\nSaved controlled top positions will stay in their assigned places. All remaining products will be randomized.`
+        }?\n\nSaved controlled top positions will stay in their assigned places. The rest will be reordered using each collection's selected rotation strategy.`
       );
 
     if (!confirmed) {
       return;
     }
+
+    // Consume any seed left over from a just-built preview exactly once, so
+    // it can only ever apply to the specific collection it was previewed
+    // for, and a later shuffle click starts fresh instead of silently
+    // reusing it.
+    const consumedPreviewSeed = previewSeed;
+    setPreviewSeed(null);
 
     clearMessages();
     clearResults();
@@ -1136,6 +1164,13 @@ export default function CollectionRotationManager() {
                   collection.id,
                 triggerType:
                   "Batch",
+                ...(consumedPreviewSeed &&
+                consumedPreviewSeed.collectionId ===
+                  collection.id
+                  ? {
+                      seed: consumedPreviewSeed.seed,
+                    }
+                  : {}),
               }),
             }
           );
@@ -1272,6 +1307,15 @@ export default function CollectionRotationManager() {
       onCollectionsChanged={() => {
         void loadCollections();
       }}
+    />
+
+    <CollectionStrategyPanel
+      collections={collections}
+      onPreviewSeedChange={(collectionId, seed) =>
+        setPreviewSeed(
+          seed ? { collectionId, seed } : null
+        )
+      }
     />
 
     <section className="card card-padded">
@@ -1592,7 +1636,9 @@ export default function CollectionRotationManager() {
                           </span>
                         ) : (
                           <span className="rotation-muted-text">
-                            Fully random
+                            {strategyLabel(
+                              collection.strategy
+                            )}
                           </span>
                         )}
                       </td>

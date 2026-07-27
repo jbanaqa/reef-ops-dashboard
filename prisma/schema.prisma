@@ -223,8 +223,8 @@ model ProductInventoryState {
   productTitle  String?
 
   totalAvailable Int
-  initializedAt DateTime @default(now())
-  checkedAt     DateTime @default(now())
+  initializedAt  DateTime @default(now())
+  checkedAt      DateTime @default(now())
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -359,6 +359,13 @@ model CollectionRotation {
 
   controlledTopCount Int @default(0)
 
+  strategy              String @default("BALANCED")
+  performanceWeight     Int    @default(45)
+  exposureWeight        Int    @default(30)
+  freshnessWeight       Int    @default(15)
+  explorationWeight     Int    @default(10)
+  analyticsLookbackDays Int    @default(30)
+
   lastShuffledAt DateTime?
   lastStatus     String?
   lastError      String?
@@ -396,7 +403,8 @@ model CollectionRotationRun {
   previousProductIds Json
   shuffledProductIds Json?
 
-  shopifyJobIds Json?
+  shopifyJobIds   Json?
+  scoringSnapshot Json?
 
   errorMessage String?
 
@@ -411,6 +419,54 @@ model CollectionRotationRun {
   @@index([shop])
   @@index([shopifyCollectionId])
   @@index([triggerType])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model CollectionProductAnalytics {
+  id String @id @default(cuid())
+
+  shop            String
+  productId       String
+  productTitle    String?
+  source          String
+  lookbackDays    Int
+  productViews    Int      @default(0)
+  listViews       Int      @default(0)
+  listClicks      Int      @default(0)
+  addsToCart      Int      @default(0)
+  purchases       Int      @default(0)
+  unitsSold       Int      @default(0)
+  revenue         Float    @default(0)
+  windowStartedAt DateTime
+  windowEndedAt   DateTime
+  syncedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([shop, productId, source, lookbackDays])
+  @@index([shop])
+  @@index([productId])
+  @@index([source])
+  @@index([syncedAt])
+}
+
+model CollectionAnalyticsSync {
+  id           String    @id @default(cuid())
+  shop         String
+  source       String
+  status       String    @default("Running")
+  lookbackDays Int
+  rowCount     Int       @default(0)
+  matchedCount Int       @default(0)
+  errorMessage String?
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([shop])
+  @@index([source])
   @@index([status])
   @@index([startedAt])
 }

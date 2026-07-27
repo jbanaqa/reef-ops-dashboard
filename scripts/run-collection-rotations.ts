@@ -25,6 +25,7 @@ async function runScheduledRotations() {
   const [
     { prisma },
     { shuffleCollection },
+    { syncConfiguredAnalyticsIfStale },
     {
       getCollectionRotationIntervalMinutes,
       getCurrentScheduleBoundary,
@@ -32,6 +33,7 @@ async function runScheduledRotations() {
   ] = await Promise.all([
     import("../lib/prisma"),
     import("../lib/collection-rotation"),
+    import("../lib/collection-rotation-analytics"),
     import("../lib/collection-rotation-schedule"),
   ]);
 
@@ -77,6 +79,13 @@ async function runScheduledRotations() {
         status: "Running",
       },
     });
+
+  const analyticsRefresh =
+    await syncConfiguredAnalyticsIfStale();
+
+  console.log(
+    `[collection-rotation] Analytics refresh: ${JSON.stringify(analyticsRefresh)}`
+  );
 
   const enabledRotations =
     await prisma.collectionRotation.findMany({

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { buildCollectionRotationPlan } from "@/lib/collection-rotation-plan";
 import {
   getShopifyShopDomain,
   shopifyGraphql,
@@ -24,6 +25,7 @@ export type CollectionProduct = {
     url: string;
     altText: string | null;
   } | null;
+  createdAt: string;
 };
 
 export type ShopifyCollectionSummary = {
@@ -172,6 +174,7 @@ const COLLECTION_PRODUCTS_QUERY = `
           legacyResourceId
           title
           handle
+          createdAt
           featuredImage {
             url
             altText
@@ -344,130 +347,6 @@ function validateTargetOrder(
       );
     }
   }
-}
-
-export function shuffleArray<T>(
-  items: readonly T[]
-) {
-  const result = [...items];
-
-  for (
-    let index = result.length - 1;
-    index > 0;
-    index -= 1
-  ) {
-    const randomIndex = Math.floor(
-      Math.random() * (index + 1)
-    );
-
-    [result[index], result[randomIndex]] = [
-      result[randomIndex],
-      result[index],
-    ];
-  }
-
-  return result;
-}
-
-function createControlledShuffle(
-  productIds: readonly string[],
-  rules: CollectionControlRules
-) {
-  const effectiveTopCount = Math.min(
-    Math.max(
-      Math.floor(rules.controlledTopCount),
-      0
-    ),
-    productIds.length
-  );
-
-  const validProductIdSet =
-    new Set(productIds);
-
-  const assignedProductIds =
-    new Set<string>();
-
-  const validRules = rules.controlledProducts
-    .filter((rule) => {
-      if (
-        rule.position < 1 ||
-        rule.position > effectiveTopCount
-      ) {
-        return false;
-      }
-
-      if (
-        !validProductIdSet.has(
-          rule.shopifyProductId
-        )
-      ) {
-        return false;
-      }
-
-      if (
-        assignedProductIds.has(
-          rule.shopifyProductId
-        )
-      ) {
-        return false;
-      }
-
-      assignedProductIds.add(
-        rule.shopifyProductId
-      );
-
-      return true;
-    })
-    .sort(
-      (first, second) =>
-        first.position - second.position
-    );
-
-  const randomPool = shuffleArray(
-    productIds.filter(
-      (productId) =>
-        !assignedProductIds.has(productId)
-    )
-  );
-
-  const targetOrder =
-    new Array<string | null>(
-      productIds.length
-    ).fill(null);
-
-  for (const rule of validRules) {
-    targetOrder[rule.position - 1] =
-      rule.shopifyProductId;
-  }
-
-  let poolIndex = 0;
-
-  for (
-    let index = 0;
-    index < targetOrder.length;
-    index += 1
-  ) {
-    if (targetOrder[index] !== null) {
-      continue;
-    }
-
-    targetOrder[index] =
-      randomPool[poolIndex] ?? null;
-
-    poolIndex += 1;
-  }
-
-  const completedOrder = targetOrder.filter(
-    (productId): productId is string =>
-      typeof productId === "string"
-  );
-
-  validateTargetOrder(
-    productIds,
-    completedOrder
-  );
-
-  return completedOrder;
 }
 
 export function createProductMoves(
@@ -909,7 +788,8 @@ async function applyTargetOrder(
 
 export async function shuffleCollection(
   collectionId: string,
-  triggerType = "Manual"
+  triggerType = "Manual",
+  explicitSeed?: string
 ) {
   const shop =
     getShopifyShopDomain();
@@ -971,6 +851,14 @@ export async function shuffleCollection(
         collectionHandle:
           originalCollection.handle,
       },
+      include: {
+        controlledProducts: {
+          select: {
+            shopifyProductId: true,
+            position: true,
+          },
+        },
+      },
     });
 
   const controlRules =
@@ -984,26 +872,27 @@ export async function shuffleCollection(
       (product) => product.id
     );
 
-  let targetProductIds =
-    createControlledShuffle(
-      originalProductIds,
-      controlRules
-    );
+  let plan = await buildCollectionRotationPlan({
+    shop,
+    products: originalCollection.products,
+    rotation,
+    seed: explicitSeed,
+  });
+
+  let targetProductIds = plan.targetProductIds;
 
   for (
-    let attempt = 0;
-    attempt < 5 &&
-    arraysEqual(
-      originalProductIds,
-      targetProductIds
-    );
+    let attempt = 1;
+    attempt <= 3 && arraysEqual(originalProductIds, targetProductIds);
     attempt += 1
   ) {
-    targetProductIds =
-      createControlledShuffle(
-        originalProductIds,
-        controlRules
-      );
+    plan = await buildCollectionRotationPlan({
+      shop,
+      products: originalCollection.products,
+      rotation,
+      seed: `${plan.seed}:${attempt}`,
+    });
+    targetProductIds = plan.targetProductIds;
   }
 
   const run =
@@ -1023,6 +912,7 @@ export async function shuffleCollection(
           originalProductIds,
         shuffledProductIds:
           targetProductIds,
+        scoringSnapshot: plan,
       },
     });
 
@@ -1047,11 +937,13 @@ export async function shuffleCollection(
         latestProductIds
       )
     ) {
-      targetProductIds =
-        createControlledShuffle(
-          latestProductIds,
-          controlRules
-        );
+      plan = await buildCollectionRotationPlan({
+        shop,
+        products: latestCollection.products,
+        rotation,
+        seed: plan.seed,
+      });
+      targetProductIds = plan.targetProductIds;
 
       await prisma.collectionRotationRun.update({
         where: {
@@ -1064,6 +956,7 @@ export async function shuffleCollection(
             latestProductIds,
           shuffledProductIds:
             targetProductIds,
+        scoringSnapshot: plan,
         },
       });
     }

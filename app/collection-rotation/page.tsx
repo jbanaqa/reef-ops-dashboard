@@ -13,11 +13,7 @@ export default function CollectionRotationPage() {
         </h2>
 
         <p className="page-description">
-          Randomize the shared Shopify order of a
-          collection so products buried near the bottom
-          receive more storefront exposure. Every
-          customer sees the same saved order until you
-          shuffle it again.
+          Rank Shopify collections with a transparent mix of recent performance, exposure opportunity, product freshness, and exploration. Preview every strategy before it changes the shared storefront order.
         </p>
       </section>
 

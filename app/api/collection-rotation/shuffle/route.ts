@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 type ShuffleRequestBody = {
   collectionId?: unknown;
   triggerType?: unknown;
+  seed?: unknown;
 };
 
 export async function POST(
@@ -32,6 +33,12 @@ export async function POST(
         ? "Batch"
         : "Manual";
 
+    const seed =
+      typeof body.seed === "string" &&
+      body.seed.trim()
+        ? body.seed.trim()
+        : undefined;
+
     if (!collectionId) {
       return NextResponse.json(
         {
@@ -48,7 +55,8 @@ export async function POST(
     const result =
       await shuffleCollection(
         collectionId,
-        triggerType
+        triggerType,
+        seed
       );
 
     return NextResponse.json({

@@ -86,6 +86,10 @@ export async function GET() {
               rotation?.isEnabled ??
               false,
 
+            strategy:
+              rotation?.strategy ??
+              "BALANCED",
+
             controlledTopCount:
               rotation
                 ?.controlledTopCount ??
