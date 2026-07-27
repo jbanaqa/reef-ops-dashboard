@@ -20,6 +20,7 @@ type AnalyticsRow = {
   revenue: number;
 };
 
+
 type ShopifyQlResponse = {
   data?: {
     shopifyqlQuery?: {
