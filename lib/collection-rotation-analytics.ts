@@ -466,20 +466,18 @@ export async function syncAnalyticsForEnabledRotations() {
   for (const lookbackDays of lookbackDaysList) {
     for (const source of sources) {
       try {
-        results.push({
-          lookbackDays,
-          ...(await syncCollectionAnalytics(source, lookbackDays)),
-        });
+        // syncCollectionAnalytics already returns its own lookbackDays (the
+        // normalized value), so nothing extra needs to be added here.
+        results.push(await syncCollectionAnalytics(source, lookbackDays));
 
         // Sales momentum (recent vs. prior period) only needs Shopify
         // Reports data, and only the current-period sync above needs to
         // have succeeded for the prior-period one to be worth attempting.
         if (source === "SHOPIFY_REPORTS") {
           try {
-            results.push({
-              lookbackDays,
-              ...(await syncCollectionAnalytics(source, lookbackDays, 1)),
-            });
+            results.push(
+              await syncCollectionAnalytics(source, lookbackDays, 1)
+            );
           } catch (priorError) {
             results.push({
               source: `${source}_PRIOR_PERIOD`,
