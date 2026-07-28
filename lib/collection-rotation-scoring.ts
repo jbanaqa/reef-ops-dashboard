@@ -224,28 +224,68 @@ function percentileRanks(values: number[]) {
   });
 }
 
-function opportunityForPosition(position: number) {
+// The top 12 positions are a fixed concept regardless of collection size -
+// they're literally what renders in the front-of-collection grid and
+// featured sliders - so this tier keeps the same absolute curve it always
+// had: 100% opportunity at position 1, decaying to ~61.5% at position 12.
+//
+// Past position 12 used to decay over a fixed absolute distance (a constant
+// divisor of 20), which reaches its 5% floor by around position 60 no
+// matter how big the collection is. In any collection bigger than that,
+// most products end up tied at the exact same "maximally neglected" value -
+// a product sitting at position 65 scores identically to one sitting at
+// position 650, with zero ability to tell them apart. Expressing the
+// post-12 decay as a fraction of the collection's ACTUAL remaining depth
+// (0 just past the top 12, 1 at the very last product) fixes this: the
+// decay always spans the collection's whole real tail, so there's a
+// meaningful, continuous gradient all the way to the last slot no matter
+// how many products the collection has.
+const EXPOSURE_TAIL_DECAY_RATE = 2.4;
+
+function opportunityForPosition(position: number, totalProducts: number) {
   if (position <= 12) {
     return Math.max(0.6, 1 - (position - 1) * 0.035);
   }
 
-  return Math.max(0.05, 0.55 * Math.exp(-(position - 12) / 20));
+  const tailLength = Math.max(1, totalProducts - 12);
+  const depthIntoTail = clamp((position - 12) / tailLength, 0, 1);
+
+  // EXPOSURE_TAIL_DECAY_RATE (2.4) is chosen so a product in the very last
+  // slot of ANY collection lands at the same ~5% floor the old fixed-decay
+  // curve used (0.55 * e^-2.4 ≈ 0.05) - preserving "the deepest-buried
+  // products still read as roughly equally neglected" while fixing the fact
+  // every product used to hit that floor at the same fixed absolute
+  // position regardless of how deep the collection actually goes.
+  return Math.max(
+    0.05,
+    0.55 * Math.exp(-depthIntoTail * EXPOSURE_TAIL_DECAY_RATE)
+  );
 }
 
 function exposureBreakdown(
   productId: string,
   runOrders: string[][],
-  currentPosition: number
+  currentPosition: number,
+  currentTotalProducts: number
 ) {
   const opportunities = runOrders
     .map((order) => {
       const index = order.indexOf(productId);
-      return index === -1 ? null : opportunityForPosition(index + 1);
+      // Each historical run's own length is that run's real collection
+      // size at the time - using it (rather than the current size) keeps
+      // past positions honest even if products have since been added to or
+      // removed from the collection.
+      return index === -1
+        ? null
+        : opportunityForPosition(index + 1, order.length);
     })
     .filter((value): value is number => value !== null);
 
   if (opportunities.length === 0) {
-    const assumedOpportunity = opportunityForPosition(currentPosition);
+    const assumedOpportunity = opportunityForPosition(
+      currentPosition,
+      currentTotalProducts
+    );
     return {
       need: clamp((1 - assumedOpportunity) * 100),
       appearedInRuns: 0,
@@ -284,9 +324,22 @@ export function scoreProducts(input: {
   weights: RotationWeights;
   seed: string;
   now?: Date;
+  // A caller may already have filtered `products` down to a subset (e.g.
+  // out-of-stock products excluded before scoring) - when that happens, a
+  // product's index in `products` no longer matches its real position in
+  // the full collection, and `products.length` no longer matches the real
+  // collection size. Exposure's cold-start fallback and its position-based
+  // decay both need the REAL position/size to be meaningful, so a caller in
+  // that situation should supply them here. Defaults to the in-array
+  // index/length when omitted, which is correct whenever `products` already
+  // represents the whole collection (e.g. the verify scripts below).
+  realPositions?: Map<string, number>;
+  realCollectionSize?: number;
 }) {
   const weights = normalizeWeights(input.weights);
   const now = input.now ?? new Date();
+  const realCollectionSize =
+    input.realCollectionSize ?? input.products.length;
   const metrics = input.products.map(
     (product) =>
       input.metrics.get(product.legacyResourceId) ?? {
@@ -449,10 +502,13 @@ export function scoreProducts(input: {
       revenueRanks[index] * 0.2 +
       momentumRanks[index] * 0.3 +
       sellThroughRanks[index] * 0.2;
+    const currentPosition =
+      input.realPositions?.get(product.id) ?? index + 1;
     const exposureInfo = exposureBreakdown(
       product.id,
       input.runOrders,
-      index + 1
+      currentPosition,
+      realCollectionSize
     );
     const exposure = exposureInfo.need;
     const freshness = freshnessScore(product.createdAt, now);
@@ -521,7 +577,7 @@ export function scoreProducts(input: {
           productId: product.id,
         },
       },
-      previousPosition: index + 1,
+      previousPosition: currentPosition,
       proposedPosition: 0,
     } satisfies ProductScore;
   });
