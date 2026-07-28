@@ -205,6 +205,17 @@ export async function buildCollectionRotationPlan(input: {
         _sum: { quantitySold: true },
         _count: { orderId: true },
       }),
+      // Every completed, non-undone run for this collection - Exposure
+      // averages a product's historical position across ALL of them, not
+      // just a recent slice, so a product's long-term track record is what
+      // determines how neglected it really is. (This used to cap at the 42
+      // most recent runs; older runs still exist in the database either
+      // way - nothing about a rotation history is ever deleted - that cap
+      // just stopped older runs from counting toward Exposure once a
+      // collection had more than 42.) See the composite index on
+      // [rotationId, status, undoneAt, completedAt] in schema.prisma, added
+      // alongside this change so the now-unbounded query still resolves via
+      // an index scan instead of a full table scan as history grows.
       prisma.collectionRotationRun.findMany({
         where: {
           rotationId: input.rotation.id,
@@ -212,7 +223,6 @@ export async function buildCollectionRotationPlan(input: {
           undoneAt: null,
         },
         orderBy: { completedAt: "desc" },
-        take: 42,
         select: { shuffledProductIds: true },
       }),
       prisma.collectionAnalyticsSync.findMany({
@@ -351,11 +361,12 @@ export async function buildCollectionRotationPlan(input: {
   const outOfStockProducts = input.products.filter((product) =>
     isConfirmedOutOfStock(product.id)
   );
-  // scoreProducts derives "previousPosition" from each product's index in
-  // the array it's given, so once out-of-stock products are filtered out
-  // before the call, that index no longer matches the product's real
-  // current position in the full Shopify collection. Capture the real
-  // positions up front and reapply them after scoring.
+  // scoreProducts derives "previousPosition" (and Exposure's fallback
+  // position/collection-size) from each product's index in the array it's
+  // given, so once out-of-stock products are filtered out before the call,
+  // that index no longer matches the product's real current position or
+  // the real collection size. Supply the real values explicitly so both
+  // stay accurate even though scoring itself only sees the in-stock subset.
   const realPositionByProductId = new Map(
     input.products.map((product, index) => [product.id, index + 1])
   );
@@ -374,11 +385,8 @@ export async function buildCollectionRotationPlan(input: {
     weights: configuredWeights(input.rotation),
     seed,
     now,
-  });
-
-  scores.forEach((score) => {
-    score.previousPosition =
-      realPositionByProductId.get(score.productId) ?? score.previousPosition;
+    realPositions: realPositionByProductId,
+    realCollectionSize: productIds.length,
   });
 
   const stockAwareOrder = [

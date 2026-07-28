@@ -421,6 +421,12 @@ model CollectionRotationRun {
   @@index([triggerType])
   @@index([status])
   @@index([startedAt])
+  // Matches collection-rotation-plan.ts's exposure-history query exactly
+  // (WHERE rotationId/status/undoneAt, ORDER BY completedAt DESC) - added
+  // when that query stopped capping at the 42 most recent runs, so it
+  // still resolves via an index scan (already in the right sort order)
+  // instead of a full table scan as a collection's run history grows.
+  @@index([rotationId, status, undoneAt, completedAt])
 }
 
 model CollectionProductAnalytics {

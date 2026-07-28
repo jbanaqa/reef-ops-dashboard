@@ -981,9 +981,12 @@ export default function CollectionStrategyPanel({
           ) : null}
 
           <p className="rotation-score-note">
-            Exposure uses the last {previewMeta?.runHistoryCount ?? 0} saved
-            rotations. It measures position opportunity across the infinite
-            collection, with extra importance on the first 12—not page views.
+            Exposure uses the full history of{" "}
+            {previewMeta?.runHistoryCount ?? 0} saved rotation
+            {previewMeta?.runHistoryCount === 1 ? "" : "s"} for this
+            collection - not just a recent slice. It measures position
+            opportunity across the infinite collection, with extra
+            importance on the first 12—not page views.
           </p>
         </div>
       ) : null}
