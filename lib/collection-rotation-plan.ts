@@ -331,8 +331,37 @@ export async function buildCollectionRotationPlan(input: {
   const seed =
     input.seed ??
     `${input.rotation.id}:${Math.floor(Date.now() / 14_400_000)}`;
+
+  // A product with confirmed zero stock shouldn't be scored or placed at
+  // all: Shopify's storefront won't actually show/sell it wherever it lands,
+  // so there's no real "position" to compute for it - some other in-stock
+  // product would occupy that slot anyway. Excluding these products from
+  // scoreProducts entirely (rather than scoring them and sorting them to the
+  // bottom afterward) also keeps them from diluting the percentile-rank
+  // baseline that every in-stock product's Performance is measured against.
+  // Only manually "controlled" top positions (handled below) can still pin
+  // an out-of-stock product, since that's an explicit merchant override.
+  function isConfirmedOutOfStock(productId: string) {
+    const metric = metrics.get(numericProductId(productId));
+    return Boolean(metric?.hasInventoryData) && (metric?.availableInventory ?? 0) <= 0;
+  }
+  const inStockProducts = input.products.filter(
+    (product) => !isConfirmedOutOfStock(product.id)
+  );
+  const outOfStockProducts = input.products.filter((product) =>
+    isConfirmedOutOfStock(product.id)
+  );
+  // scoreProducts derives "previousPosition" from each product's index in
+  // the array it's given, so once out-of-stock products are filtered out
+  // before the call, that index no longer matches the product's real
+  // current position in the full Shopify collection. Capture the real
+  // positions up front and reapply them after scoring.
+  const realPositionByProductId = new Map(
+    input.products.map((product, index) => [product.id, index + 1])
+  );
+
   const scores = scoreProducts({
-    products: input.products.map((product) => ({
+    products: inStockProducts.map((product) => ({
       id: product.id,
       legacyResourceId: product.legacyResourceId,
       title: product.title,
@@ -346,27 +375,15 @@ export async function buildCollectionRotationPlan(input: {
     seed,
     now,
   });
-  // A product with confirmed zero stock shouldn't occupy a visible top slot:
-  // Shopify's storefront won't actually show/sell it there, so a "top 12"
-  // that includes it doesn't match what a shopper will really see - some
-  // other in-stock product would slide up to fill that spot anyway. This is
-  // a stable partition applied only to final ordering, after scoring: a
-  // sold-out product's Performance/Exposure/Freshness/Exploration are still
-  // computed normally (via the `scores` array above), so it isn't unfairly
-  // penalized on exposure history once it's back in stock. Only manually
-  // "controlled" top positions (handled next) are exempt, since those are an
-  // explicit merchant override.
-  function isConfirmedOutOfStock(productId: string) {
-    const metric = metrics.get(numericProductId(productId));
-    return Boolean(metric?.hasInventoryData) && (metric?.availableInventory ?? 0) <= 0;
-  }
+
+  scores.forEach((score) => {
+    score.previousPosition =
+      realPositionByProductId.get(score.productId) ?? score.previousPosition;
+  });
+
   const stockAwareOrder = [
-    ...scores
-      .filter((score) => !isConfirmedOutOfStock(score.productId))
-      .map((score) => score.productId),
-    ...scores
-      .filter((score) => isConfirmedOutOfStock(score.productId))
-      .map((score) => score.productId),
+    ...scores.map((score) => score.productId),
+    ...outOfStockProducts.map((product) => product.id),
   ];
   const targetProductIds = applyControlledPositions(
     productIds,
@@ -399,6 +416,12 @@ export async function buildCollectionRotationPlan(input: {
     weights: configuredWeights(input.rotation),
     targetProductIds,
     scores,
+    // Out-of-stock products excluded from `scores` above, still present
+    // (moved to the end of the collection, in their existing relative
+    // order) in `targetProductIds`. Surfaced separately so the UI can be
+    // transparent about why the count here is lower than the collection's
+    // total product count.
+    outOfStockCount: outOfStockProducts.length,
     confidence,
     sources: [...sourceSet],
     runHistoryCount: recentRuns.length,

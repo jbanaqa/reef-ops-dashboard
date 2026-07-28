@@ -2788,6 +2788,11 @@ body{background:#fff!important;color:#17212b!important}.reef-sidebar,.reef-topba
   color: #d34a58;
 }
 
+.rotation-score-oos-summary {
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+
 .rotation-score-detail-row td {
   padding: 0;
   white-space: normal;
