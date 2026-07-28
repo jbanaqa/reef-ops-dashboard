@@ -63,6 +63,8 @@ type PreviewScore = {
       sellThroughWeight: number;
       availableInventory: number;
       hasInventoryData: boolean;
+      unexplainedShrinkage: number;
+      effectiveAvailable: number;
     };
     exposure: {
       appearedInRuns: number;
@@ -135,9 +137,11 @@ function FactorDetail({
         weight: performance.momentumWeight,
       },
       {
-        label: performance.hasInventoryData
-          ? `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock)`
-          : "Sell-through (inventory not tracked yet)",
+        label: !performance.hasInventoryData
+          ? "Sell-through (inventory not tracked yet)"
+          : performance.unexplainedShrinkage > 0
+            ? `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock, +${performance.unexplainedShrinkage} unexplained loss excluded)`
+            : `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock)`,
         rank: performance.sellThroughRank,
         weight: performance.sellThroughWeight,
       },

@@ -14,7 +14,8 @@ const metric = (
   productId: string,
   unitsSold: number,
   priorUnitsSold = unitsSold,
-  availableInventory = unitsSold * 4
+  availableInventory = unitsSold * 4,
+  unexplainedShrinkage = 0
 ) => ({
   productId,
   productViews: unitsSold * 10,
@@ -28,13 +29,14 @@ const metric = (
   hasPriorWindowData: true,
   availableInventory,
   hasInventoryData: true,
+  unexplainedShrinkage,
   sources: ["SHOPIFY_REPORTS"],
   newestSyncAt: "2026-07-26T00:00:00.000Z",
 });
 const metrics = new Map([
   ["1", metric("1", 8, 3, 10)], // accelerating, thin stock
   ["2", metric("2", 3, 6, 40)], // decelerating, well-stocked
-  ["3", metric("3", 1, 1, 4)], // flat
+  ["3", metric("3", 1, 1, 4, 0)], // flat
 ]);
 const input = {
   products,

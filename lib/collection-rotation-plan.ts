@@ -115,6 +115,7 @@ export async function buildCollectionRotationPlan(input: {
     analyticsRows,
     priorAnalyticsRows,
     inventoryTotals,
+    unexplainedShrinkageTotals,
     orderClaims,
     recentRuns,
     recentSyncs,
@@ -147,6 +148,21 @@ export async function buildCollectionRotationPlan(input: {
           productId: { in: numericIds },
         },
         _sum: { available: true },
+      }),
+      // Units that left inventory during this same window with no matching
+      // Shopify order behind them (from finalize-inventory-windows.ts's
+      // reconciliation) - e.g. an unlabeled livestock death or other manual
+      // write-off. Summed regardless of eventType: only decrement events
+      // ever populate unknownChangeQuantity above 0, so restocks and
+      // sale-matched decrements naturally contribute nothing here.
+      prisma.inventoryEvent.groupBy({
+        by: ["productId"],
+        where: {
+          shop: input.shop,
+          productId: { in: numericIds },
+          detectedAt: { gte: windowStartedAt },
+        },
+        _sum: { unknownChangeQuantity: true },
       }),
       prisma.orderInventoryClaim.groupBy({
         by: ["productId"],
@@ -187,6 +203,14 @@ export async function buildCollectionRotationPlan(input: {
     inventoryTotals
       .filter((row) => row.productId)
       .map((row) => [row.productId as string, row._sum.available ?? 0])
+  );
+  const unexplainedShrinkageByProduct = new Map(
+    unexplainedShrinkageTotals
+      .filter((row) => row.productId)
+      .map((row) => [
+        row.productId as string,
+        row._sum.unknownChangeQuantity ?? 0,
+      ])
   );
   const localOrders = new Map(
     orderClaims
@@ -234,6 +258,7 @@ export async function buildCollectionRotationPlan(input: {
       hasPriorWindowData: priorUnitsByProduct.has(productId),
       availableInventory: availableInventoryByProduct.get(productId) ?? 0,
       hasInventoryData: availableInventoryByProduct.has(productId),
+      unexplainedShrinkage: unexplainedShrinkageByProduct.get(productId) ?? 0,
       sources,
       newestSyncAt:
         rows.length > 0

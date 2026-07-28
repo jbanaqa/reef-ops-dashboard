@@ -43,6 +43,13 @@ export type ProductMetric = {
   // has never had an inventory webhook recorded.
   availableInventory: number;
   hasInventoryData: boolean;
+  // Units that disappeared from inventory during the lookback window with no
+  // matching Shopify order behind them (from InventoryEvent.unknownChangeQuantity
+  // - e.g. livestock deaths or other manual write-offs with no reason code
+  // attached). Sell-Through adds this back into "available" so a die-off
+  // doesn't get misread as a hot seller. 0 genuinely means "no untracked
+  // loss found," not missing data, so this has no separate has*Data flag.
+  unexplainedShrinkage: number;
   sources: string[];
   newestSyncAt: string | null;
 };
@@ -61,6 +68,8 @@ export type ProductScoreBreakdown = {
     sellThroughWeight: number;
     availableInventory: number;
     hasInventoryData: boolean;
+    unexplainedShrinkage: number;
+    effectiveAvailable: number;
   };
   exposure: {
     appearedInRuns: number;
@@ -258,6 +267,7 @@ export function scoreProducts(input: {
         hasPriorWindowData: false,
         availableInventory: 0,
         hasInventoryData: false,
+        unexplainedShrinkage: 0,
         sources: [],
         newestSyncAt: null,
       }
@@ -307,17 +317,22 @@ export function scoreProducts(input: {
     })
   );
   const SELL_THROUGH_SMOOTHING = 2;
+  // Units that vanished from stock with no matching order (unexplainedShrinkage
+  // - e.g. an unlabeled livestock death) get added back to "available" here,
+  // so they read as neither sold nor a real depletion of stock rather than
+  // inflating Sell-Through as if a customer had bought them.
+  const effectiveAvailableFor = (metric: ProductMetric) => {
+    const available = metric.hasInventoryData
+      ? metric.availableInventory
+      : metric.unitsSold;
+    return available + Math.max(0, metric.unexplainedShrinkage);
+  };
   const sellThroughRanks = percentileRanks(
     metrics.map((metric) => {
-      // No inventory webhook recorded yet for this product: assume stock
-      // roughly matches units sold (~50% sell-through) rather than
-      // guessing efficiency from nothing.
-      const available = metric.hasInventoryData
-        ? metric.availableInventory
-        : metric.unitsSold;
+      const effectiveAvailable = effectiveAvailableFor(metric);
       return (
         (metric.unitsSold + SELL_THROUGH_SMOOTHING) /
-        (metric.unitsSold + available + SELL_THROUGH_SMOOTHING)
+        (metric.unitsSold + effectiveAvailable + SELL_THROUGH_SMOOTHING)
       );
     })
   );
@@ -377,6 +392,8 @@ export function scoreProducts(input: {
             ? metric.availableInventory
             : metric.unitsSold,
           hasInventoryData: metric.hasInventoryData,
+          unexplainedShrinkage: Math.max(0, metric.unexplainedShrinkage),
+          effectiveAvailable: effectiveAvailableFor(metric),
         },
         exposure: {
           appearedInRuns: exposureInfo.appearedInRuns,
