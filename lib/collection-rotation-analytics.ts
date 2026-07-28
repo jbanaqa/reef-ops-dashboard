@@ -410,71 +410,94 @@ export async function syncCollectionAnalytics(
   }
 }
 
-export async function syncConfiguredAnalyticsIfStale(maxAgeHours = 6) {
-  if (process.env.COLLECTION_ROTATION_ANALYTICS_AUTO_SYNC !== "true") {
-    return { skipped: true, reason: "disabled" };
+// Refreshes analytics for every collection that's actually enabled for
+// automatic rotation, right before the scheduled cycle shuffles them - so
+// every shuffle works from data that's at most a few minutes old rather than
+// whatever happened to be synced last (which, before this existed, could
+// silently be hours or days stale if nobody remembered to click "Refresh
+// analytics" and COLLECTION_ROTATION_ANALYTICS_AUTO_SYNC wasn't set).
+//
+// This intentionally does NOT skip based on how recently data was synced -
+// the whole point is "as accurate as possible right before this specific
+// shuffle," and re-running a ShopifyQL report per enabled lookback window
+// every few hours is cheap. It also syncs each DISTINCT analyticsLookbackDays
+// value actually configured across enabled collections (14/30/60/90), rather
+// than one hardcoded global window - previously, a collection configured for
+// e.g. a 90-day lookback would never get its own analytics populated by the
+// scheduled sync (which only ever synced one fixed window), silently leaving
+// it scoring against empty data until someone manually opened that
+// collection's Strategy panel and clicked Refresh.
+export async function syncAnalyticsForEnabledRotations() {
+  // Kept as an explicit opt-OUT (not opt-in) escape hatch - e.g. for staging
+  // environments that shouldn't hit Shopify's API automatically. Auto-sync
+  // now happens by default, since depending on someone remembering to flip
+  // this to "true" was exactly the gap this replaces.
+  if (
+    process.env.COLLECTION_ROTATION_ANALYTICS_AUTO_SYNC?.trim().toLowerCase() ===
+    "false"
+  ) {
+    return { skipped: true, reason: "disabled via env var", results: [] };
   }
 
   const shop = getShopifyShopDomain();
-  const lookbackDays = Math.min(
-    90,
-    Math.max(
-      7,
-      Math.round(
-        Number(process.env.COLLECTION_ROTATION_ANALYTICS_LOOKBACK_DAYS) || 30
+  const enabledRotations = await prisma.collectionRotation.findMany({
+    where: { shop, isEnabled: true },
+    select: { analyticsLookbackDays: true },
+  });
+
+  if (enabledRotations.length === 0) {
+    return { skipped: true, reason: "no enabled collections", results: [] };
+  }
+
+  const lookbackDaysList = [
+    ...new Set(
+      enabledRotations.map((rotation) =>
+        Math.min(90, Math.max(7, Math.round(rotation.analyticsLookbackDays)))
       )
-    )
-  );
+    ),
+  ];
   const availability = getAnalyticsAvailability();
   const sources: AnalyticsSource[] = [
     "SHOPIFY_REPORTS",
     ...(availability.ga4 ? (["GA4"] as AnalyticsSource[]) : []),
   ];
-  const cutoff = new Date(Date.now() - maxAgeHours * 3_600_000);
   const results: Array<Record<string, unknown>> = [];
 
-  for (const source of sources) {
-    const recent = await prisma.collectionAnalyticsSync.findFirst({
-      where: {
-        shop,
-        source,
-        status: "Completed",
-        completedAt: { gte: cutoff },
-      },
-      orderBy: { completedAt: "desc" },
-    });
+  for (const lookbackDays of lookbackDaysList) {
+    for (const source of sources) {
+      try {
+        results.push({
+          lookbackDays,
+          ...(await syncCollectionAnalytics(source, lookbackDays)),
+        });
 
-    if (recent) {
-      results.push({ source, skipped: true, reason: "fresh" });
-      continue;
-    }
-
-    try {
-      results.push(await syncCollectionAnalytics(source, lookbackDays));
-
-      // Sales momentum (recent vs. prior period) only needs Shopify Reports
-      // data, and only the current-period sync above needs to have
-      // succeeded for the prior-period one to be worth attempting.
-      if (source === "SHOPIFY_REPORTS") {
-        try {
-          results.push(
-            await syncCollectionAnalytics(source, lookbackDays, 1)
-          );
-        } catch (priorError) {
-          results.push({
-            source: `${source}_PRIOR_PERIOD`,
-            error:
-              priorError instanceof Error
-                ? priorError.message
-                : "Prior-period sync failed",
-          });
+        // Sales momentum (recent vs. prior period) only needs Shopify
+        // Reports data, and only the current-period sync above needs to
+        // have succeeded for the prior-period one to be worth attempting.
+        if (source === "SHOPIFY_REPORTS") {
+          try {
+            results.push({
+              lookbackDays,
+              ...(await syncCollectionAnalytics(source, lookbackDays, 1)),
+            });
+          } catch (priorError) {
+            results.push({
+              source: `${source}_PRIOR_PERIOD`,
+              lookbackDays,
+              error:
+                priorError instanceof Error
+                  ? priorError.message
+                  : "Prior-period sync failed",
+            });
+          }
         }
+      } catch (error) {
+        results.push({
+          source,
+          lookbackDays,
+          error: error instanceof Error ? error.message : "Sync failed",
+        });
       }
-    } catch (error) {
-      results.push({
-        source,
-        error: error instanceof Error ? error.message : "Sync failed",
-      });
     }
   }
 

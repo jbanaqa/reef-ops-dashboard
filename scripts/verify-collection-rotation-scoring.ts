@@ -15,7 +15,9 @@ const metric = (
   unitsSold: number,
   priorUnitsSold = unitsSold,
   availableInventory = unitsSold * 4,
-  unexplainedShrinkage = 0
+  unexplainedShrinkage = 0,
+  currentWindowCoverage = 1,
+  priorWindowCoverage = 1
 ) => ({
   productId,
   productViews: unitsSold * 10,
@@ -27,6 +29,9 @@ const metric = (
   revenue: unitsSold * 25,
   priorUnitsSold,
   hasPriorWindowData: true,
+  currentWindowCoverage,
+  priorWindowCoverage,
+  hasCoverageData: true,
   availableInventory,
   hasInventoryData: true,
   unexplainedShrinkage,
@@ -34,9 +39,9 @@ const metric = (
   newestSyncAt: "2026-07-26T00:00:00.000Z",
 });
 const metrics = new Map([
-  ["1", metric("1", 8, 3, 10)], // accelerating, thin stock
-  ["2", metric("2", 3, 6, 40)], // decelerating, well-stocked
-  ["3", metric("3", 1, 1, 4, 0)], // flat
+  ["1", metric("1", 8, 3, 10)], // accelerating, thin stock, fully covered both windows
+  ["2", metric("2", 3, 6, 40)], // decelerating, well-stocked, fully covered both windows
+  ["3", metric("3", 1, 1, 4, 0)], // flat, fully covered both windows
 ]);
 const input = {
   products,

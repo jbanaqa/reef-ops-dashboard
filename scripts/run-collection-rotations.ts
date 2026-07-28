@@ -25,7 +25,7 @@ async function runScheduledRotations() {
   const [
     { prisma },
     { shuffleCollection },
-    { syncConfiguredAnalyticsIfStale },
+    { syncAnalyticsForEnabledRotations },
     {
       getCollectionRotationIntervalMinutes,
       getCurrentScheduleBoundary,
@@ -81,7 +81,7 @@ async function runScheduledRotations() {
     });
 
   const analyticsRefresh =
-    await syncConfiguredAnalyticsIfStale();
+    await syncAnalyticsForEnabledRotations();
 
   console.log(
     `[collection-rotation] Analytics refresh: ${JSON.stringify(analyticsRefresh)}`

@@ -9,6 +9,10 @@ import {
   type RotationStrategy,
   type RotationWeights,
 } from "@/lib/collection-rotation-scoring";
+import {
+  computeWindowCoverage,
+  type InventoryChangeEvent,
+} from "@/lib/inventory-coverage";
 
 type RotationConfiguration = {
   id: string;
@@ -104,8 +108,16 @@ export async function buildCollectionRotationPlan(input: {
   seed?: string;
 }) {
   const lookbackDays = input.rotation.analyticsLookbackDays;
+  const now = new Date();
   const windowStartedAt = new Date(
-    Date.now() - lookbackDays * 86_400_000
+    now.getTime() - lookbackDays * 86_400_000
+  );
+  // The window immediately before the current one, same length - mirrors
+  // fetchShopifyReportMetrics's periodOffset:1 boundaries exactly, so the
+  // coverage numbers below line up with the unitsSold/priorUnitsSold pair
+  // sales momentum is already comparing.
+  const priorWindowStartedAt = new Date(
+    windowStartedAt.getTime() - lookbackDays * 86_400_000
   );
   const productIds = input.products.map((product) => product.id);
   const numericIds = input.products.map((product) =>
@@ -116,6 +128,7 @@ export async function buildCollectionRotationPlan(input: {
     priorAnalyticsRows,
     inventoryTotals,
     unexplainedShrinkageTotals,
+    inventoryChangeEvents,
     orderClaims,
     recentRuns,
     recentSyncs,
@@ -163,6 +176,24 @@ export async function buildCollectionRotationPlan(input: {
           detectedAt: { gte: windowStartedAt },
         },
         _sum: { unknownChangeQuantity: true },
+      }),
+      // Full inventory-change history (not scoped to either window) so the
+      // coverage reconstruction below can walk backward through everything
+      // between "now" and the prior window's start and land on the right
+      // stock level at every point in between - see inventory-coverage.ts.
+      prisma.inventoryEvent.findMany({
+        where: {
+          shop: input.shop,
+          productId: { in: numericIds },
+          detectedAt: { lte: now },
+        },
+        orderBy: { detectedAt: "asc" },
+        select: {
+          productId: true,
+          detectedAt: true,
+          netDelta: true,
+          startingAvailable: true,
+        },
       }),
       prisma.orderInventoryClaim.groupBy({
         by: ["productId"],
@@ -212,6 +243,27 @@ export async function buildCollectionRotationPlan(input: {
         row._sum.unknownChangeQuantity ?? 0,
       ])
   );
+  const inventoryEventsByProduct = new Map<string, InventoryChangeEvent[]>();
+
+  for (const event of inventoryChangeEvents) {
+    if (!event.productId) continue;
+    const current = inventoryEventsByProduct.get(event.productId) ?? [];
+    current.push({
+      detectedAt: event.detectedAt,
+      netDelta: event.netDelta,
+      startingAvailable: event.startingAvailable,
+    });
+    inventoryEventsByProduct.set(event.productId, current);
+  }
+
+  const windowCoverageFor = (productId: string, windowStart: Date, windowEnd: Date) =>
+    computeWindowCoverage({
+      events: inventoryEventsByProduct.get(productId) ?? [],
+      currentAvailable: availableInventoryByProduct.get(productId) ?? 0,
+      windowStart,
+      windowEnd,
+      now,
+    });
   const localOrders = new Map(
     orderClaims
       .filter((row) => row.productId)
@@ -239,6 +291,12 @@ export async function buildCollectionRotationPlan(input: {
     const shopify = rows.find((row) => row.source === "SHOPIFY_REPORTS");
     const local = localOrders.get(productId);
     const sales = shopify ?? ga4;
+    const currentCoverage = windowCoverageFor(productId, windowStartedAt, now);
+    const priorCoverage = windowCoverageFor(
+      productId,
+      priorWindowStartedAt,
+      windowStartedAt
+    );
     const sources = [
       ...(ga4 ? ["GA4"] : []),
       ...(shopify ? ["SHOPIFY_REPORTS"] : []),
@@ -256,6 +314,9 @@ export async function buildCollectionRotationPlan(input: {
       revenue: sales?.revenue ?? 0,
       priorUnitsSold: priorUnitsByProduct.get(productId) ?? 0,
       hasPriorWindowData: priorUnitsByProduct.has(productId),
+      currentWindowCoverage: currentCoverage.coverage,
+      priorWindowCoverage: priorCoverage.coverage,
+      hasCoverageData: currentCoverage.hasCoverageData || priorCoverage.hasCoverageData,
       availableInventory: availableInventoryByProduct.get(productId) ?? 0,
       hasInventoryData: availableInventoryByProduct.has(productId),
       unexplainedShrinkage: unexplainedShrinkageByProduct.get(productId) ?? 0,
@@ -283,6 +344,7 @@ export async function buildCollectionRotationPlan(input: {
       .filter((order) => order.length > 0),
     weights: configuredWeights(input.rotation),
     seed,
+    now,
   });
   // A product with confirmed zero stock shouldn't occupy a visible top slot:
   // Shopify's storefront won't actually show/sell it there, so a "top 12"

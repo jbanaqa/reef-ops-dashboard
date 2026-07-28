@@ -59,8 +59,14 @@ type PreviewScore = {
       momentumWeight: number;
       priorUnitsSold: number;
       hasPriorWindowData: boolean;
+      currentWindowCoverage: number;
+      priorWindowCoverage: number;
+      hasCoverageData: boolean;
+      momentumEligible: boolean;
+      momentumConfidence: number;
       sellThroughRank: number;
       sellThroughWeight: number;
+      sellThroughConfidence: number;
       availableInventory: number;
       hasInventoryData: boolean;
       unexplainedShrinkage: number;
@@ -123,6 +129,33 @@ function FactorDetail({
 }) {
   if (factorKey === "performance") {
     const performance = score.breakdown.performance;
+    const confidencePct = (value: number) => Math.round(value * 100);
+    const momentumLabel = (() => {
+      if (!performance.hasPriorWindowData) {
+        return "Sales momentum (no prior period synced yet)";
+      }
+      if (!performance.momentumEligible) {
+        const currentPct = Math.round(performance.currentWindowCoverage * 100);
+        const priorPct = Math.round(performance.priorWindowCoverage * 100);
+        return `Sales momentum (not eligible — only in stock ${currentPct}% of the current period vs. ${priorPct}% of the prior period, likely a restock timing gap)`;
+      }
+      const base = `Sales momentum (${score.metrics.unitsSold} now vs. ${performance.priorUnitsSold} prior period)`;
+      if (performance.momentumConfidence >= 0.9) {
+        return base;
+      }
+      return `${base} — ${confidencePct(performance.momentumConfidence)}% confidence, too few total sales yet to fully trust this ratio`;
+    })();
+    const sellThroughLabel = (() => {
+      const base = !performance.hasInventoryData
+        ? "Sell-through (inventory not tracked yet)"
+        : performance.unexplainedShrinkage > 0
+          ? `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock, +${performance.unexplainedShrinkage} unexplained loss excluded)`
+          : `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock)`;
+      if (!performance.hasInventoryData || performance.sellThroughConfidence >= 0.9) {
+        return base;
+      }
+      return `${base} — ${confidencePct(performance.sellThroughConfidence)}% confidence, small batch so the ratio is noisy`;
+    })();
     const rows: Array<{ label: string; rank: number; weight: number }> = [
       {
         label: "Units sold (log-scaled)",
@@ -135,18 +168,12 @@ function FactorDetail({
         weight: performance.revenueWeight,
       },
       {
-        label: performance.hasPriorWindowData
-          ? `Sales momentum (${score.metrics.unitsSold} now vs. ${performance.priorUnitsSold} prior period)`
-          : "Sales momentum (no prior period synced yet)",
+        label: momentumLabel,
         rank: performance.momentumRank,
         weight: performance.momentumWeight,
       },
       {
-        label: !performance.hasInventoryData
-          ? "Sell-through (inventory not tracked yet)"
-          : performance.unexplainedShrinkage > 0
-            ? `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock, +${performance.unexplainedShrinkage} unexplained loss excluded)`
-            : `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock)`,
+        label: sellThroughLabel,
         rank: performance.sellThroughRank,
         weight: performance.sellThroughWeight,
       },
@@ -260,6 +287,22 @@ function ScoreBreakdown({
               {score.breakdown.performance.hasPriorWindowData
                 ? score.breakdown.performance.priorUnitsSold.toLocaleString()
                 : "Not synced yet"}
+            </strong>
+          </div>
+          <div>
+            <span>In stock, current period</span>
+            <strong>
+              {score.breakdown.performance.hasCoverageData
+                ? `${Math.round(score.breakdown.performance.currentWindowCoverage * 100)}%`
+                : "Assumed 100% (no history yet)"}
+            </strong>
+          </div>
+          <div>
+            <span>In stock, prior period</span>
+            <strong>
+              {score.breakdown.performance.hasCoverageData
+                ? `${Math.round(score.breakdown.performance.priorWindowCoverage * 100)}%`
+                : "Assumed 100% (no history yet)"}
             </strong>
           </div>
           <div>

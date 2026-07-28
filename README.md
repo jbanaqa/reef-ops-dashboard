@@ -52,12 +52,16 @@ GA4_SERVICE_ACCOUNT_EMAIL=reef-ops@project.iam.gserviceaccount.com
 GA4_SERVICE_ACCOUNT_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
-To refresh configured sources automatically before scheduled rotations when
-cached data is more than six hours old:
+Every scheduled rotation cycle refreshes analytics for all enabled
+collections automatically, first thing, before shuffling anything - it syncs
+each distinct lookback window (14/30/60/90 days) actually configured across
+enabled collections, not just one fixed default, so a collection set to a
+non-default lookback always scores against current data instead of an empty
+or stale window. To opt out (e.g. in a staging environment that shouldn't
+call Shopify automatically):
 
 ```env
-COLLECTION_ROTATION_ANALYTICS_AUTO_SYNC=true
-COLLECTION_ROTATION_ANALYTICS_LOOKBACK_DAYS=30
+COLLECTION_ROTATION_ANALYTICS_AUTO_SYNC=false
 ```
 
 Analytics failures are recorded but do not block a scheduled rotation. GA4
