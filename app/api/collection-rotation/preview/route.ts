@@ -68,6 +68,29 @@ export async function GET(request: NextRequest) {
           exposure: Math.round(score.exposure),
           freshness: Math.round(score.freshness),
           exploration: Math.round(score.exploration),
+          breakdown: {
+            ...score.breakdown,
+            performance: {
+              ...score.breakdown.performance,
+              viewRank: Math.round(score.breakdown.performance.viewRank),
+              cartRateRank: Math.round(
+                score.breakdown.performance.cartRateRank
+              ),
+              purchaseRateRank: Math.round(
+                score.breakdown.performance.purchaseRateRank
+              ),
+              unitRank: Math.round(score.breakdown.performance.unitRank),
+              revenueRank: Math.round(
+                score.breakdown.performance.revenueRank
+              ),
+            },
+            exposure: {
+              ...score.breakdown.exposure,
+              averageOpportunityPercent: Math.round(
+                score.breakdown.exposure.averageOpportunityPercent
+              ),
+            },
+          },
         })),
       },
     });

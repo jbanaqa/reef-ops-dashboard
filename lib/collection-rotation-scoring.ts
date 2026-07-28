@@ -32,6 +32,35 @@ export type ProductMetric = {
   newestSyncAt: string | null;
 };
 
+export type ProductScoreBreakdown = {
+  performance: {
+    viewRank: number;
+    viewWeight: number;
+    cartRateRank: number;
+    cartRateWeight: number;
+    purchaseRateRank: number;
+    purchaseRateWeight: number;
+    unitRank: number;
+    unitWeight: number;
+    revenueRank: number;
+    revenueWeight: number;
+  };
+  exposure: {
+    appearedInRuns: number;
+    totalRuns: number;
+    averageOpportunityPercent: number;
+    usedCurrentPositionFallback: boolean;
+  };
+  freshness: {
+    ageDays: number;
+    halfLifeDays: number;
+  };
+  exploration: {
+    seed: string;
+    productId: string;
+  };
+};
+
 export type ProductScore = {
   productId: string;
   title: string;
@@ -42,6 +71,7 @@ export type ProductScore = {
   exploration: number;
   ageDays: number;
   metrics: ProductMetric;
+  breakdown: ProductScoreBreakdown;
   previousPosition: number;
   proposedPosition: number;
 };
@@ -141,7 +171,7 @@ function opportunityForPosition(position: number) {
   return Math.max(0.05, 0.55 * Math.exp(-(position - 12) / 20));
 }
 
-function exposureNeed(
+function exposureBreakdown(
   productId: string,
   runOrders: string[][],
   currentPosition: number
@@ -154,14 +184,27 @@ function exposureNeed(
     .filter((value): value is number => value !== null);
 
   if (opportunities.length === 0) {
-    return clamp((1 - opportunityForPosition(currentPosition)) * 100);
+    const assumedOpportunity = opportunityForPosition(currentPosition);
+    return {
+      need: clamp((1 - assumedOpportunity) * 100),
+      appearedInRuns: 0,
+      totalRuns: runOrders.length,
+      averageOpportunityPercent: clamp(assumedOpportunity * 100),
+      usedCurrentPositionFallback: true,
+    };
   }
 
   const average =
     opportunities.reduce((sum, value) => sum + value, 0) /
     opportunities.length;
 
-  return clamp((1 - average) * 100);
+  return {
+    need: clamp((1 - average) * 100),
+    appearedInRuns: opportunities.length,
+    totalRuns: runOrders.length,
+    averageOpportunityPercent: clamp(average * 100),
+    usedCurrentPositionFallback: false,
+  };
 }
 
 function freshnessScore(createdAt: Date, now: Date) {
@@ -227,11 +270,12 @@ export function scoreProducts(input: {
       purchaseRateRanks[index] * 0.25 +
       unitRanks[index] * 0.25 +
       revenueRanks[index] * 0.1;
-    const exposure = exposureNeed(
+    const exposureInfo = exposureBreakdown(
       product.id,
       input.runOrders,
       index + 1
     );
+    const exposure = exposureInfo.need;
     const freshness = freshnessScore(product.createdAt, now);
     const ageDays = Math.max(
       0,
@@ -256,6 +300,34 @@ export function scoreProducts(input: {
       exploration,
       ageDays: Math.round(ageDays),
       metrics: metric,
+      breakdown: {
+        performance: {
+          viewRank: viewRanks[index],
+          viewWeight: 20,
+          cartRateRank: cartRateRanks[index],
+          cartRateWeight: 20,
+          purchaseRateRank: purchaseRateRanks[index],
+          purchaseRateWeight: 25,
+          unitRank: unitRanks[index],
+          unitWeight: 25,
+          revenueRank: revenueRanks[index],
+          revenueWeight: 10,
+        },
+        exposure: {
+          appearedInRuns: exposureInfo.appearedInRuns,
+          totalRuns: exposureInfo.totalRuns,
+          averageOpportunityPercent: exposureInfo.averageOpportunityPercent,
+          usedCurrentPositionFallback: exposureInfo.usedCurrentPositionFallback,
+        },
+        freshness: {
+          ageDays: Math.round(ageDays),
+          halfLifeDays: 28,
+        },
+        exploration: {
+          seed: input.seed,
+          productId: product.id,
+        },
+      },
       previousPosition: index + 1,
       proposedPosition: 0,
     } satisfies ProductScore;

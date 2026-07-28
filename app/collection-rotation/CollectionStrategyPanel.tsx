@@ -49,6 +49,34 @@ type PreviewScore = {
     sources: string[];
     newestSyncAt: string | null;
   };
+  breakdown: {
+    performance: {
+      viewRank: number;
+      viewWeight: number;
+      cartRateRank: number;
+      cartRateWeight: number;
+      purchaseRateRank: number;
+      purchaseRateWeight: number;
+      unitRank: number;
+      unitWeight: number;
+      revenueRank: number;
+      revenueWeight: number;
+    };
+    exposure: {
+      appearedInRuns: number;
+      totalRuns: number;
+      averageOpportunityPercent: number;
+      usedCurrentPositionFallback: boolean;
+    };
+    freshness: {
+      ageDays: number;
+      halfLifeDays: number;
+    };
+    exploration: {
+      seed: string;
+      productId: string;
+    };
+  };
 };
 
 const SCORE_FACTOR_COPY: Record<
@@ -75,6 +103,88 @@ function formatSyncedAt(value: string | null) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function FactorDetail({
+  factorKey,
+  score,
+}: {
+  factorKey: "performance" | "exposure" | "freshness" | "exploration";
+  score: PreviewScore;
+}) {
+  if (factorKey === "performance") {
+    const performance = score.breakdown.performance;
+    const rows: Array<{ label: string; rank: number; weight: number }> = [
+      {
+        label: "Views (log-scaled)",
+        rank: performance.viewRank,
+        weight: performance.viewWeight,
+      },
+      {
+        label: "Cart-add rate",
+        rank: performance.cartRateRank,
+        weight: performance.cartRateWeight,
+      },
+      {
+        label: "Purchase rate",
+        rank: performance.purchaseRateRank,
+        weight: performance.purchaseRateWeight,
+      },
+      {
+        label: "Units sold (log-scaled)",
+        rank: performance.unitRank,
+        weight: performance.unitWeight,
+      },
+      {
+        label: "Revenue (log-scaled)",
+        rank: performance.revenueRank,
+        weight: performance.revenueWeight,
+      },
+    ];
+
+    return (
+      <ul className="rotation-score-subbreakdown">
+        {rows.map((row) => (
+          <li key={row.label}>
+            <span>{row.label}</span>
+            <strong>
+              {row.rank}th pct · {row.weight}%
+            </strong>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (factorKey === "exposure") {
+    const exposure = score.breakdown.exposure;
+    return (
+      <p className="rotation-score-subbreakdown-note">
+        {exposure.usedCurrentPositionFallback
+          ? `No saved rotation history yet — estimated from this product's current position, which already gets about ${exposure.averageOpportunityPercent}% of available prime-position opportunity.`
+          : `Appeared in ${exposure.appearedInRuns} of ${exposure.totalRuns} saved rotations, averaging ${exposure.averageOpportunityPercent}% of available prime-position opportunity already received.`}
+      </p>
+    );
+  }
+
+  if (factorKey === "freshness") {
+    const freshness = score.breakdown.freshness;
+    return (
+      <p className="rotation-score-subbreakdown-note">
+        {freshness.ageDays} days old → 100 × e^(-{freshness.ageDays}/
+        {freshness.halfLifeDays}) = {score.freshness}
+      </p>
+    );
+  }
+
+  const exploration = score.breakdown.exploration;
+  return (
+    <p className="rotation-score-subbreakdown-note">
+      Deterministic hash of &ldquo;{exploration.seed}:{exploration.productId}
+      &rdquo; → {score.exploration}. Same seed always gives the same nudge; a
+      new shuffle seed gives a new one.
+    </p>
+  );
 }
 
 function ScoreBreakdown({
@@ -182,6 +292,7 @@ function ScoreBreakdown({
                 </span>
               </div>
               <p>{SCORE_FACTOR_COPY[factor.key]}</p>
+              <FactorDetail factorKey={factor.key} score={score} />
             </div>
           ))}
         </div>
