@@ -446,6 +446,13 @@ export default function CollectionStrategyPanel({
     sources: string[];
     runHistoryCount: number;
   } | null>(null);
+  // The preview endpoint already returns every product in the collection,
+  // scored and sorted by proposed position (i.e. descending overall score) -
+  // the top-12 table just slices it. "View all" reuses that same array and
+  // paginates it instead of re-fetching anything.
+  const [viewAllProducts, setViewAllProducts] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
+  const [productPage, setProductPage] = useState(0);
   const [availability, setAvailability] = useState({
     shopifyReports: true,
     ga4: false,
@@ -471,6 +478,8 @@ export default function CollectionStrategyPanel({
         setScores([]);
         setPreviewMeta(null);
         setExpandedProductId(null);
+        setViewAllProducts(false);
+        setProductSearch("");
       }
     });
 
@@ -517,6 +526,33 @@ export default function CollectionStrategyPanel({
     settings.exposureWeight +
     settings.freshnessWeight +
     settings.explorationWeight;
+
+  const PRODUCTS_PER_PAGE = 25;
+  const normalizedProductSearch = productSearch.trim().toLowerCase();
+  const filteredAllScores =
+    viewAllProducts && normalizedProductSearch
+      ? scores.filter((score) =>
+          score.title.toLowerCase().includes(normalizedProductSearch)
+        )
+      : scores;
+  const totalProductPages = Math.max(
+    1,
+    Math.ceil(filteredAllScores.length / PRODUCTS_PER_PAGE)
+  );
+  const safeProductPage = Math.min(productPage, totalProductPages - 1);
+  const displayedScores = viewAllProducts
+    ? filteredAllScores.slice(
+        safeProductPage * PRODUCTS_PER_PAGE,
+        safeProductPage * PRODUCTS_PER_PAGE + PRODUCTS_PER_PAGE
+      )
+    : scores.slice(0, 12);
+
+  // Whenever the underlying score set, the search filter, or the view mode
+  // changes, the previously-selected page number may no longer be valid (or
+  // may no longer be what the person is looking at) - snap back to page 1.
+  useEffect(() => {
+    setProductPage(0);
+  }, [scores, normalizedProductSearch, viewAllProducts]);
 
   function chooseStrategy(strategy: Strategy) {
     setSettings((current) => ({
@@ -801,21 +837,55 @@ export default function CollectionStrategyPanel({
         <div className="rotation-score-preview">
           <div className="rotation-score-heading">
             <div>
-              <h4>Proposed first 12 products</h4>
+              <h4>
+                {viewAllProducts
+                  ? `All ${scores.length} product${scores.length === 1 ? "" : "s"}, ranked by overall score`
+                  : "Proposed first 12 products"}
+              </h4>
               <p>
-                These are the products customers see first in collection grids
-                and featured sliders.
+                {viewAllProducts
+                  ? "Every product in this collection with its full score breakdown, sorted highest to lowest — exactly the order the next shuffle would apply."
+                  : "These are the products customers see first in collection grids and featured sliders."}
               </p>
             </div>
             <span className={`rotation-confidence is-${previewMeta?.confidence.toLowerCase()}`}>
               {previewMeta?.confidence} data confidence
             </span>
           </div>
+
+          <div className="rotation-score-view-controls">
+            <div className="rotation-score-view-toggle">
+              <button
+                type="button"
+                className={`rotation-score-view-option${viewAllProducts ? "" : " is-active"}`}
+                onClick={() => setViewAllProducts(false)}
+              >
+                Top 12
+              </button>
+              <button
+                type="button"
+                className={`rotation-score-view-option${viewAllProducts ? " is-active" : ""}`}
+                onClick={() => setViewAllProducts(true)}
+              >
+                View all products
+              </button>
+            </div>
+            {viewAllProducts ? (
+              <input
+                type="search"
+                className="form-input rotation-score-search"
+                value={productSearch}
+                onChange={(event) => setProductSearch(event.target.value)}
+                placeholder="Search by product title"
+              />
+            ) : null}
+          </div>
+
           <div className="rotation-score-table-wrap">
             <table className="rotation-score-table">
               <thead>
                 <tr>
-                  <th>Move</th>
+                  <th>{viewAllProducts ? "Rank" : "Move"}</th>
                   <th>Product</th>
                   <th>Score</th>
                   <th>Performance</th>
@@ -825,7 +895,7 @@ export default function CollectionStrategyPanel({
                 </tr>
               </thead>
               <tbody>
-                {scores.slice(0, 12).map((score) => {
+                {displayedScores.map((score) => {
                   const isExpanded = expandedProductId === score.productId;
                   return (
                     <Fragment key={score.productId}>
@@ -838,7 +908,9 @@ export default function CollectionStrategyPanel({
                         }
                       >
                         <td>
-                          {score.previousPosition} → {score.proposedPosition}
+                          {viewAllProducts
+                            ? score.proposedPosition
+                            : `${score.previousPosition} → ${score.proposedPosition}`}
                         </td>
                         <td>
                           <span className="rotation-score-toggle">
@@ -871,9 +943,51 @@ export default function CollectionStrategyPanel({
                     </Fragment>
                   );
                 })}
+                {viewAllProducts && displayedScores.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="rotation-score-empty-cell">
+                      No products match &ldquo;{productSearch}&rdquo;.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
+
+          {viewAllProducts ? (
+            <div className="rotation-score-pagination">
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={safeProductPage === 0}
+                onClick={() =>
+                  setProductPage((current) => Math.max(0, current - 1))
+                }
+              >
+                Previous
+              </button>
+              <span>
+                Page {safeProductPage + 1} of {totalProductPages}
+                {" · "}
+                {filteredAllScores.length} product
+                {filteredAllScores.length === 1 ? "" : "s"}
+                {normalizedProductSearch ? " matched" : " total"}
+              </span>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={safeProductPage >= totalProductPages - 1}
+                onClick={() =>
+                  setProductPage((current) =>
+                    Math.min(totalProductPages - 1, current + 1)
+                  )
+                }
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
+
           <p className="rotation-score-note">
             Exposure uses the last {previewMeta?.runHistoryCount ?? 0} saved
             rotations. It measures position opportunity across the infinite
