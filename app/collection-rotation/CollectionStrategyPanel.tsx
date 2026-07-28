@@ -148,7 +148,7 @@ function FactorDetail({
           <li key={row.label}>
             <span>{row.label}</span>
             <strong>
-              {row.rank}th pct · {row.weight}%
+              {row.rank} pct · {row.weight}%
             </strong>
           </li>
         ))}

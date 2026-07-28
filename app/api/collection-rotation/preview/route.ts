@@ -8,6 +8,14 @@ import { getShopifyShopDomain } from "@/lib/shopify";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// All displayed score figures share this precision so a value that reads the
+// same in one column (e.g. Performance) can't silently disagree with a more
+// heavily-rounded neighbor (e.g. the old whole-number Performance column vs.
+// the one-decimal Score column) and make two rows look tied when they aren't.
+function roundForDisplay(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const collectionId =
@@ -63,30 +71,30 @@ export async function GET(request: NextRequest) {
         ...plan,
         scores: plan.scores.map((score) => ({
           ...score,
-          score: Math.round(score.score * 10) / 10,
-          performance: Math.round(score.performance),
-          exposure: Math.round(score.exposure),
-          freshness: Math.round(score.freshness),
-          exploration: Math.round(score.exploration),
+          score: roundForDisplay(score.score),
+          performance: roundForDisplay(score.performance),
+          exposure: roundForDisplay(score.exposure),
+          freshness: roundForDisplay(score.freshness),
+          exploration: roundForDisplay(score.exploration),
           breakdown: {
             ...score.breakdown,
             performance: {
               ...score.breakdown.performance,
-              viewRank: Math.round(score.breakdown.performance.viewRank),
-              cartRateRank: Math.round(
+              viewRank: roundForDisplay(score.breakdown.performance.viewRank),
+              cartRateRank: roundForDisplay(
                 score.breakdown.performance.cartRateRank
               ),
-              purchaseRateRank: Math.round(
+              purchaseRateRank: roundForDisplay(
                 score.breakdown.performance.purchaseRateRank
               ),
-              unitRank: Math.round(score.breakdown.performance.unitRank),
-              revenueRank: Math.round(
+              unitRank: roundForDisplay(score.breakdown.performance.unitRank),
+              revenueRank: roundForDisplay(
                 score.breakdown.performance.revenueRank
               ),
             },
             exposure: {
               ...score.breakdown.exposure,
-              averageOpportunityPercent: Math.round(
+              averageOpportunityPercent: roundForDisplay(
                 score.breakdown.exposure.averageOpportunityPercent
               ),
             },
