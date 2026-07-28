@@ -10,7 +10,12 @@ const products = [
   { id: "gid://shopify/Product/2", legacyResourceId: "2", title: "B", createdAt: new Date("2026-06-01") },
   { id: "gid://shopify/Product/3", legacyResourceId: "3", title: "C", createdAt: new Date("2026-01-01") },
 ];
-const metric = (productId: string, unitsSold: number) => ({
+const metric = (
+  productId: string,
+  unitsSold: number,
+  priorUnitsSold = unitsSold,
+  availableInventory = unitsSold * 4
+) => ({
   productId,
   productViews: unitsSold * 10,
   listViews: unitsSold * 20,
@@ -19,13 +24,17 @@ const metric = (productId: string, unitsSold: number) => ({
   purchases: unitsSold,
   unitsSold,
   revenue: unitsSold * 25,
+  priorUnitsSold,
+  hasPriorWindowData: true,
+  availableInventory,
+  hasInventoryData: true,
   sources: ["SHOPIFY_REPORTS"],
   newestSyncAt: "2026-07-26T00:00:00.000Z",
 });
 const metrics = new Map([
-  ["1", metric("1", 8)],
-  ["2", metric("2", 3)],
-  ["3", metric("3", 1)],
+  ["1", metric("1", 8, 3, 10)], // accelerating, thin stock
+  ["2", metric("2", 3, 6, 40)], // decelerating, well-stocked
+  ["3", metric("3", 1, 1, 4)], // flat
 ]);
 const input = {
   products,

@@ -431,6 +431,12 @@ model CollectionProductAnalytics {
   productTitle    String?
   source          String
   lookbackDays    Int
+  // 0 = the current lookback window ending now. 1 = the immediately
+  // preceding window of the same length (e.g. days 31-60 ago, when
+  // lookbackDays is 30). The prior window exists so Performance scoring can
+  // compute sales momentum (recent vs. prior) without needing GA4 or any
+  // other page-view tracking.
+  periodOffset    Int      @default(0)
   productViews    Int      @default(0)
   listViews       Int      @default(0)
   listClicks      Int      @default(0)
@@ -444,7 +450,7 @@ model CollectionProductAnalytics {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@unique([shop, productId, source, lookbackDays])
+  @@unique([shop, productId, source, lookbackDays, periodOffset])
   @@index([shop])
   @@index([productId])
   @@index([source])

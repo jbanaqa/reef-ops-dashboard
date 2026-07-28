@@ -80,16 +80,15 @@ export async function GET(request: NextRequest) {
             ...score.breakdown,
             performance: {
               ...score.breakdown.performance,
-              viewRank: roundForDisplay(score.breakdown.performance.viewRank),
-              cartRateRank: roundForDisplay(
-                score.breakdown.performance.cartRateRank
-              ),
-              purchaseRateRank: roundForDisplay(
-                score.breakdown.performance.purchaseRateRank
-              ),
-              unitRank: roundForDisplay(score.breakdown.performance.unitRank),
+              unitsRank: roundForDisplay(score.breakdown.performance.unitsRank),
               revenueRank: roundForDisplay(
                 score.breakdown.performance.revenueRank
+              ),
+              momentumRank: roundForDisplay(
+                score.breakdown.performance.momentumRank
+              ),
+              sellThroughRank: roundForDisplay(
+                score.breakdown.performance.sellThroughRank
               ),
             },
             exposure: {

@@ -111,14 +111,42 @@ export async function buildCollectionRotationPlan(input: {
   const numericIds = input.products.map((product) =>
     numericProductId(product.id)
   );
-  const [analyticsRows, orderClaims, recentRuns, recentSyncs] =
-    await Promise.all([
+  const [
+    analyticsRows,
+    priorAnalyticsRows,
+    inventoryTotals,
+    orderClaims,
+    recentRuns,
+    recentSyncs,
+  ] = await Promise.all([
       prisma.collectionProductAnalytics.findMany({
         where: {
           shop: input.shop,
           productId: { in: numericIds },
           lookbackDays,
+          periodOffset: 0,
         },
+      }),
+      // The immediately-preceding window of the same length, used only to
+      // compute sales momentum (recent vs. prior). Never populated for GA4,
+      // and only present once a "Sync analytics" run has synced it at least
+      // once - hasPriorWindowData below tracks whether that's happened yet.
+      prisma.collectionProductAnalytics.findMany({
+        where: {
+          shop: input.shop,
+          productId: { in: numericIds },
+          source: "SHOPIFY_REPORTS",
+          lookbackDays,
+          periodOffset: 1,
+        },
+      }),
+      prisma.inventorySnapshot.groupBy({
+        by: ["productId"],
+        where: {
+          shop: input.shop,
+          productId: { in: numericIds },
+        },
+        _sum: { available: true },
       }),
       prisma.orderInventoryClaim.groupBy({
         by: ["productId"],
@@ -150,6 +178,16 @@ export async function buildCollectionRotationPlan(input: {
         take: 4,
       }),
     ]);
+  const priorUnitsByProduct = new Map(
+    priorAnalyticsRows
+      .filter((row) => row.productId)
+      .map((row) => [row.productId, row.unitsSold])
+  );
+  const availableInventoryByProduct = new Map(
+    inventoryTotals
+      .filter((row) => row.productId)
+      .map((row) => [row.productId as string, row._sum.available ?? 0])
+  );
   const localOrders = new Map(
     orderClaims
       .filter((row) => row.productId)
@@ -192,6 +230,10 @@ export async function buildCollectionRotationPlan(input: {
       purchases: sales?.purchases ?? local?.orders ?? 0,
       unitsSold: sales?.unitsSold ?? local?.units ?? 0,
       revenue: sales?.revenue ?? 0,
+      priorUnitsSold: priorUnitsByProduct.get(productId) ?? 0,
+      hasPriorWindowData: priorUnitsByProduct.has(productId),
+      availableInventory: availableInventoryByProduct.get(productId) ?? 0,
+      hasInventoryData: availableInventoryByProduct.has(productId),
       sources,
       newestSyncAt:
         rows.length > 0

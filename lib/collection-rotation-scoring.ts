@@ -21,6 +21,11 @@ export type ScoringProduct = {
 
 export type ProductMetric = {
   productId: string;
+  // productViews/listViews/listClicks/addsToCart are GA4-sourced and, since
+  // GA4 isn't connected, are always 0 right now. They're kept on this type
+  // (rather than removed) so Performance scoring can start using them again
+  // the moment a page-view source comes online, but they no longer feed the
+  // Performance formula below - see the redesign notes on scoreProducts().
   productViews: number;
   listViews: number;
   listClicks: number;
@@ -28,22 +33,34 @@ export type ProductMetric = {
   purchases: number;
   unitsSold: number;
   revenue: number;
+  // Units sold in the equal-length window immediately before this one -
+  // powers the Sales Momentum sub-metric. hasPriorWindowData is false until
+  // a "Sync analytics" run has captured that prior window at least once.
+  priorUnitsSold: number;
+  hasPriorWindowData: boolean;
+  // Current on-hand inventory (summed across locations) - powers the
+  // Sell-Through Rate sub-metric. hasInventoryData is false if this product
+  // has never had an inventory webhook recorded.
+  availableInventory: number;
+  hasInventoryData: boolean;
   sources: string[];
   newestSyncAt: string | null;
 };
 
 export type ProductScoreBreakdown = {
   performance: {
-    viewRank: number;
-    viewWeight: number;
-    cartRateRank: number;
-    cartRateWeight: number;
-    purchaseRateRank: number;
-    purchaseRateWeight: number;
-    unitRank: number;
-    unitWeight: number;
+    unitsRank: number;
+    unitsWeight: number;
     revenueRank: number;
     revenueWeight: number;
+    momentumRank: number;
+    momentumWeight: number;
+    priorUnitsSold: number;
+    hasPriorWindowData: boolean;
+    sellThroughRank: number;
+    sellThroughWeight: number;
+    availableInventory: number;
+    hasInventoryData: boolean;
   };
   exposure: {
     appearedInRuns: number;
@@ -237,39 +254,81 @@ export function scoreProducts(input: {
         purchases: 0,
         unitsSold: 0,
         revenue: 0,
+        priorUnitsSold: 0,
+        hasPriorWindowData: false,
+        availableInventory: 0,
+        hasInventoryData: false,
         sources: [],
         newestSyncAt: null,
       }
   );
 
-  const viewRanks = percentileRanks(
-    metrics.map((metric) => Math.log1p(metric.productViews))
-  );
-  const cartRateRanks = percentileRanks(
-    metrics.map(
-      (metric) => (metric.addsToCart + 1) / (metric.productViews + 12)
-    )
-  );
-  const purchaseRateRanks = percentileRanks(
-    metrics.map(
-      (metric) => (metric.purchases + 0.5) / (metric.productViews + 20)
-    )
-  );
+  // Performance is built entirely from Shopify Reports + inventory data -
+  // metrics that are actually available - rather than the page-view/cart-add
+  // tracking GA4 would otherwise supply. Views and cart-add rate were
+  // dropped: without GA4 they always tied every product at a neutral 50th
+  // percentile, contributing nothing but dead weight. "Purchase rate" was
+  // also retired - dividing by (views + 20) when views is always 0 made it
+  // mathematically identical to just ranking by raw purchase count, which
+  // Units Sold already captures more directly.
+  //
+  // The four sub-metrics below are each a genuinely distinct signal:
+  //   - Units Sold: raw sales volume.
+  //   - Revenue: dollar value generated (rewards higher-ticket items).
+  //   - Sales Momentum: is this product's pace accelerating or slowing,
+  //     comparing the current window to the equal-length window before it.
+  //     This is the closest available substitute for "growing interest"
+  //     that doesn't require any page-view tracking.
+  //   - Sell-Through Rate: units sold relative to how much inventory is
+  //     actually on hand - a product moving fast against thin stock is a
+  //     different (and useful) signal from raw volume or revenue alone.
   const unitRanks = percentileRanks(
     metrics.map((metric) => Math.log1p(metric.unitsSold))
   );
   const revenueRanks = percentileRanks(
     metrics.map((metric) => Math.log1p(Math.max(0, metric.revenue)))
   );
+  // Smoothing constants below follow the same additive-smoothing approach
+  // already used elsewhere in this formula (e.g. the old purchase-rate
+  // math), so a product with only 1-2 orders - or no prior-window/inventory
+  // data synced yet - doesn't produce a wildly overconfident ratio.
+  const MOMENTUM_SMOOTHING = 3;
+  const momentumRanks = percentileRanks(
+    metrics.map((metric) => {
+      // No prior-period sync yet for this product: assume flat (recent ==
+      // prior) rather than guessing a trend from nothing.
+      const priorUnits = metric.hasPriorWindowData
+        ? metric.priorUnitsSold
+        : metric.unitsSold;
+      return (
+        (metric.unitsSold + MOMENTUM_SMOOTHING) /
+        (priorUnits + MOMENTUM_SMOOTHING)
+      );
+    })
+  );
+  const SELL_THROUGH_SMOOTHING = 2;
+  const sellThroughRanks = percentileRanks(
+    metrics.map((metric) => {
+      // No inventory webhook recorded yet for this product: assume stock
+      // roughly matches units sold (~50% sell-through) rather than
+      // guessing efficiency from nothing.
+      const available = metric.hasInventoryData
+        ? metric.availableInventory
+        : metric.unitsSold;
+      return (
+        (metric.unitsSold + SELL_THROUGH_SMOOTHING) /
+        (metric.unitsSold + available + SELL_THROUGH_SMOOTHING)
+      );
+    })
+  );
 
   const scores = input.products.map((product, index) => {
     const metric = metrics[index];
     const performance =
-      viewRanks[index] * 0.2 +
-      cartRateRanks[index] * 0.2 +
-      purchaseRateRanks[index] * 0.25 +
-      unitRanks[index] * 0.25 +
-      revenueRanks[index] * 0.1;
+      unitRanks[index] * 0.3 +
+      revenueRanks[index] * 0.2 +
+      momentumRanks[index] * 0.3 +
+      sellThroughRanks[index] * 0.2;
     const exposureInfo = exposureBreakdown(
       product.id,
       input.runOrders,
@@ -302,16 +361,22 @@ export function scoreProducts(input: {
       metrics: metric,
       breakdown: {
         performance: {
-          viewRank: viewRanks[index],
-          viewWeight: 20,
-          cartRateRank: cartRateRanks[index],
-          cartRateWeight: 20,
-          purchaseRateRank: purchaseRateRanks[index],
-          purchaseRateWeight: 25,
-          unitRank: unitRanks[index],
-          unitWeight: 25,
+          unitsRank: unitRanks[index],
+          unitsWeight: 30,
           revenueRank: revenueRanks[index],
-          revenueWeight: 10,
+          revenueWeight: 20,
+          momentumRank: momentumRanks[index],
+          momentumWeight: 30,
+          priorUnitsSold: metric.hasPriorWindowData
+            ? metric.priorUnitsSold
+            : metric.unitsSold,
+          hasPriorWindowData: metric.hasPriorWindowData,
+          sellThroughRank: sellThroughRanks[index],
+          sellThroughWeight: 20,
+          availableInventory: metric.hasInventoryData
+            ? metric.availableInventory
+            : metric.unitsSold,
+          hasInventoryData: metric.hasInventoryData,
         },
         exposure: {
           appearedInRuns: exposureInfo.appearedInRuns,

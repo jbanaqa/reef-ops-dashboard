@@ -73,6 +73,15 @@ export async function POST(request: NextRequest) {
 
     for (const source of sources) {
       results.push(await syncCollectionAnalytics(source, lookbackDays));
+
+      // Sales momentum (recent vs. prior period, used by Performance
+      // scoring) is derived entirely from Shopify Reports data, so refresh
+      // the prior-period window alongside the current one.
+      if (source === "SHOPIFY_REPORTS") {
+        results.push(
+          await syncCollectionAnalytics(source, lookbackDays, 1)
+        );
+      }
     }
 
     return NextResponse.json({ ok: true, results });

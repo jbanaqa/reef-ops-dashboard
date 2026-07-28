@@ -20,7 +20,6 @@ type AnalyticsRow = {
   revenue: number;
 };
 
-
 type ShopifyQlResponse = {
   data?: {
     shopifyqlQuery?: {
@@ -91,9 +90,15 @@ function rowObject(
 }
 
 export async function fetchShopifyReportMetrics(
-  lookbackDays: number
+  lookbackDays: number,
+  periodOffset = 0
 ): Promise<AnalyticsRow[]> {
-  const windowEndedAt = new Date();
+  // periodOffset 0 = the window ending now. periodOffset 1 = the
+  // equal-length window immediately before that one (used to compute sales
+  // momentum by comparing recent vs. prior activity).
+  const windowEndedAt = new Date(
+    Date.now() - periodOffset * lookbackDays * 86_400_000
+  );
   const windowStartedAt = new Date(
     windowEndedAt.getTime() - lookbackDays * 86_400_000
   );
@@ -318,7 +323,8 @@ export function getAnalyticsAvailability() {
 
 export async function syncCollectionAnalytics(
   source: AnalyticsSource,
-  lookbackDays: number
+  lookbackDays: number,
+  periodOffset = 0
 ) {
   const shop = getShopifyShopDomain();
   const normalizedLookback = Math.min(
@@ -330,12 +336,17 @@ export async function syncCollectionAnalytics(
   });
 
   try {
+    // The prior-period window (used for sales momentum) only exists as a
+    // Shopify Reports concept right now - GA4 metrics aren't windowed this
+    // way, and momentum doesn't depend on GA4 anyway.
     const rawRows =
       source === "GA4"
         ? await fetchGa4Metrics(normalizedLookback)
-        : await fetchShopifyReportMetrics(normalizedLookback);
+        : await fetchShopifyReportMetrics(normalizedLookback, periodOffset);
     const rows = aggregateAnalyticsRows(rawRows);
-    const windowEndedAt = new Date();
+    const windowEndedAt = new Date(
+      Date.now() - periodOffset * normalizedLookback * 86_400_000
+    );
     const windowStartedAt = new Date(
       windowEndedAt.getTime() - normalizedLookback * 86_400_000
     );
@@ -344,17 +355,19 @@ export async function syncCollectionAnalytics(
       rows.map((row) =>
         prisma.collectionProductAnalytics.upsert({
           where: {
-            shop_productId_source_lookbackDays: {
+            shop_productId_source_lookbackDays_periodOffset: {
               shop,
               productId: row.productId,
               source,
               lookbackDays: normalizedLookback,
+              periodOffset,
             },
           },
           create: {
             shop,
             source,
             lookbackDays: normalizedLookback,
+            periodOffset,
             ...row,
             windowStartedAt,
             windowEndedAt,
@@ -379,7 +392,11 @@ export async function syncCollectionAnalytics(
       },
     });
 
-    return { source, lookbackDays: normalizedLookback, rowCount: rows.length };
+    return {
+      source: periodOffset > 0 ? `${source} (prior period)` : source,
+      lookbackDays: normalizedLookback,
+      rowCount: rows.length,
+    };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Analytics sync failed.";
@@ -434,6 +451,25 @@ export async function syncConfiguredAnalyticsIfStale(maxAgeHours = 6) {
 
     try {
       results.push(await syncCollectionAnalytics(source, lookbackDays));
+
+      // Sales momentum (recent vs. prior period) only needs Shopify Reports
+      // data, and only the current-period sync above needs to have
+      // succeeded for the prior-period one to be worth attempting.
+      if (source === "SHOPIFY_REPORTS") {
+        try {
+          results.push(
+            await syncCollectionAnalytics(source, lookbackDays, 1)
+          );
+        } catch (priorError) {
+          results.push({
+            source: `${source}_PRIOR_PERIOD`,
+            error:
+              priorError instanceof Error
+                ? priorError.message
+                : "Prior-period sync failed",
+          });
+        }
+      }
     } catch (error) {
       results.push({
         source,

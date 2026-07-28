@@ -51,16 +51,18 @@ type PreviewScore = {
   };
   breakdown: {
     performance: {
-      viewRank: number;
-      viewWeight: number;
-      cartRateRank: number;
-      cartRateWeight: number;
-      purchaseRateRank: number;
-      purchaseRateWeight: number;
-      unitRank: number;
-      unitWeight: number;
+      unitsRank: number;
+      unitsWeight: number;
       revenueRank: number;
       revenueWeight: number;
+      momentumRank: number;
+      momentumWeight: number;
+      priorUnitsSold: number;
+      hasPriorWindowData: boolean;
+      sellThroughRank: number;
+      sellThroughWeight: number;
+      availableInventory: number;
+      hasInventoryData: boolean;
     };
     exposure: {
       appearedInRuns: number;
@@ -83,7 +85,7 @@ const SCORE_FACTOR_COPY: Record<
   "performance" | "exposure" | "freshness" | "exploration",
   string
 > = {
-  performance: "Recent views, cart adds, purchases, units, and revenue vs. the rest of this collection.",
+  performance: "Units sold, revenue, sales momentum, and sell-through rate vs. the rest of this collection — built entirely from Shopify Reports and inventory data, no page-view tracking required.",
   exposure: "How little (or how much) prime real estate this product has gotten in recent rotations.",
   freshness: "How recently this product was added — fades out over about a month.",
   exploration: "A small, reproducible random nudge so the order isn't fully locked in.",
@@ -116,29 +118,28 @@ function FactorDetail({
     const performance = score.breakdown.performance;
     const rows: Array<{ label: string; rank: number; weight: number }> = [
       {
-        label: "Views (log-scaled)",
-        rank: performance.viewRank,
-        weight: performance.viewWeight,
-      },
-      {
-        label: "Cart-add rate",
-        rank: performance.cartRateRank,
-        weight: performance.cartRateWeight,
-      },
-      {
-        label: "Purchase rate",
-        rank: performance.purchaseRateRank,
-        weight: performance.purchaseRateWeight,
-      },
-      {
         label: "Units sold (log-scaled)",
-        rank: performance.unitRank,
-        weight: performance.unitWeight,
+        rank: performance.unitsRank,
+        weight: performance.unitsWeight,
       },
       {
         label: "Revenue (log-scaled)",
         rank: performance.revenueRank,
         weight: performance.revenueWeight,
+      },
+      {
+        label: performance.hasPriorWindowData
+          ? `Sales momentum (${score.metrics.unitsSold} now vs. ${performance.priorUnitsSold} prior period)`
+          : "Sales momentum (no prior period synced yet)",
+        rank: performance.momentumRank,
+        weight: performance.momentumWeight,
+      },
+      {
+        label: performance.hasInventoryData
+          ? `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock)`
+          : "Sell-through (inventory not tracked yet)",
+        rank: performance.sellThroughRank,
+        weight: performance.sellThroughWeight,
       },
     ];
 
@@ -237,22 +238,6 @@ function ScoreBreakdown({
         <h5>Raw data behind this score</h5>
         <div className="rotation-score-detail-grid">
           <div>
-            <span>Product views</span>
-            <strong>{score.metrics.productViews.toLocaleString()}</strong>
-          </div>
-          <div>
-            <span>List views</span>
-            <strong>{score.metrics.listViews.toLocaleString()}</strong>
-          </div>
-          <div>
-            <span>List clicks</span>
-            <strong>{score.metrics.listClicks.toLocaleString()}</strong>
-          </div>
-          <div>
-            <span>Added to cart</span>
-            <strong>{score.metrics.addsToCart.toLocaleString()}</strong>
-          </div>
-          <div>
             <span>Purchases</span>
             <strong>{score.metrics.purchases.toLocaleString()}</strong>
           </div>
@@ -261,8 +246,24 @@ function ScoreBreakdown({
             <strong>{score.metrics.unitsSold.toLocaleString()}</strong>
           </div>
           <div>
+            <span>Units sold, prior period</span>
+            <strong>
+              {score.breakdown.performance.hasPriorWindowData
+                ? score.breakdown.performance.priorUnitsSold.toLocaleString()
+                : "Not synced yet"}
+            </strong>
+          </div>
+          <div>
             <span>Revenue</span>
             <strong>{formatCurrency(score.metrics.revenue)}</strong>
+          </div>
+          <div>
+            <span>Available inventory</span>
+            <strong>
+              {score.breakdown.performance.hasInventoryData
+                ? score.breakdown.performance.availableInventory.toLocaleString()
+                : "Not tracked yet"}
+            </strong>
           </div>
           <div>
             <span>Product age</span>
