@@ -284,9 +284,31 @@ export async function buildCollectionRotationPlan(input: {
     weights: configuredWeights(input.rotation),
     seed,
   });
+  // A product with confirmed zero stock shouldn't occupy a visible top slot:
+  // Shopify's storefront won't actually show/sell it there, so a "top 12"
+  // that includes it doesn't match what a shopper will really see - some
+  // other in-stock product would slide up to fill that spot anyway. This is
+  // a stable partition applied only to final ordering, after scoring: a
+  // sold-out product's Performance/Exposure/Freshness/Exploration are still
+  // computed normally (via the `scores` array above), so it isn't unfairly
+  // penalized on exposure history once it's back in stock. Only manually
+  // "controlled" top positions (handled next) are exempt, since those are an
+  // explicit merchant override.
+  function isConfirmedOutOfStock(productId: string) {
+    const metric = metrics.get(numericProductId(productId));
+    return Boolean(metric?.hasInventoryData) && (metric?.availableInventory ?? 0) <= 0;
+  }
+  const stockAwareOrder = [
+    ...scores
+      .filter((score) => !isConfirmedOutOfStock(score.productId))
+      .map((score) => score.productId),
+    ...scores
+      .filter((score) => isConfirmedOutOfStock(score.productId))
+      .map((score) => score.productId),
+  ];
   const targetProductIds = applyControlledPositions(
     productIds,
-    scores.map((score) => score.productId),
+    stockAwareOrder,
     input.rotation
   );
   const targetPosition = new Map(

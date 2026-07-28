@@ -109,6 +109,11 @@ function formatSyncedAt(value: string | null) {
   }).format(new Date(value));
 }
 
+function isConfirmedOutOfStock(score: PreviewScore) {
+  const performance = score.breakdown.performance;
+  return performance.hasInventoryData && performance.availableInventory <= 0;
+}
+
 function FactorDetail({
   factorKey,
   score,
@@ -283,6 +288,16 @@ function ScoreBreakdown({
             : "none yet (cold start)"}{" "}
           · Last synced: {formatSyncedAt(score.metrics.newestSyncAt)}
         </p>
+        {isConfirmedOutOfStock(score) ? (
+          <p className="rotation-score-detail-note rotation-out-of-stock-note">
+            Zero stock on hand, so this product is parked below every in-stock
+            product regardless of score - Shopify wouldn&apos;t actually show
+            or sell it in a top slot, so an in-stock product would just take
+            its place there anyway. Its score above still reflects its real
+            Performance/Exposure/Freshness/Exploration, so it isn&apos;t
+            penalized once it&apos;s back in stock.
+          </p>
+        ) : null}
       </div>
 
       <div className="rotation-score-detail-section">
@@ -787,6 +802,11 @@ export default function CollectionStrategyPanel({
                             {isExpanded ? "▾" : "▸"}
                           </span>
                           {score.title}
+                          {isConfirmedOutOfStock(score) ? (
+                            <span className="rotation-out-of-stock-tag">
+                              Out of stock
+                            </span>
+                          ) : null}
                         </td>
                         <td><strong>{score.score}</strong></td>
                         <td>{score.performance}</td>
