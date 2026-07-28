@@ -2628,6 +2628,116 @@ body{background:#fff!important;color:#17212b!important}.reef-sidebar,.reef-topba
   margin: 10px 0 0;
 }
 
+.rotation-score-row {
+  cursor: pointer;
+}
+
+.rotation-score-row:hover,
+.rotation-score-row.is-expanded {
+  background: var(--surface-muted);
+}
+
+.rotation-score-toggle {
+  display: inline-block;
+  width: 14px;
+  color: var(--text-muted);
+}
+
+.rotation-score-detail-row td {
+  padding: 0;
+  white-space: normal;
+}
+
+.rotation-score-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px;
+  background: var(--surface-muted);
+  white-space: normal;
+}
+
+.rotation-score-detail-section h5 {
+  margin: 0 0 8px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.rotation-score-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px 16px;
+}
+
+.rotation-score-detail-grid div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rotation-score-detail-grid span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rotation-score-detail-grid strong {
+  font-size: 13px;
+}
+
+.rotation-score-detail-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rotation-score-factor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.rotation-score-factor {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.rotation-score-factor-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.rotation-score-factor-heading span {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.rotation-score-factor p {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rotation-score-formula {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-main);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 @media (max-width: 1050px) {
   .rotation-strategy-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

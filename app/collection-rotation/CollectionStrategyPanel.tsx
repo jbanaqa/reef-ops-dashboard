@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import {
   STRATEGY_LABELS,
@@ -35,15 +35,169 @@ type PreviewScore = {
   exposure: number;
   freshness: number;
   exploration: number;
+  ageDays: number;
   previousPosition: number;
   proposedPosition: number;
   metrics: {
     productViews: number;
+    listViews: number;
+    listClicks: number;
     addsToCart: number;
+    purchases: number;
     unitsSold: number;
+    revenue: number;
     sources: string[];
+    newestSyncAt: string | null;
   };
 };
+
+const SCORE_FACTOR_COPY: Record<
+  "performance" | "exposure" | "freshness" | "exploration",
+  string
+> = {
+  performance: "Recent views, cart adds, purchases, units, and revenue vs. the rest of this collection.",
+  exposure: "How little (or how much) prime real estate this product has gotten in recent rotations.",
+  freshness: "How recently this product was added — fades out over about a month.",
+  exploration: "A small, reproducible random nudge so the order isn't fully locked in.",
+};
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatSyncedAt(value: string | null) {
+  if (!value) return "Never synced";
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function ScoreBreakdown({
+  score,
+  weights,
+}: {
+  score: PreviewScore;
+  weights: {
+    performanceWeight: number;
+    exposureWeight: number;
+    freshnessWeight: number;
+    explorationWeight: number;
+  };
+}) {
+  const factors: Array<{
+    key: "performance" | "exposure" | "freshness" | "exploration";
+    label: string;
+    value: number;
+    weight: number;
+  }> = [
+    {
+      key: "performance",
+      label: "Performance",
+      value: score.performance,
+      weight: weights.performanceWeight,
+    },
+    {
+      key: "exposure",
+      label: "Exposure",
+      value: score.exposure,
+      weight: weights.exposureWeight,
+    },
+    {
+      key: "freshness",
+      label: "Freshness",
+      value: score.freshness,
+      weight: weights.freshnessWeight,
+    },
+    {
+      key: "exploration",
+      label: "Exploration",
+      value: score.exploration,
+      weight: weights.explorationWeight,
+    },
+  ];
+
+  return (
+    <div className="rotation-score-detail">
+      <div className="rotation-score-detail-section">
+        <h5>Raw data behind this score</h5>
+        <div className="rotation-score-detail-grid">
+          <div>
+            <span>Product views</span>
+            <strong>{score.metrics.productViews.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>List views</span>
+            <strong>{score.metrics.listViews.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>List clicks</span>
+            <strong>{score.metrics.listClicks.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Added to cart</span>
+            <strong>{score.metrics.addsToCart.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Purchases</span>
+            <strong>{score.metrics.purchases.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Units sold</span>
+            <strong>{score.metrics.unitsSold.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Revenue</span>
+            <strong>{formatCurrency(score.metrics.revenue)}</strong>
+          </div>
+          <div>
+            <span>Product age</span>
+            <strong>
+              {score.ageDays === 0 ? "Added today" : `${score.ageDays}d old`}
+            </strong>
+          </div>
+        </div>
+        <p className="rotation-score-detail-note">
+          Sources:{" "}
+          {score.metrics.sources.length > 0
+            ? score.metrics.sources.join(", ")
+            : "none yet (cold start)"}{" "}
+          · Last synced: {formatSyncedAt(score.metrics.newestSyncAt)}
+        </p>
+      </div>
+
+      <div className="rotation-score-detail-section">
+        <h5>How the four factors scored</h5>
+        <div className="rotation-score-factor-grid">
+          {factors.map((factor) => (
+            <div key={factor.key} className="rotation-score-factor">
+              <div className="rotation-score-factor-heading">
+                <strong>{factor.label}</strong>
+                <span>
+                  {factor.value} × {factor.weight}%
+                </span>
+              </div>
+              <p>{SCORE_FACTOR_COPY[factor.key]}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rotation-score-detail-section">
+        <h5>The math</h5>
+        <p className="rotation-score-formula">
+          ({factors
+            .map((factor) => `${factor.value} × ${factor.weight}`)
+            .join(" + ")}) ÷ 100 = <strong>{score.score}</strong>
+        </p>
+      </div>
+    </div>
+  );
+}
 
 // Weight presets now live in lib/collection-rotation-scoring.ts (the same
 // module the server uses to score products), so the picker and the actual
@@ -109,6 +263,9 @@ export default function CollectionStrategyPanel({
     ...presetWeights("BALANCED"),
   });
   const [scores, setScores] = useState<PreviewScore[]>([]);
+  const [expandedProductId, setExpandedProductId] = useState<
+    string | null
+  >(null);
   const [previewMeta, setPreviewMeta] = useState<{
     seed: string;
     confidence: string;
@@ -139,6 +296,7 @@ export default function CollectionStrategyPanel({
         setBusy("settings");
         setScores([]);
         setPreviewMeta(null);
+        setExpandedProductId(null);
       }
     });
 
@@ -194,6 +352,7 @@ export default function CollectionStrategyPanel({
     }));
     setScores([]);
     setPreviewMeta(null);
+    setExpandedProductId(null);
     // The scoring configuration just changed, so any earlier preview seed
     // was computed against settings that no longer apply.
     if (activeCollectionId) onPreviewSeedChange?.(activeCollectionId, null);
@@ -207,6 +366,7 @@ export default function CollectionStrategyPanel({
     }));
     setScores([]);
     setPreviewMeta(null);
+    setExpandedProductId(null);
     if (activeCollectionId) onPreviewSeedChange?.(activeCollectionId, null);
   }
 
@@ -265,6 +425,7 @@ export default function CollectionStrategyPanel({
       );
       setScores(data.preview.scores);
       setPreviewMeta(data.preview);
+      setExpandedProductId(null);
       onPreviewSeedChange?.(activeCollectionId, data.preview.seed);
       setMessage(
         "Preview ready. Nothing has been changed in Shopify yet — shuffling this collection now, without changing anything above first, will apply exactly this order."
@@ -310,6 +471,7 @@ export default function CollectionStrategyPanel({
       );
       setScores([]);
       setPreviewMeta(null);
+      setExpandedProductId(null);
       // The data behind any earlier preview just changed, so that seed no
       // longer reflects what a fresh preview would produce.
       if (activeCollectionId) onPreviewSeedChange?.(activeCollectionId, null);
@@ -489,23 +651,47 @@ export default function CollectionStrategyPanel({
                 </tr>
               </thead>
               <tbody>
-                {scores.slice(0, 12).map((score) => (
-                  <tr key={score.productId}>
-                    <td>
-                      {score.previousPosition} → {score.proposedPosition}
-                    </td>
-                    <td>{score.title}</td>
-                    <td><strong>{score.score}</strong></td>
-                    <td>{score.performance}</td>
-                    <td>{score.exposure}</td>
-                    <td>{score.freshness}</td>
-                    <td>
-                      {score.metrics.sources.length > 0
-                        ? score.metrics.sources.join(", ")
-                        : "Cold start"}
-                    </td>
-                  </tr>
-                ))}
+                {scores.slice(0, 12).map((score) => {
+                  const isExpanded = expandedProductId === score.productId;
+                  return (
+                    <Fragment key={score.productId}>
+                      <tr
+                        className={`rotation-score-row${isExpanded ? " is-expanded" : ""}`}
+                        onClick={() =>
+                          setExpandedProductId((current) =>
+                            current === score.productId ? null : score.productId
+                          )
+                        }
+                      >
+                        <td>
+                          {score.previousPosition} → {score.proposedPosition}
+                        </td>
+                        <td>
+                          <span className="rotation-score-toggle">
+                            {isExpanded ? "▾" : "▸"}
+                          </span>
+                          {score.title}
+                        </td>
+                        <td><strong>{score.score}</strong></td>
+                        <td>{score.performance}</td>
+                        <td>{score.exposure}</td>
+                        <td>{score.freshness}</td>
+                        <td>
+                          {score.metrics.sources.length > 0
+                            ? score.metrics.sources.join(", ")
+                            : "Cold start"}
+                        </td>
+                      </tr>
+                      {isExpanded ? (
+                        <tr className="rotation-score-detail-row">
+                          <td colSpan={7}>
+                            <ScoreBreakdown score={score} weights={settings} />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

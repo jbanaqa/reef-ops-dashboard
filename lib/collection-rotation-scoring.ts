@@ -40,6 +40,7 @@ export type ProductScore = {
   exposure: number;
   freshness: number;
   exploration: number;
+  ageDays: number;
   metrics: ProductMetric;
   previousPosition: number;
   proposedPosition: number;
@@ -232,6 +233,10 @@ export function scoreProducts(input: {
       index + 1
     );
     const freshness = freshnessScore(product.createdAt, now);
+    const ageDays = Math.max(
+      0,
+      (now.getTime() - product.createdAt.getTime()) / 86_400_000
+    );
     const exploration =
       hashUnit(`${input.seed}:${product.id}`) * 100;
     const score =
@@ -249,6 +254,7 @@ export function scoreProducts(input: {
       exposure,
       freshness,
       exploration,
+      ageDays: Math.round(ageDays),
       metrics: metric,
       previousPosition: index + 1,
       proposedPosition: 0,
