@@ -12,6 +12,16 @@ import {
   type RotationStrategy,
 } from "@/lib/collection-rotation-scoring";
 
+// Custom weights are tuned per collection in the Strategy panel below, so
+// bulk strategy assignment only offers the four presets that come with a
+// ready-made weight split.
+const BULK_STRATEGY_OPTIONS: Exclude<RotationStrategy, "CUSTOM">[] = [
+  "BALANCED",
+  "PERFORMANCE",
+  "DISCOVERY",
+  "RANDOM",
+];
+
 type CollectionSummary = {
   id: string;
   title: string;
@@ -184,9 +194,34 @@ export default function CollectionAutomationPanel({
     setErrorMessage,
   ] = useState("");
 
+  const [
+    successMessage,
+    setSuccessMessage,
+  ] = useState("");
+
+  const [
+    selectedIds,
+    setSelectedIds,
+  ] = useState<Set<string>>(
+    new Set()
+  );
+
+  const [
+    bulkStrategy,
+    setBulkStrategy,
+  ] = useState<RotationStrategy>(
+    "BALANCED"
+  );
+
+  const [
+    isBulkApplying,
+    setIsBulkApplying,
+  ] = useState(false);
+
   const loadAutomationData =
     useCallback(async () => {
       setErrorMessage("");
+      setSuccessMessage("");
 
       try {
         const [
@@ -444,6 +479,151 @@ export default function CollectionAutomationPanel({
     }
   }
 
+  function toggleSelection(
+    collectionId: string
+  ) {
+    setSelectedIds(
+      (current) => {
+        const next = new Set(
+          current
+        );
+
+        if (next.has(collectionId)) {
+          next.delete(collectionId);
+        } else {
+          next.add(collectionId);
+        }
+
+        return next;
+      }
+    );
+  }
+
+  const allVisibleSelected =
+    visibleCollections.length > 0 &&
+    visibleCollections.every(
+      (collection) =>
+        selectedIds.has(collection.id)
+    );
+
+  function toggleSelectAllVisible() {
+    setSelectedIds((current) => {
+      if (allVisibleSelected) {
+        const next = new Set(current);
+        visibleCollections.forEach(
+          (collection) =>
+            next.delete(collection.id)
+        );
+        return next;
+      }
+
+      const next = new Set(current);
+      visibleCollections.forEach(
+        (collection) =>
+          next.add(collection.id)
+      );
+      return next;
+    });
+  }
+
+  async function applyBulkStrategy() {
+    if (
+      selectedIds.size === 0 ||
+      isBulkApplying
+    ) {
+      return;
+    }
+
+    setIsBulkApplying(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const targetCollections =
+      collections.filter((collection) =>
+        selectedIds.has(collection.id)
+      );
+
+    try {
+      const response = await fetch(
+        "/api/collection-rotation/strategy/bulk",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            strategy: bulkStrategy,
+
+            collections:
+              targetCollections.map(
+                (collection) => ({
+                  collectionId:
+                    collection.id,
+                  collectionTitle:
+                    collection.title,
+                  collectionHandle:
+                    collection.handle,
+                })
+              ),
+          }),
+        }
+      );
+
+      const data = await readResponse<{
+        ok: true;
+        updatedCount: number;
+        failed: Array<{
+          collectionId: string;
+          error?: string;
+        }>;
+      }>(response);
+
+      const failedIds = new Set(
+        data.failed.map(
+          (failure) =>
+            failure.collectionId
+        )
+      );
+
+      setCollections(
+        (currentCollections) =>
+          currentCollections.map(
+            (item) =>
+              selectedIds.has(
+                item.id
+              ) &&
+              !failedIds.has(item.id)
+                ? {
+                    ...item,
+                    strategy:
+                      bulkStrategy,
+                  }
+                : item
+          )
+      );
+
+      setSuccessMessage(
+        data.failed.length > 0
+          ? `Applied ${strategyLabel(bulkStrategy)} to ${data.updatedCount} collection(s). ${data.failed.length} failed.`
+          : `Applied ${strategyLabel(bulkStrategy)} to ${data.updatedCount} collection(s).`
+      );
+
+      setSelectedIds(new Set());
+      onCollectionsChanged?.();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to apply the strategy to the selected collections."
+      );
+    } finally {
+      setIsBulkApplying(false);
+    }
+  }
+
   return (
     <section className="rotation-automation-card">
       <div className="rotation-automation-top">
@@ -605,6 +785,101 @@ export default function CollectionAutomationPanel({
             />
           </div>
 
+          <div className="rotation-automation-bulk-bar">
+            <label className="rotation-automation-select-all">
+              <input
+                type="checkbox"
+                checked={
+                  allVisibleSelected
+                }
+                onChange={
+                  toggleSelectAllVisible
+                }
+              />
+              <span>
+                {selectedIds.size > 0
+                  ? `${selectedIds.size} selected`
+                  : "Select all visible"}
+              </span>
+            </label>
+
+            {selectedIds.size > 0 ? (
+              <div className="rotation-automation-bulk-actions">
+                <select
+                  className="form-select"
+                  value={bulkStrategy}
+                  onChange={(event) =>
+                    setBulkStrategy(
+                      event.target
+                        .value as RotationStrategy
+                    )
+                  }
+                  disabled={
+                    isBulkApplying
+                  }
+                >
+                  {BULK_STRATEGY_OPTIONS.map(
+                    (strategy) => (
+                      <option
+                        key={strategy}
+                        value={strategy}
+                      >
+                        {
+                          STRATEGY_LABELS[
+                            strategy
+                          ]
+                        }
+                      </option>
+                    )
+                  )}
+                </select>
+
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={
+                    isBulkApplying
+                  }
+                  onClick={() =>
+                    void applyBulkStrategy()
+                  }
+                >
+                  {isBulkApplying
+                    ? "Applying..."
+                    : `Apply to ${selectedIds.size}`}
+                </button>
+
+                <button
+                  type="button"
+                  className="rotation-text-button"
+                  disabled={
+                    isBulkApplying
+                  }
+                  onClick={() =>
+                    setSelectedIds(
+                      new Set()
+                    )
+                  }
+                >
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <p className="rotation-automation-bulk-hint">
+                Select collections to set a
+                strategy for several at once.
+                Custom weights are still tuned
+                one collection at a time below.
+              </p>
+            )}
+          </div>
+
+          {successMessage ? (
+            <p className="rotation-alert rotation-alert-success rotation-automation-bulk-message">
+              {successMessage}
+            </p>
+          ) : null}
+
           <div className="rotation-automation-list">
             {visibleCollections.map(
               (collection) => (
@@ -612,24 +887,44 @@ export default function CollectionAutomationPanel({
                   key={collection.id}
                   className="rotation-automation-row"
                 >
-                  <div>
-                    <p className="rotation-automation-row-title">
-                      {collection.isStarred
-                        ? "★ "
-                        : ""}
-                      {collection.title}
-                    </p>
+                  <div className="rotation-automation-row-main">
+                    <label className="rotation-automation-row-select">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(
+                          collection.id
+                        )}
+                        onChange={() =>
+                          toggleSelection(
+                            collection.id
+                          )
+                        }
+                      />
+                    </label>
 
-                    <p className="rotation-automation-row-meta">
-                      {
-                        collection.productsCount
-                      }{" "}
-                      products
-                      {collection.controlledTopCount >
-                      0
-                        ? ` · Top ${collection.controlledTopCount} controlled · ${collection.controlledAssignedCount} assigned`
-                        : ` · ${strategyLabel(collection.strategy)}`}
-                    </p>
+                    <div>
+                      <p className="rotation-automation-row-title">
+                        {collection.isStarred
+                          ? "★ "
+                          : ""}
+                        {collection.title}
+                      </p>
+
+                      <p className="rotation-automation-row-meta">
+                        {
+                          collection.productsCount
+                        }{" "}
+                        products ·{" "}
+                        {strategyLabel(
+                          collection.strategy
+                        )}{" "}
+                        strategy
+                        {collection.controlledTopCount >
+                        0
+                          ? ` · Top ${collection.controlledTopCount} controlled · ${collection.controlledAssignedCount} assigned`
+                          : ""}
+                      </p>
+                    </div>
                   </div>
 
                   <label className="rotation-toggle">
