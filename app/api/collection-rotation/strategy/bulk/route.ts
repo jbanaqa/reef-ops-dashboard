@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  normalizeWeights,
   STRATEGY_PRESETS,
   type RotationStrategy,
 } from "@/lib/collection-rotation-scoring";
@@ -10,15 +11,19 @@ import { getShopifyShopDomain } from "@/lib/shopify";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Bulk assignment intentionally only supports the ready-made presets, not
-// CUSTOM - custom weights are a per-collection tuning exercise (the numbers
-// have to add to 100 and are meant to be reasoned about one collection at a
-// time), so they stay in the single-collection Strategy panel.
+// All five strategies are now bulk-assignable. CUSTOM has two forms here:
+//   - weightPresetId: apply a previously-saved named weight orientation
+//     (see /api/collection-rotation/weight-presets) to every selected
+//     collection.
+//   - inline performance/exposure/freshness/explorationWeight fields: a
+//     one-off custom split, typed in just for this bulk apply, not saved
+//     anywhere as a reusable preset.
 const VALID_BULK_STRATEGIES = new Set<RotationStrategy>([
   "BALANCED",
   "PERFORMANCE",
   "DISCOVERY",
   "RANDOM",
+  "CUSTOM",
 ]);
 
 type BulkCollectionInput = {
@@ -46,7 +51,7 @@ export async function POST(request: NextRequest) {
         {
           ok: false,
           error:
-            "Select Balanced, Performance, Discovery, or Random to apply to multiple collections at once.",
+            "Select Balanced, Performance, Discovery, Random, or a custom orientation to apply to multiple collections at once.",
         },
         { status: 400 }
       );
@@ -89,12 +94,59 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const weights =
-      STRATEGY_PRESETS[
-        strategy as Exclude<RotationStrategy, "CUSTOM">
-      ];
-
     const shop = getShopifyShopDomain();
+
+    let weights: {
+      performance: number;
+      exposure: number;
+      freshness: number;
+      exploration: number;
+    };
+
+    if (strategy === "CUSTOM") {
+      const weightPresetId =
+        typeof body.weightPresetId === "string"
+          ? body.weightPresetId.trim()
+          : "";
+
+      if (weightPresetId) {
+        // Scoped to this shop, same as the individual preset endpoints - a
+        // preset ID from another shop simply won't be found here.
+        const preset = await prisma.rotationWeightPreset.findFirst({
+          where: { id: weightPresetId, shop },
+        });
+
+        if (!preset) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "That saved orientation no longer exists.",
+            },
+            { status: 400 }
+          );
+        }
+
+        weights = normalizeWeights({
+          performance: preset.performanceWeight,
+          exposure: preset.exposureWeight,
+          freshness: preset.freshnessWeight,
+          exploration: preset.explorationWeight,
+        });
+      } else {
+        // A one-off custom split typed in just for this bulk apply - not
+        // saved as a reusable preset unless the person separately does that
+        // from the Strategy panel.
+        weights = normalizeWeights({
+          performance: Number(body.performanceWeight),
+          exposure: Number(body.exposureWeight),
+          freshness: Number(body.freshnessWeight),
+          exploration: Number(body.explorationWeight),
+        });
+      }
+    } else {
+      weights =
+        STRATEGY_PRESETS[strategy as Exclude<RotationStrategy, "CUSTOM">];
+    }
 
     const results = await Promise.all(
       collectionsInput.map(async ({ id, title, handle }) => {

@@ -16,6 +16,19 @@ type CollectionOption = {
   isEnabled: boolean;
 };
 
+// A named, shop-wide custom weight orientation - saved once from this panel,
+// reusable both here (apply to whichever collection is active) and in the
+// bulk assignment bar (apply to many collections at once).
+type WeightPreset = {
+  id: string;
+  name: string;
+  performanceWeight: number;
+  exposureWeight: number;
+  freshnessWeight: number;
+  explorationWeight: number;
+  updatedAt: string;
+};
+
 type Strategy = RotationStrategy;
 
 type Settings = {
@@ -362,6 +375,105 @@ export default function CollectionStrategyPanel({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
+  // Saved weight presets are shop-wide (not per-collection), so they're
+  // loaded once on mount rather than every time the active collection
+  // changes.
+  const [weightPresets, setWeightPresets] = useState<WeightPreset[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const [presetsError, setPresetsError] = useState("");
+
+  const loadWeightPresets = () => {
+    fetch("/api/collection-rotation/weight-presets", { cache: "no-store" })
+      .then((response) =>
+        readJson<{ ok: true; presets: WeightPreset[] }>(response)
+      )
+      .then((data) => setWeightPresets(data.presets))
+      .catch(() => {
+        // Non-fatal - the rest of the panel still works without saved
+        // presets, so this fails silently rather than blocking the page.
+      });
+  };
+
+  useEffect(() => {
+    loadWeightPresets();
+  }, []);
+
+  function applyWeightPreset(preset: WeightPreset) {
+    setSettings((current) => ({
+      ...current,
+      strategy: "CUSTOM",
+      performanceWeight: preset.performanceWeight,
+      exposureWeight: preset.exposureWeight,
+      freshnessWeight: preset.freshnessWeight,
+      explorationWeight: preset.explorationWeight,
+    }));
+    setScores([]);
+    setPreviewMeta(null);
+    setExpandedProductId(null);
+    if (activeCollectionId) onPreviewSeedChange?.(activeCollectionId, null);
+  }
+
+  async function saveWeightPreset() {
+    const name = presetName.trim();
+    if (!name || weightTotal !== 100) return;
+    setPresetsError("");
+
+    try {
+      const data = await readJson<{ ok: true; preset: WeightPreset }>(
+        await fetch("/api/collection-rotation/weight-presets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            performanceWeight: settings.performanceWeight,
+            exposureWeight: settings.exposureWeight,
+            freshnessWeight: settings.freshnessWeight,
+            explorationWeight: settings.explorationWeight,
+          }),
+        })
+      );
+      setWeightPresets((current) => {
+        const withoutExisting = current.filter(
+          (preset) => preset.id !== data.preset.id
+        );
+        return [...withoutExisting, data.preset].sort((first, second) =>
+          first.name.localeCompare(second.name)
+        );
+      });
+      setPresetName("");
+    } catch (saveError) {
+      setPresetsError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Could not save this orientation."
+      );
+    }
+  }
+
+  async function deleteWeightPreset(preset: WeightPreset) {
+    setPresetsError("");
+    const previous = weightPresets;
+    setWeightPresets((current) =>
+      current.filter((item) => item.id !== preset.id)
+    );
+
+    try {
+      await readJson(
+        await fetch(
+          `/api/collection-rotation/weight-presets?id=${encodeURIComponent(preset.id)}`,
+          { method: "DELETE" }
+        )
+      );
+    } catch (deleteError) {
+      setWeightPresets(previous);
+      setPresetsError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Could not delete this orientation."
+      );
+    }
+  }
+
   const activeCollectionId =
     collectionId || orderedCollections[0]?.id || "";
 
@@ -669,6 +781,79 @@ export default function CollectionStrategyPanel({
             </span>
           </label>
         ))}
+      </div>
+
+      <div className="rotation-weight-presets">
+        <div className="rotation-weight-presets-heading">
+          <strong>Saved custom orientations</strong>
+          <span>
+            Save the weights above under a name to reuse them later, on this
+            collection or several at once from the automation panel.
+          </span>
+        </div>
+
+        {weightPresets.length > 0 ? (
+          <div className="rotation-weight-preset-chips">
+            {weightPresets.map((preset) => (
+              <div key={preset.id} className="rotation-weight-preset-chip">
+                <button
+                  type="button"
+                  className="rotation-weight-preset-apply"
+                  title={`${preset.performanceWeight}/${preset.exposureWeight}/${preset.freshnessWeight}/${preset.explorationWeight} (performance/exposure/freshness/exploration)`}
+                  onClick={() => applyWeightPreset(preset)}
+                >
+                  {preset.name}
+                </button>
+                <button
+                  type="button"
+                  className="rotation-weight-preset-delete"
+                  aria-label={`Delete "${preset.name}"`}
+                  onClick={() => void deleteWeightPreset(preset)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="rotation-weight-presets-empty">
+            No saved orientations yet.
+          </p>
+        )}
+
+        {presetsError ? (
+          <p className="rotation-alert rotation-alert-error">{presetsError}</p>
+        ) : null}
+
+        <div className="rotation-weight-preset-save">
+          <input
+            type="text"
+            className="form-input"
+            value={presetName}
+            onChange={(event) => setPresetName(event.target.value)}
+            placeholder="Name this orientation (e.g. Aggressive clearance)"
+            maxLength={60}
+            disabled={settings.strategy !== "CUSTOM"}
+          />
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={
+              !presetName.trim() ||
+              weightTotal !== 100 ||
+              settings.strategy !== "CUSTOM"
+            }
+            onClick={() => void saveWeightPreset()}
+          >
+            Save as preset
+          </button>
+        </div>
+        {settings.strategy !== "CUSTOM" ? (
+          <p className="rotation-weight-presets-empty">
+            Switch to Custom above to save the current weights as a new
+            preset.
+          </p>
+        ) : null}
       </div>
 
       <div className="rotation-data-bar">

@@ -385,6 +385,31 @@ model CollectionRotation {
   @@index([lastShuffledAt])
 }
 
+// A shop-wide, named set of the four rotation weights (performance/exposure/
+// freshness/exploration) - lets someone save a custom orientation once (e.g.
+// "Aggressive clearance") and re-apply it later, either to a single
+// collection's Strategy panel or across many collections at once via bulk
+// assignment, without re-typing the same four numbers every time. Not tied
+// to any one collection - @@unique([shop, name]) means saving again under an
+// existing name just overwrites that preset's weights.
+model RotationWeightPreset {
+  id String @id @default(cuid())
+
+  shop String
+  name String
+
+  performanceWeight Int
+  exposureWeight    Int
+  freshnessWeight   Int
+  explorationWeight Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, name])
+  @@index([shop])
+}
+
 model CollectionRotationRun {
   id String @id @default(cuid())
 

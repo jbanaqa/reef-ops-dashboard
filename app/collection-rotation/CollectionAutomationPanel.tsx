@@ -12,15 +12,19 @@ import {
   type RotationStrategy,
 } from "@/lib/collection-rotation-scoring";
 
-// Custom weights are tuned per collection in the Strategy panel below, so
-// bulk strategy assignment only offers the four presets that come with a
-// ready-made weight split.
+// The four ready-made presets are always offered. Beyond that, bulk
+// assignment can also apply a CUSTOM orientation - either one saved earlier
+// from the Strategy panel (see weightPresets below) or a one-off split typed
+// in just for this bulk apply - rather than only these fixed weight splits.
 const BULK_STRATEGY_OPTIONS: Exclude<RotationStrategy, "CUSTOM">[] = [
   "BALANCED",
   "PERFORMANCE",
   "DISCOVERY",
   "RANDOM",
 ];
+
+const CUSTOM_ENTRY_VALUE = "CUSTOM_ENTRY";
+const PRESET_VALUE_PREFIX = "preset:";
 
 type CollectionSummary = {
   id: string;
@@ -32,6 +36,17 @@ type CollectionSummary = {
   strategy: string;
   controlledTopCount: number;
   controlledAssignedCount: number;
+};
+
+// A named, shop-wide custom weight orientation saved from the Strategy
+// panel - see /api/collection-rotation/weight-presets.
+type WeightPreset = {
+  id: string;
+  name: string;
+  performanceWeight: number;
+  exposureWeight: number;
+  freshnessWeight: number;
+  explorationWeight: number;
 };
 
 function strategyLabel(strategy: string) {
@@ -206,17 +221,80 @@ export default function CollectionAutomationPanel({
     new Set()
   );
 
+  // Either a base strategy ("BALANCED" etc.), "preset:<id>" for a saved
+  // custom orientation, or CUSTOM_ENTRY_VALUE for a one-off typed-in split.
   const [
-    bulkStrategy,
-    setBulkStrategy,
-  ] = useState<RotationStrategy>(
+    bulkSelection,
+    setBulkSelection,
+  ] = useState<string>(
     "BALANCED"
   );
+
+  const [
+    weightPresets,
+    setWeightPresets,
+  ] = useState<WeightPreset[]>([]);
+
+  const [
+    customWeights,
+    setCustomWeights,
+  ] = useState({
+    performanceWeight: 45,
+    exposureWeight: 30,
+    freshnessWeight: 15,
+    explorationWeight: 10,
+  });
 
   const [
     isBulkApplying,
     setIsBulkApplying,
   ] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/collection-rotation/weight-presets", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { ok?: boolean; presets?: WeightPreset[] }) => {
+        if (data.ok && Array.isArray(data.presets)) {
+          setWeightPresets(data.presets);
+        }
+      })
+      .catch(() => {
+        // Non-fatal - bulk assignment still works with just the four base
+        // strategies and one-off custom entry if this fails to load.
+      });
+  }, []);
+
+  const customWeightTotal =
+    customWeights.performanceWeight +
+    customWeights.exposureWeight +
+    customWeights.freshnessWeight +
+    customWeights.explorationWeight;
+
+  function updateCustomWeight(
+    field: keyof typeof customWeights,
+    value: number
+  ) {
+    setCustomWeights((current) => ({
+      ...current,
+      [field]: Math.min(100, Math.max(0, Math.round(value || 0))),
+    }));
+  }
+
+  function bulkSelectionLabel(selection: string) {
+    if (selection === CUSTOM_ENTRY_VALUE) return "Custom weights";
+    if (selection.startsWith(PRESET_VALUE_PREFIX)) {
+      const id = selection.slice(PRESET_VALUE_PREFIX.length);
+      return (
+        weightPresets.find((preset) => preset.id === id)?.name ??
+        "a saved orientation"
+      );
+    }
+    return strategyLabel(selection);
+  }
+
+  const isBulkApplyDisabled =
+    isBulkApplying ||
+    (bulkSelection === CUSTOM_ENTRY_VALUE && customWeightTotal !== 100);
 
   const loadAutomationData =
     useCallback(async () => {
@@ -529,7 +607,8 @@ export default function CollectionAutomationPanel({
   async function applyBulkStrategy() {
     if (
       selectedIds.size === 0 ||
-      isBulkApplying
+      isBulkApplying ||
+      (bulkSelection === CUSTOM_ENTRY_VALUE && customWeightTotal !== 100)
     ) {
       return;
     }
@@ -543,6 +622,37 @@ export default function CollectionAutomationPanel({
         selectedIds.has(collection.id)
       );
 
+    // The server-side strategy field is always one of the five enum values -
+    // a saved preset or one-off custom split both land as "CUSTOM" there,
+    // with the actual weights carried separately.
+    const isPreset = bulkSelection.startsWith(
+      PRESET_VALUE_PREFIX
+    );
+    const requestBody: Record<string, unknown> = isPreset
+      ? {
+          strategy: "CUSTOM",
+          weightPresetId: bulkSelection.slice(
+            PRESET_VALUE_PREFIX.length
+          ),
+        }
+      : bulkSelection === CUSTOM_ENTRY_VALUE
+        ? {
+            strategy: "CUSTOM",
+            performanceWeight:
+              customWeights.performanceWeight,
+            exposureWeight:
+              customWeights.exposureWeight,
+            freshnessWeight:
+              customWeights.freshnessWeight,
+            explorationWeight:
+              customWeights.explorationWeight,
+          }
+        : { strategy: bulkSelection };
+
+    const resolvedStrategy = isPreset || bulkSelection === CUSTOM_ENTRY_VALUE
+      ? "CUSTOM"
+      : bulkSelection;
+
     try {
       const response = await fetch(
         "/api/collection-rotation/strategy/bulk",
@@ -555,7 +665,7 @@ export default function CollectionAutomationPanel({
           },
 
           body: JSON.stringify({
-            strategy: bulkStrategy,
+            ...requestBody,
 
             collections:
               targetCollections.map(
@@ -599,16 +709,19 @@ export default function CollectionAutomationPanel({
                 ? {
                     ...item,
                     strategy:
-                      bulkStrategy,
+                      resolvedStrategy,
                   }
                 : item
           )
       );
 
+      const selectionLabel =
+        bulkSelectionLabel(bulkSelection);
+
       setSuccessMessage(
         data.failed.length > 0
-          ? `Applied ${strategyLabel(bulkStrategy)} to ${data.updatedCount} collection(s). ${data.failed.length} failed.`
-          : `Applied ${strategyLabel(bulkStrategy)} to ${data.updatedCount} collection(s).`
+          ? `Applied ${selectionLabel} to ${data.updatedCount} collection(s). ${data.failed.length} failed.`
+          : `Applied ${selectionLabel} to ${data.updatedCount} collection(s).`
       );
 
       setSelectedIds(new Set());
@@ -804,72 +917,168 @@ export default function CollectionAutomationPanel({
             </label>
 
             {selectedIds.size > 0 ? (
-              <div className="rotation-automation-bulk-actions">
-                <select
-                  className="form-select"
-                  value={bulkStrategy}
-                  onChange={(event) =>
-                    setBulkStrategy(
-                      event.target
-                        .value as RotationStrategy
-                    )
-                  }
-                  disabled={
-                    isBulkApplying
-                  }
-                >
-                  {BULK_STRATEGY_OPTIONS.map(
-                    (strategy) => (
-                      <option
-                        key={strategy}
-                        value={strategy}
-                      >
-                        {
-                          STRATEGY_LABELS[
-                            strategy
-                          ]
-                        }
+              <div className="rotation-automation-bulk-column">
+                <div className="rotation-automation-bulk-actions">
+                  <select
+                    className="form-select"
+                    value={bulkSelection}
+                    onChange={(event) =>
+                      setBulkSelection(
+                        event.target.value
+                      )
+                    }
+                    disabled={
+                      isBulkApplying
+                    }
+                  >
+                    <optgroup label="Presets">
+                      {BULK_STRATEGY_OPTIONS.map(
+                        (strategy) => (
+                          <option
+                            key={strategy}
+                            value={strategy}
+                          >
+                            {
+                              STRATEGY_LABELS[
+                                strategy
+                              ]
+                            }
+                          </option>
+                        )
+                      )}
+                    </optgroup>
+                    {weightPresets.length > 0 ? (
+                      <optgroup label="Saved custom orientations">
+                        {weightPresets.map(
+                          (preset) => (
+                            <option
+                              key={preset.id}
+                              value={`${PRESET_VALUE_PREFIX}${preset.id}`}
+                            >
+                              {preset.name}
+                            </option>
+                          )
+                        )}
+                      </optgroup>
+                    ) : null}
+                    <optgroup label="One-off">
+                      <option value={CUSTOM_ENTRY_VALUE}>
+                        Custom weights...
                       </option>
-                    )
-                  )}
-                </select>
+                    </optgroup>
+                  </select>
 
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  disabled={
-                    isBulkApplying
-                  }
-                  onClick={() =>
-                    void applyBulkStrategy()
-                  }
-                >
-                  {isBulkApplying
-                    ? "Applying..."
-                    : `Apply to ${selectedIds.size}`}
-                </button>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={
+                      isBulkApplyDisabled
+                    }
+                    onClick={() =>
+                      void applyBulkStrategy()
+                    }
+                  >
+                    {isBulkApplying
+                      ? "Applying..."
+                      : `Apply to ${selectedIds.size}`}
+                  </button>
 
-                <button
-                  type="button"
-                  className="rotation-text-button"
-                  disabled={
-                    isBulkApplying
-                  }
-                  onClick={() =>
-                    setSelectedIds(
-                      new Set()
-                    )
-                  }
-                >
-                  Clear
-                </button>
+                  <button
+                    type="button"
+                    className="rotation-text-button"
+                    disabled={
+                      isBulkApplying
+                    }
+                    onClick={() =>
+                      setSelectedIds(
+                        new Set()
+                      )
+                    }
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {bulkSelection ===
+                CUSTOM_ENTRY_VALUE ? (
+                  <div className="rotation-automation-bulk-custom">
+                    {(
+                      [
+                        [
+                          "performanceWeight",
+                          "Performance",
+                        ],
+                        [
+                          "exposureWeight",
+                          "Exposure",
+                        ],
+                        [
+                          "freshnessWeight",
+                          "Freshness",
+                        ],
+                        [
+                          "explorationWeight",
+                          "Exploration",
+                        ],
+                      ] as Array<
+                        [
+                          keyof typeof customWeights,
+                          string
+                        ]
+                      >
+                    ).map(([field, label]) => (
+                      <label
+                        key={field}
+                        className="rotation-automation-bulk-custom-field"
+                      >
+                        <span>{label}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={
+                            customWeights[
+                              field
+                            ]
+                          }
+                          disabled={
+                            isBulkApplying
+                          }
+                          onChange={(
+                            event
+                          ) =>
+                            updateCustomWeight(
+                              field,
+                              Number(
+                                event.target
+                                  .value
+                              )
+                            )
+                          }
+                        />
+                      </label>
+                    ))}
+                    <span
+                      className={`rotation-automation-bulk-custom-total${
+                        customWeightTotal !==
+                        100
+                          ? " is-invalid"
+                          : ""
+                      }`}
+                    >
+                      {customWeightTotal}%
+                      total
+                    </span>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <p className="rotation-automation-bulk-hint">
-                Select collections to set a
-                strategy for several at once.
-                Custom weights are still tuned
-                one collection at a time below.
+                Select collections to apply a
+                preset, a saved custom
+                orientation, or a one-off
+                custom weight split to all of
+                them at once.
               </p>
             )}
           </div>
