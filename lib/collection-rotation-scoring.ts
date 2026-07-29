@@ -33,31 +33,35 @@ export type ProductMetric = {
   purchases: number;
   unitsSold: number;
   revenue: number;
-  // Units sold in the equal-length window immediately before this one -
-  // powers the Sales Momentum sub-metric. hasPriorWindowData is false until
-  // a "Sync analytics" run has captured that prior window at least once.
+  // Units sold in the equal-length window immediately before this one.
+  // Previously powered the Sales Momentum sub-metric, which was retired from
+  // Performance scoring as too noisy in practice (small sample sizes and
+  // restock timing produced misleading swings). Kept on this type - rather
+  // than removed - in case a future revisit finds a more reliable way to use
+  // it; nothing currently reads these for scoring.
   priorUnitsSold: number;
   hasPriorWindowData: boolean;
   // What fraction (0-1) of the current/prior lookback window this product
   // actually had stock on hand, reconstructed from InventoryEvent history.
-  // Momentum only trusts the raw unit counts above once both windows clear
-  // a minimum coverage bar - see MOMENTUM_MIN_WINDOW_COVERAGE below. A
-  // product restocked right at a window boundary will show low coverage in
-  // whichever window it mostly missed, which is exactly the signal needed
-  // to stop that timing artifact from reading as real demand acceleration.
+  // Same status as priorUnitsSold above - no longer read by scoring now that
+  // Sales Momentum is retired, kept for potential future reuse.
   currentWindowCoverage: number;
   priorWindowCoverage: number;
   hasCoverageData: boolean;
-  // Current on-hand inventory (summed across locations) - powers the
-  // Sell-Through Rate sub-metric. hasInventoryData is false if this product
+  // Current on-hand inventory (summed across locations). Still actively used
+  // - not by Performance scoring (Sell-Through Rate was retired for the same
+  // noisiness reason as Momentum), but to exclude confirmed out-of-stock
+  // products from scoring entirely (see isConfirmedOutOfStock in
+  // collection-rotation-plan.ts). hasInventoryData is false if this product
   // has never had an inventory webhook recorded.
   availableInventory: number;
   hasInventoryData: boolean;
   // Units that disappeared from inventory during the lookback window with no
   // matching Shopify order behind them (from InventoryEvent.unknownChangeQuantity
   // - e.g. livestock deaths or other manual write-offs with no reason code
-  // attached). Sell-Through adds this back into "available" so a die-off
-  // doesn't get misread as a hot seller. 0 genuinely means "no untracked
+  // attached). Previously fed back into Sell-Through Rate's "available"
+  // figure; no longer read now that Sell-Through is retired from Performance
+  // scoring. Kept for potential future reuse. 0 genuinely means "no untracked
   // loss found," not missing data, so this has no separate has*Data flag.
   unexplainedShrinkage: number;
   sources: string[];
@@ -70,33 +74,6 @@ export type ProductScoreBreakdown = {
     unitsWeight: number;
     revenueRank: number;
     revenueWeight: number;
-    momentumRank: number;
-    momentumWeight: number;
-    priorUnitsSold: number;
-    hasPriorWindowData: boolean;
-    currentWindowCoverage: number;
-    priorWindowCoverage: number;
-    hasCoverageData: boolean;
-    // Cleared the hard gates (prior data exists, both windows had enough
-    // stock coverage) - a prerequisite for momentumConfidence to be above 0.
-    momentumEligible: boolean;
-    // 0-1: how much this product's combined sales volume (current + prior
-    // window) supports trusting its momentum ratio, once eligible. Blends
-    // toward neutral continuously rather than a hard pass/fail, so a product
-    // that just barely clears the eligibility bar doesn't get full credit
-    // for a ratio built from very few sales.
-    momentumConfidence: number;
-    sellThroughRank: number;
-    sellThroughWeight: number;
-    // 0-1: how much total transaction volume (units sold + effective
-    // available) supports trusting this product's sell-through ratio. Same
-    // purpose as momentumConfidence - a tiny batch can swing to a
-    // dramatic-looking ratio off a single unit.
-    sellThroughConfidence: number;
-    availableInventory: number;
-    hasInventoryData: boolean;
-    unexplainedShrinkage: number;
-    effectiveAvailable: number;
   };
   exposure: {
     appearedInRuns: number;
@@ -169,14 +146,6 @@ export const STRATEGY_LABELS: Record<RotationStrategy, string> = {
 
 function clamp(value: number, minimum = 0, maximum = 100) {
   return Math.min(Math.max(value, minimum), maximum);
-}
-
-// Linearly ramps confidence from 0 (at or below `from`) to 1 (at or above
-// `to`), used to fade a thin-data ratio toward neutral gradually rather than
-// as a hard cliff at one specific sample size.
-function confidenceRamp(value: number, from: number, to: number) {
-  if (to <= from) return value >= to ? 1 : 0;
-  return clamp((value - from) / (to - from), 0, 1);
 }
 
 export function normalizeWeights(weights: RotationWeights) {
@@ -364,144 +333,35 @@ export function scoreProducts(input: {
       }
   );
 
-  // Performance is built entirely from Shopify Reports + inventory data -
-  // metrics that are actually available - rather than the page-view/cart-add
-  // tracking GA4 would otherwise supply. Views and cart-add rate were
-  // dropped: without GA4 they always tied every product at a neutral 50th
+  // Performance is built entirely from Shopify Reports data - metrics that
+  // are actually available - rather than the page-view/cart-add tracking
+  // GA4 would otherwise supply. Views and cart-add rate were dropped:
+  // without GA4 they always tied every product at a neutral 50th
   // percentile, contributing nothing but dead weight. "Purchase rate" was
   // also retired - dividing by (views + 20) when views is always 0 made it
   // mathematically identical to just ranking by raw purchase count, which
-  // Units Sold already captures more directly.
+  // Units Sold already captures more directly. Sales Momentum and
+  // Sell-Through Rate were retired too - both depended on reconstructed
+  // prior-window/inventory-coverage data that proved too noisy in practice
+  // (small sample sizes and restock timing produced misleading swings) to
+  // be a reliable signal, per direct feedback that they read as inaccurate.
   //
-  // The four sub-metrics below are each a genuinely distinct signal:
+  // What's left is two simple, direct signals:
   //   - Units Sold: raw sales volume.
   //   - Revenue: dollar value generated (rewards higher-ticket items).
-  //   - Sales Momentum: is this product's pace accelerating or slowing,
-  //     comparing the current window to the equal-length window before it.
-  //     This is the closest available substitute for "growing interest"
-  //     that doesn't require any page-view tracking.
-  //   - Sell-Through Rate: units sold relative to how much inventory is
-  //     actually on hand - a product moving fast against thin stock is a
-  //     different (and useful) signal from raw volume or revenue alone.
+  // Units Sold keeps the larger share (60/40) to preserve the original
+  // relative weighting between the two (previously 30/20 out of the old
+  // four-way split).
   const unitRanks = percentileRanks(
     metrics.map((metric) => Math.log1p(metric.unitsSold))
   );
   const revenueRanks = percentileRanks(
     metrics.map((metric) => Math.log1p(Math.max(0, metric.revenue)))
   );
-  // Smoothing constants below follow the same additive-smoothing approach
-  // already used elsewhere in this formula (e.g. the old purchase-rate
-  // math), so a product with only 1-2 orders - or no prior-window/inventory
-  // data synced yet - doesn't produce a wildly overconfident ratio.
-  const MOMENTUM_SMOOTHING = 3;
-  // A product must have actually been in stock for at least this fraction of
-  // BOTH the current and prior window before its momentum ratio is eligible
-  // at all - otherwise a restock landing near the window boundary (arriving
-  // mid-prior-window, or mid-current-window right after a full prior
-  // stockout) reads as a huge swing that's really just a timing artifact,
-  // not real demand change. This stays a hard cutoff (not a ramp) since it's
-  // answering a different question than volume confidence below - whether
-  // the two windows are comparable at all, not how much to trust the result.
-  const MOMENTUM_MIN_WINDOW_COVERAGE = 0.5;
-  // Even once eligible, a handful of total sales isn't enough to fully trust
-  // a ratio - e.g. one unit of a rare specimen selling the day it arrived
-  // would otherwise look like an enormous spike. Rather than a second hard
-  // cutoff, confidence ramps continuously from 0 (right at the eligibility
-  // floor) up to 1 (comfortably higher volume), so a product that just
-  // barely qualifies isn't treated the same as an established seller.
-  const MOMENTUM_MIN_COMBINED_UNITS = 4;
-  const MOMENTUM_FULL_CONFIDENCE_UNITS = 20;
-  const isMomentumEligible = (metric: ProductMetric) =>
-    metric.hasPriorWindowData &&
-    metric.currentWindowCoverage >= MOMENTUM_MIN_WINDOW_COVERAGE &&
-    metric.priorWindowCoverage >= MOMENTUM_MIN_WINDOW_COVERAGE;
-  const momentumConfidenceFor = (metric: ProductMetric) => {
-    if (!isMomentumEligible(metric)) return 0;
-    const combinedUnits = metric.unitsSold + metric.priorUnitsSold;
-    return confidenceRamp(
-      combinedUnits,
-      MOMENTUM_MIN_COMBINED_UNITS,
-      MOMENTUM_FULL_CONFIDENCE_UNITS
-    );
-  };
-  const momentumRanks = percentileRanks(
-    metrics.map((metric) => {
-      const confidence = momentumConfidenceFor(metric);
-      if (confidence <= 0) {
-        // Not eligible, or eligible but with essentially no volume behind
-        // it - assume flat rather than let a restock-timing artifact or a
-        // single sale produce a misleading spike or dip.
-        return 1;
-      }
-      // Rather than comparing raw unit counts (which assumes both windows
-      // were equally sellable), scale each window's units up by how much of
-      // it the product was actually in stock, so a window it was only
-      // partly available for is compared on the demand rate it implies, not
-      // the smaller raw total that partial availability alone would produce.
-      const adjustedCurrent =
-        metric.unitsSold / Math.max(MOMENTUM_MIN_WINDOW_COVERAGE, metric.currentWindowCoverage);
-      const adjustedPrior =
-        metric.priorUnitsSold / Math.max(MOMENTUM_MIN_WINDOW_COVERAGE, metric.priorWindowCoverage);
-      const rawRatio =
-        (adjustedCurrent + MOMENTUM_SMOOTHING) /
-        (adjustedPrior + MOMENTUM_SMOOTHING);
-      // Blend toward 1 ("no change") in proportion to how little volume
-      // supports this ratio, so a product that just cleared the eligibility
-      // floor lands close to neutral instead of getting the full swing.
-      return confidence * rawRatio + (1 - confidence) * 1;
-    })
-  );
-  const SELL_THROUGH_SMOOTHING = 2;
-  // Units that vanished from stock with no matching order (unexplainedShrinkage
-  // - e.g. an unlabeled livestock death) get added back to "available" here,
-  // so they read as neither sold nor a real depletion of stock rather than
-  // inflating Sell-Through as if a customer had bought them.
-  const effectiveAvailableFor = (metric: ProductMetric) => {
-    const available = metric.hasInventoryData
-      ? metric.availableInventory
-      : metric.unitsSold;
-    return available + Math.max(0, metric.unexplainedShrinkage);
-  };
-  // Same underlying issue as momentum: a small total batch (units sold +
-  // what's left) can swing to a dramatic-looking ratio off a single unit -
-  // 1 sold of 1 available reads as a "hot" 75%, but that's noise, not
-  // signal. Confidence ramps on total transaction volume rather than a hard
-  // cutoff, using the same anchor points as momentum for consistency.
-  const SELL_THROUGH_MIN_TOTAL_UNITS = 4;
-  const SELL_THROUGH_FULL_CONFIDENCE_UNITS = 20;
-  const sellThroughRawRatios = metrics.map((metric) => {
-    const effectiveAvailable = effectiveAvailableFor(metric);
-    return (
-      (metric.unitsSold + SELL_THROUGH_SMOOTHING) /
-      (metric.unitsSold + effectiveAvailable + SELL_THROUGH_SMOOTHING)
-    );
-  });
-  const sellThroughRawRanks = percentileRanks(sellThroughRawRatios);
-  const sellThroughConfidenceFor = (metric: ProductMetric) => {
-    const totalUnits = metric.unitsSold + effectiveAvailableFor(metric);
-    return confidenceRamp(
-      totalUnits,
-      SELL_THROUGH_MIN_TOTAL_UNITS,
-      SELL_THROUGH_FULL_CONFIDENCE_UNITS
-    );
-  };
-  // Sell-through has no collection-independent "neutral ratio" the way
-  // momentum's "1" (no change) is - what counts as a normal turnover rate
-  // depends on the rest of this collection. So instead of blending the raw
-  // ratio toward a fixed anchor before ranking, blend the already-computed
-  // percentile toward the neutral 50th percentile after ranking.
-  const sellThroughRanks = metrics.map((metric, index) => {
-    const confidence = sellThroughConfidenceFor(metric);
-    return confidence * sellThroughRawRanks[index] + (1 - confidence) * 50;
-  });
 
   const scores = input.products.map((product, index) => {
     const metric = metrics[index];
-    const performance =
-      unitRanks[index] * 0.3 +
-      revenueRanks[index] * 0.2 +
-      momentumRanks[index] * 0.3 +
-      sellThroughRanks[index] * 0.2;
+    const performance = unitRanks[index] * 0.6 + revenueRanks[index] * 0.4;
     const currentPosition =
       input.realPositions?.get(product.id) ?? index + 1;
     const exposureInfo = exposureBreakdown(
@@ -538,29 +398,9 @@ export function scoreProducts(input: {
       breakdown: {
         performance: {
           unitsRank: unitRanks[index],
-          unitsWeight: 30,
+          unitsWeight: 60,
           revenueRank: revenueRanks[index],
-          revenueWeight: 20,
-          momentumRank: momentumRanks[index],
-          momentumWeight: 30,
-          priorUnitsSold: metric.hasPriorWindowData
-            ? metric.priorUnitsSold
-            : metric.unitsSold,
-          hasPriorWindowData: metric.hasPriorWindowData,
-          currentWindowCoverage: metric.currentWindowCoverage,
-          priorWindowCoverage: metric.priorWindowCoverage,
-          hasCoverageData: metric.hasCoverageData,
-          momentumEligible: isMomentumEligible(metric),
-          momentumConfidence: momentumConfidenceFor(metric),
-          sellThroughRank: sellThroughRanks[index],
-          sellThroughWeight: 20,
-          sellThroughConfidence: sellThroughConfidenceFor(metric),
-          availableInventory: metric.hasInventoryData
-            ? metric.availableInventory
-            : metric.unitsSold,
-          hasInventoryData: metric.hasInventoryData,
-          unexplainedShrinkage: Math.max(0, metric.unexplainedShrinkage),
-          effectiveAvailable: effectiveAvailableFor(metric),
+          revenueWeight: 40,
         },
         exposure: {
           appearedInRuns: exposureInfo.appearedInRuns,

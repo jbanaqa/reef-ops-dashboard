@@ -55,22 +55,6 @@ type PreviewScore = {
       unitsWeight: number;
       revenueRank: number;
       revenueWeight: number;
-      momentumRank: number;
-      momentumWeight: number;
-      priorUnitsSold: number;
-      hasPriorWindowData: boolean;
-      currentWindowCoverage: number;
-      priorWindowCoverage: number;
-      hasCoverageData: boolean;
-      momentumEligible: boolean;
-      momentumConfidence: number;
-      sellThroughRank: number;
-      sellThroughWeight: number;
-      sellThroughConfidence: number;
-      availableInventory: number;
-      hasInventoryData: boolean;
-      unexplainedShrinkage: number;
-      effectiveAvailable: number;
     };
     exposure: {
       appearedInRuns: number;
@@ -93,7 +77,7 @@ const SCORE_FACTOR_COPY: Record<
   "performance" | "exposure" | "freshness" | "exploration",
   string
 > = {
-  performance: "Units sold, revenue, sales momentum, and sell-through rate vs. the rest of this collection — built entirely from Shopify Reports and inventory data, no page-view tracking required.",
+  performance: "Units sold and revenue vs. the rest of this collection — built entirely from Shopify Reports data, no page-view tracking required.",
   exposure: "How little (or how much) prime real estate this product has gotten in recent rotations.",
   freshness: "How recently this product was added — fades out over about a month.",
   exploration: "A small, reproducible random nudge so the order isn't fully locked in.",
@@ -124,33 +108,6 @@ function FactorDetail({
 }) {
   if (factorKey === "performance") {
     const performance = score.breakdown.performance;
-    const confidencePct = (value: number) => Math.round(value * 100);
-    const momentumLabel = (() => {
-      if (!performance.hasPriorWindowData) {
-        return "Sales momentum (no prior period synced yet)";
-      }
-      if (!performance.momentumEligible) {
-        const currentPct = Math.round(performance.currentWindowCoverage * 100);
-        const priorPct = Math.round(performance.priorWindowCoverage * 100);
-        return `Sales momentum (not eligible — only in stock ${currentPct}% of the current period vs. ${priorPct}% of the prior period, likely a restock timing gap)`;
-      }
-      const base = `Sales momentum (${score.metrics.unitsSold} now vs. ${performance.priorUnitsSold} prior period)`;
-      if (performance.momentumConfidence >= 0.9) {
-        return base;
-      }
-      return `${base} — ${confidencePct(performance.momentumConfidence)}% confidence, too few total sales yet to fully trust this ratio`;
-    })();
-    const sellThroughLabel = (() => {
-      const base = !performance.hasInventoryData
-        ? "Sell-through (inventory not tracked yet)"
-        : performance.unexplainedShrinkage > 0
-          ? `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock, +${performance.unexplainedShrinkage} unexplained loss excluded)`
-          : `Sell-through (${score.metrics.unitsSold} sold vs. ${performance.availableInventory} in stock)`;
-      if (!performance.hasInventoryData || performance.sellThroughConfidence >= 0.9) {
-        return base;
-      }
-      return `${base} — ${confidencePct(performance.sellThroughConfidence)}% confidence, small batch so the ratio is noisy`;
-    })();
     const rows: Array<{ label: string; rank: number; weight: number }> = [
       {
         label: "Units sold (log-scaled)",
@@ -161,16 +118,6 @@ function FactorDetail({
         label: "Revenue (log-scaled)",
         rank: performance.revenueRank,
         weight: performance.revenueWeight,
-      },
-      {
-        label: momentumLabel,
-        rank: performance.momentumRank,
-        weight: performance.momentumWeight,
-      },
-      {
-        label: sellThroughLabel,
-        rank: performance.sellThroughRank,
-        weight: performance.sellThroughWeight,
       },
     ];
 
@@ -277,40 +224,8 @@ function ScoreBreakdown({
             <strong>{score.metrics.unitsSold.toLocaleString()}</strong>
           </div>
           <div>
-            <span>Units sold, prior period</span>
-            <strong>
-              {score.breakdown.performance.hasPriorWindowData
-                ? score.breakdown.performance.priorUnitsSold.toLocaleString()
-                : "Not synced yet"}
-            </strong>
-          </div>
-          <div>
-            <span>In stock, current period</span>
-            <strong>
-              {score.breakdown.performance.hasCoverageData
-                ? `${Math.round(score.breakdown.performance.currentWindowCoverage * 100)}%`
-                : "Assumed 100% (no history yet)"}
-            </strong>
-          </div>
-          <div>
-            <span>In stock, prior period</span>
-            <strong>
-              {score.breakdown.performance.hasCoverageData
-                ? `${Math.round(score.breakdown.performance.priorWindowCoverage * 100)}%`
-                : "Assumed 100% (no history yet)"}
-            </strong>
-          </div>
-          <div>
             <span>Revenue</span>
             <strong>{formatCurrency(score.metrics.revenue)}</strong>
-          </div>
-          <div>
-            <span>Available inventory</span>
-            <strong>
-              {score.breakdown.performance.hasInventoryData
-                ? score.breakdown.performance.availableInventory.toLocaleString()
-                : "Not tracked yet"}
-            </strong>
           </div>
           <div>
             <span>Product age</span>

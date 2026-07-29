@@ -84,12 +84,6 @@ export async function GET(request: NextRequest) {
               revenueRank: roundForDisplay(
                 score.breakdown.performance.revenueRank
               ),
-              momentumRank: roundForDisplay(
-                score.breakdown.performance.momentumRank
-              ),
-              sellThroughRank: roundForDisplay(
-                score.breakdown.performance.sellThroughRank
-              ),
             },
             exposure: {
               ...score.breakdown.exposure,
