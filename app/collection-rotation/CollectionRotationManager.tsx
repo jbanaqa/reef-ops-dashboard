@@ -69,6 +69,31 @@ type ControlEditor = {
   products: ControlProduct[];
 };
 
+type HistoryRunProductRef = {
+  productId: string;
+  title: string | null;
+};
+
+type HistoryRun = {
+  id: string;
+  triggerType: string;
+  status: string;
+  productCount: number;
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  undoneAt: string | null;
+  movesCount: number | null;
+  topBefore: HistoryRunProductRef[];
+  topAfter: HistoryRunProductRef[];
+};
+
+type HistoryModalState = {
+  collectionId: string;
+  collectionTitle: string;
+  runs: HistoryRun[];
+};
+
 type SortMode =
   | "count-desc"
   | "count-asc"
@@ -205,6 +230,23 @@ export default function CollectionRotationManager() {
     isSavingControlEditor,
     setIsSavingControlEditor,
   ] = useState(false);
+
+  const [
+    historyModal,
+    setHistoryModal,
+  ] = useState<HistoryModalState | null>(
+    null
+  );
+
+  const [
+    isLoadingHistory,
+    setIsLoadingHistory,
+  ] = useState(false);
+
+  const [
+    expandedHistoryRunId,
+    setExpandedHistoryRunId,
+  ] = useState<string | null>(null);
 
   const [
     activeStarId,
@@ -800,6 +842,53 @@ export default function CollectionRotationManager() {
         false
       );
     }
+  }
+
+  async function openHistory(
+    collection: CollectionSummary
+  ) {
+    setIsLoadingHistory(true);
+    setExpandedHistoryRunId(null);
+    clearMessages();
+
+    try {
+      const response = await fetch(
+        `/api/collection-rotation/history?collectionId=${encodeURIComponent(
+          collection.id
+        )}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      const data = await readResponse<{
+        ok: true;
+        collection: { id: string; title: string };
+        runs: HistoryRun[];
+      }>(response);
+
+      setHistoryModal({
+        collectionId: data.collection.id,
+        collectionTitle: data.collection.title,
+        runs: data.runs,
+      });
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to load rotation history."
+      );
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
+  function historyStatusClass(status: string) {
+    if (status === "Completed") return "rotation-status-success";
+    if (status === "Failed") return "rotation-status-failed";
+    if (status === "Running") return "rotation-status-progress";
+    return "";
   }
 
   function updateControlledTopCount(
@@ -1696,6 +1785,21 @@ export default function CollectionRotationManager() {
                           >
                             Undo
                           </button>
+
+                          <button
+                            type="button"
+                            className="rotation-small-button"
+                            onClick={() =>
+                              void openHistory(
+                                collection
+                              )
+                            }
+                            disabled={
+                              isBusy
+                            }
+                          >
+                            History
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -2174,6 +2278,153 @@ export default function CollectionRotationManager() {
                   ? "Saving..."
                   : "Save Top Positions"}
               </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {historyModal ? (
+        <div
+          className="rotation-control-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setHistoryModal(null);
+            }
+          }}
+        >
+          <section
+            className="rotation-control-modal rotation-history-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-modal-title"
+          >
+            <div className="rotation-control-modal-header">
+              <div>
+                <p className="page-header-eyebrow">
+                  Recent rotations
+                </p>
+
+                <h3
+                  id="history-modal-title"
+                  className="rotation-control-modal-title"
+                >
+                  {historyModal.collectionTitle}
+                </h3>
+
+                <p className="card-description">
+                  {historyModal.runs.length > 0
+                    ? `The last ${historyModal.runs.length} shuffle${historyModal.runs.length === 1 ? "" : "s"} for this collection, most recent first.`
+                    : "No rotations recorded yet for this collection."}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="rotation-modal-close"
+                onClick={() => setHistoryModal(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="rotation-history-list">
+              {isLoadingHistory ? (
+                <p className="rotation-history-empty">
+                  Loading rotation history...
+                </p>
+              ) : historyModal.runs.length === 0 ? (
+                <p className="rotation-history-empty">
+                  Once this collection has shuffled - manually or on
+                  schedule - its recent runs will show up here.
+                </p>
+              ) : (
+                historyModal.runs.map((run) => {
+                  const isExpanded =
+                    expandedHistoryRunId === run.id;
+
+                  return (
+                    <div
+                      key={run.id}
+                      className="rotation-history-row"
+                    >
+                      <button
+                        type="button"
+                        className="rotation-history-row-summary"
+                        onClick={() =>
+                          setExpandedHistoryRunId(
+                            (current) =>
+                              current === run.id
+                                ? null
+                                : run.id
+                          )
+                        }
+                      >
+                        <span className="rotation-score-toggle">
+                          {isExpanded ? "▾" : "▸"}
+                        </span>
+
+                        <span className="rotation-history-row-main">
+                          <span className="rotation-history-row-date">
+                            {formatDate(run.startedAt)}
+                          </span>
+
+                          <span className="rotation-history-row-meta">
+                            {run.triggerType}
+                            {run.movesCount !== null
+                              ? ` · ${run.movesCount} product${run.movesCount === 1 ? "" : "s"} moved`
+                              : ""}
+                            {run.undoneAt ? " · Undone since" : ""}
+                          </span>
+                        </span>
+
+                        <span
+                          className={`rotation-status-pill ${historyStatusClass(run.status)}`}
+                        >
+                          {run.status}
+                        </span>
+                      </button>
+
+                      {isExpanded ? (
+                        <div className="rotation-history-detail">
+                          {run.errorMessage ? (
+                            <p className="rotation-alert rotation-alert-error">
+                              {run.errorMessage}
+                            </p>
+                          ) : null}
+
+                          <div className="rotation-history-columns">
+                            <div>
+                              <h5>Before</h5>
+                              <ol>
+                                {run.topBefore.map((product, index) => (
+                                  <li key={`${run.id}-before-${index}`}>
+                                    {product.title ??
+                                      "Product no longer in this collection"}
+                                  </li>
+                                ))}
+                              </ol>
+                            </div>
+
+                            <div>
+                              <h5>After</h5>
+                              <ol>
+                                {run.topAfter.map((product, index) => (
+                                  <li key={`${run.id}-after-${index}`}>
+                                    {product.title ??
+                                      "Product no longer in this collection"}
+                                  </li>
+                                ))}
+                              </ol>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </section>
         </div>
