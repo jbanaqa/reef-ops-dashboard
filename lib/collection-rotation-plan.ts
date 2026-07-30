@@ -119,6 +119,23 @@ export async function buildCollectionRotationPlan(input: {
   const priorWindowStartedAt = new Date(
     windowStartedAt.getTime() - lookbackDays * 86_400_000
   );
+  // Exposure averages a product's historical position across its recent
+  // runs to decide who's been neglected lately. Averaging across a
+  // collection's ENTIRE run history (as this briefly did) turned out to
+  // wash the signal out: Exposure is a self-correcting fairness mechanic,
+  // so given enough historical rounds, every product's long-run average
+  // position converges toward the same middle-of-the-pack value almost
+  // regardless of its actual quality - that's what "the system successfully
+  // equalized exposure over time" looks like statistically, but it leaves
+  // nothing left to differentiate the NEXT shuffle with. A recent window
+  // keeps Exposure answering "who's been under-exposed lately" instead of
+  // "who's been under-exposed on lifetime average." Time-based (rather than
+  // a fixed run count) so this stays meaningful even if the automation
+  // schedule interval ever changes.
+  const EXPOSURE_HISTORY_WINDOW_DAYS = 3;
+  const exposureWindowStartedAt = new Date(
+    now.getTime() - EXPOSURE_HISTORY_WINDOW_DAYS * 86_400_000
+  );
   const productIds = input.products.map((product) => product.id);
   const numericIds = input.products.map((product) =>
     numericProductId(product.id)
@@ -205,22 +222,21 @@ export async function buildCollectionRotationPlan(input: {
         _sum: { quantitySold: true },
         _count: { orderId: true },
       }),
-      // Every completed, non-undone run for this collection - Exposure
-      // averages a product's historical position across ALL of them, not
-      // just a recent slice, so a product's long-term track record is what
-      // determines how neglected it really is. (This used to cap at the 42
-      // most recent runs; older runs still exist in the database either
-      // way - nothing about a rotation history is ever deleted - that cap
-      // just stopped older runs from counting toward Exposure once a
-      // collection had more than 42.) See the composite index on
-      // [rotationId, status, undoneAt, completedAt] in schema.prisma, added
-      // alongside this change so the now-unbounded query still resolves via
-      // an index scan instead of a full table scan as history grows.
+      // Completed, non-undone runs from the last EXPOSURE_HISTORY_WINDOW_DAYS
+      // days only - see the comment on that constant above for why Exposure
+      // needs a recent window rather than a collection's entire run history.
+      // Older runs still exist in the database either way - nothing about a
+      // rotation history is ever deleted - this just stops them from
+      // counting toward Exposure once they've aged out of the window. The
+      // composite index on [rotationId, status, undoneAt, completedAt] in
+      // schema.prisma covers this query too (the added completedAt lower
+      // bound still resolves via an index range scan).
       prisma.collectionRotationRun.findMany({
         where: {
           rotationId: input.rotation.id,
           status: "Completed",
           undoneAt: null,
+          completedAt: { gte: exposureWindowStartedAt },
         },
         orderBy: { completedAt: "desc" },
         select: { shuffledProductIds: true },
