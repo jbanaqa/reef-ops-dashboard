@@ -196,39 +196,39 @@ function percentileRanks(values: number[]) {
 // The top 12 positions are a fixed concept regardless of collection size -
 // they're literally what renders in the front-of-collection grid and
 // featured sliders - so this tier keeps the same absolute curve it always
-// had: 100% opportunity at position 1, decaying to ~61.5% at position 12.
+// had: 100% opportunity at position 1, decaying to a floor of 60% by
+// position 12.
 //
-// Past position 12 used to decay over a fixed absolute distance (a constant
-// divisor of 20), which reaches its 5% floor by around position 60 no
-// matter how big the collection is. In any collection bigger than that,
-// most products end up tied at the exact same "maximally neglected" value -
-// a product sitting at position 65 scores identically to one sitting at
-// position 650, with zero ability to tell them apart. Expressing the
-// post-12 decay as a fraction of the collection's ACTUAL remaining depth
-// (0 just past the top 12, 1 at the very last product) fixes this: the
-// decay always spans the collection's whole real tail, so there's a
-// meaningful, continuous gradient all the way to the last slot no matter
-// how many products the collection has.
-const EXPOSURE_TAIL_DECAY_RATE = 2.4;
+// Past position 12, opportunity decays as a fraction of the collection's
+// ACTUAL remaining depth (0 just past the top 12, 1 at the very last
+// product) rather than a fixed absolute distance - so the decay always
+// spans the collection's whole real tail no matter how many products it
+// has (a product halfway back scores the same whether the collection has
+// 60 products or 6,000).
+//
+// That decay is LINEAR, not exponential. An earlier exponential version
+// dropped fast early and then flattened out, so most of a large
+// collection's products - which mostly live in the back half of the tail -
+// all landed within a narrow ~20-point band near the top of the scale
+// ("everything scores 70-100, spread under 30"). A straight line spends
+// the same 0-100 "need" range evenly across the ENTIRE tail, proportional
+// to how deep a product actually sits, so the Exposure weight has a real,
+// visible effect without needing to be turned up to dominate the score.
+// It's anchored at TOP_TIER_OPPORTUNITY_FLOOR so there's no jump at the
+// position-12/13 boundary, and runs all the way to 0 opportunity (100
+// "need") at the true last position - the full range is always reachable,
+// regardless of collection size.
+const TOP_TIER_OPPORTUNITY_FLOOR = 0.6;
 
 function opportunityForPosition(position: number, totalProducts: number) {
   if (position <= 12) {
-    return Math.max(0.6, 1 - (position - 1) * 0.035);
+    return Math.max(TOP_TIER_OPPORTUNITY_FLOOR, 1 - (position - 1) * 0.035);
   }
 
   const tailLength = Math.max(1, totalProducts - 12);
   const depthIntoTail = clamp((position - 12) / tailLength, 0, 1);
 
-  // EXPOSURE_TAIL_DECAY_RATE (2.4) is chosen so a product in the very last
-  // slot of ANY collection lands at the same ~5% floor the old fixed-decay
-  // curve used (0.55 * e^-2.4 ≈ 0.05) - preserving "the deepest-buried
-  // products still read as roughly equally neglected" while fixing the fact
-  // every product used to hit that floor at the same fixed absolute
-  // position regardless of how deep the collection actually goes.
-  return Math.max(
-    0.05,
-    0.55 * Math.exp(-depthIntoTail * EXPOSURE_TAIL_DECAY_RATE)
-  );
+  return TOP_TIER_OPPORTUNITY_FLOOR * (1 - depthIntoTail);
 }
 
 function exposureBreakdown(

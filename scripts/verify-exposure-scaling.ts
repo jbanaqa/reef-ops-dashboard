@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 
 import { scoreProducts, STRATEGY_PRESETS } from "../lib/collection-rotation-scoring";
 
-// Reproduces the exact complaint: in a large collection, the old
-// opportunityForPosition() curve decayed over a FIXED absolute distance
-// (floor reached by ~position 60 regardless of collection size), so any
-// product sitting deeper than that got an identical, maximally-pinned
-// Exposure score with zero differentiation - "all of them have exposure
-// over 80, spread under 20." This proves the new relative-depth curve
-// produces a real, distinct gradient across the ENTIRE depth of a large
-// collection instead of flatlining past a fixed absolute position.
+// This script has now verified two successive Exposure fixes:
+//   1. (original) The old absolute-distance decay flatlined past a FIXED
+//      position (~60) regardless of collection size - "all of them have
+//      exposure over 80, spread under 20." Fixed by expressing the tail
+//      decay as a fraction of the collection's actual remaining depth.
+//   2. (this version) That relative-depth fix used an EXPONENTIAL curve,
+//      which drops fast early and then flattens - so most of a large
+//      collection's products (which mostly live in the back half of the
+//      tail) still all landed in a narrow ~20-point band near the top of
+//      the scale ("everything scores 70-100"). Fixed by switching the tail
+//      to a LINEAR decay, so "need" is spread evenly across the entire
+//      0-100 range in proportion to how deep a product actually sits.
 
 function buildProducts(count: number) {
   return Array.from({ length: count }, (_, index) => ({
@@ -50,9 +54,7 @@ function buildFlatMetrics(count: number) {
 // A 300-product collection with NO run history yet (cold start), so every
 // product's Exposure falls back to opportunityForPosition(currentPosition).
 // Products are numbered in their current Shopify order, so product P250
-// really does sit at position 250 of 300 - deep in what used to be the
-// flatlined dead zone (anything past position ~60 used to be pinned at
-// identical 95.0 exposure no matter how much deeper it went).
+// really does sit at position 250 of 300.
 const PRODUCT_COUNT = 300;
 const products = buildProducts(PRODUCT_COUNT);
 const metrics = buildFlatMetrics(PRODUCT_COUNT);
@@ -76,10 +78,8 @@ const exposures = deepPositions.map((position) => ({
 console.log("Exposure by deep position in a 300-product collection:");
 console.log(exposures);
 
-// The core bug: under the old fixed-distance decay, positions 65 through
-// 300 were ALL pinned at exactly 95.0 - identical, no differentiation.
-// Confirm that's no longer true: each deeper position should score
-// meaningfully higher (more "neglected") than the one before it.
+// Each deeper position should score meaningfully higher (more "neglected")
+// than the one before it - no flatlining anywhere in the tail.
 for (let index = 1; index < exposures.length; index += 1) {
   assert.ok(
     exposures[index].exposure > exposures[index - 1].exposure + 0.5,
@@ -87,19 +87,38 @@ for (let index = 1; index < exposures.length; index += 1) {
   );
 }
 
-// The very last product in the collection should still land at roughly the
-// same ~95 "maximally neglected" ceiling the old curve used, just now
-// reached proportionally at the true end of the collection instead of at a
-// fixed absolute position.
+// The linear tail is anchored to run all the way to 0 opportunity - so the
+// VERY last product in any collection should now land at exactly 100 (fully
+// "needs exposure"), not an artificial ~95 floor.
 assert.ok(
-  Math.abs(byId.get(`P${PRODUCT_COUNT}`)!.exposure - 95) < 1,
-  `Expected the very last product to sit near 95 exposure, got ${byId.get(`P${PRODUCT_COUNT}`)!.exposure}`
+  Math.abs(byId.get(`P${PRODUCT_COUNT}`)!.exposure - 100) < 0.5,
+  `Expected the very last product to sit at exactly 100 exposure, got ${byId.get(`P${PRODUCT_COUNT}`)!.exposure}`
 );
 
-// Now prove scale-invariance: the SAME relative depth (e.g. halfway through
-// the tail) should produce roughly the same exposure whether the collection
-// has 60 products or 600 - the whole point of switching to a relative-depth
-// curve instead of an absolute one.
+// The core regression this version fixes: under the old exponential tail,
+// a product only a third of the way back (position 100 of 300, ~31% into
+// the tail) already read as 73.6 - deep into the "everything's 70-100"
+// compression zone. The new linear tail should place that same position
+// meaningfully lower, proving the "need" range is spread across the WHOLE
+// tail rather than bunched near the top.
+assert.ok(
+  byId.get("P100")!.exposure < 65,
+  `Expected position 100 of 300 to score comfortably below the old compressed ~70-100 band, got ${byId.get("P100")!.exposure}`
+);
+
+// And the halfway-through-the-collection position (150 of 300, 48% into
+// the tail) should land close to the middle of the 0-100 range, not
+// bunched near the top - proof the linear curve actually uses the full
+// scale instead of saturating early.
+assert.ok(
+  Math.abs(byId.get("P150")!.exposure - 68.75) < 0.5,
+  `Expected position 150 of 300 to land near the middle of the range (~68.75), got ${byId.get("P150")!.exposure}`
+);
+
+// Now prove scale-invariance still holds: the SAME relative depth (e.g.
+// halfway through the tail) should produce the SAME exposure whether the
+// collection has 60 products or 600 - the whole point of measuring depth
+// as a fraction of each collection's own remaining length.
 function exposureAtRelativeTailDepth(totalCount: number, fraction: number) {
   const testProducts = buildProducts(totalCount);
   const testMetrics = buildFlatMetrics(totalCount);
@@ -126,6 +145,14 @@ console.log(
 assert.ok(
   Math.abs(smallCollectionMidTail - largeCollectionMidTail) < 1,
   `Expected exposure at the same relative tail depth to be scale-invariant, got ${smallCollectionMidTail} (60 products) vs ${largeCollectionMidTail} (600 products)`
+);
+
+// The linear formula puts 50% tail depth at exactly 70.0 need
+// (opportunity = 0.6 * (1 - 0.5) = 0.3, need = 70) - pin that down
+// explicitly so a future change can't silently drift the curve's shape.
+assert.ok(
+  Math.abs(smallCollectionMidTail - 70) < 0.5,
+  `Expected 50% tail depth to land at exactly 70.0 need, got ${smallCollectionMidTail}`
 );
 
 console.log("Exposure scaling verification passed.");
