@@ -92,6 +92,7 @@ function rowObject(
 export async function fetchShopifyReportMetrics(
   lookbackDays: number,
   periodOffset = 0
+  
 ): Promise<AnalyticsRow[]> {
   // periodOffset 0 = the window ending now. periodOffset 1 = the
   // equal-length window immediately before that one (used to compute sales
