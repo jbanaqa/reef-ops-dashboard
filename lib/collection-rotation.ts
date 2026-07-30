@@ -21,6 +21,13 @@ export type CollectionProduct = {
   legacyResourceId: string;
   title: string;
   handle: string;
+  // ACTIVE, ARCHIVED, or DRAFT - Shopify collection membership doesn't drop
+  // a product just because it's been archived or unpublished, but neither
+  // status is ever visible/purchasable on the storefront. See
+  // collection-rotation-plan.ts, which excludes non-ACTIVE products from
+  // scoring for the same reason it excludes out-of-stock ones: there's no
+  // real "position" to compute for something Shopify won't actually show.
+  status: string;
   featuredImage: {
     url: string;
     altText: string | null;
@@ -174,6 +181,7 @@ const COLLECTION_PRODUCTS_QUERY = `
           legacyResourceId
           title
           handle
+          status
           createdAt
           featuredImage {
             url

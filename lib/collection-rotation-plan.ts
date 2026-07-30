@@ -371,18 +371,37 @@ export async function buildCollectionRotationPlan(input: {
     const metric = metrics.get(numericProductId(productId));
     return Boolean(metric?.hasInventoryData) && (metric?.availableInventory ?? 0) <= 0;
   }
+  // Same reasoning applies to archived/draft products: Shopify collection
+  // membership doesn't automatically drop a product just because it's been
+  // archived or unpublished, but neither status is ever visible or
+  // purchasable on the storefront either - so there's nothing to score or
+  // place here regardless of what its inventory count happens to read.
+  function isUnpublished(product: CollectionProduct) {
+    return product.status !== "ACTIVE";
+  }
   const inStockProducts = input.products.filter(
-    (product) => !isConfirmedOutOfStock(product.id)
+    (product) => !isUnpublished(product) && !isConfirmedOutOfStock(product.id)
   );
-  const outOfStockProducts = input.products.filter((product) =>
-    isConfirmedOutOfStock(product.id)
+  // Preserves the products' original relative order (rather than grouping
+  // "archived" and "out of stock" into two separately-concatenated blocks),
+  // same as the single-reason version this replaces.
+  const unavailableProducts = input.products.filter(
+    (product) => isUnpublished(product) || isConfirmedOutOfStock(product.id)
   );
+  const archivedCount = unavailableProducts.filter((product) =>
+    isUnpublished(product)
+  ).length;
+  // Doesn't double-count a product that's both archived AND out of stock -
+  // that one's counted under archivedCount only, since archived/unpublished
+  // is the more permanent of the two reasons.
+  const outOfStockCount = unavailableProducts.length - archivedCount;
   // scoreProducts derives "previousPosition" (and Exposure's fallback
   // position/collection-size) from each product's index in the array it's
-  // given, so once out-of-stock products are filtered out before the call,
+  // given, so once unavailable products are filtered out before the call,
   // that index no longer matches the product's real current position or
   // the real collection size. Supply the real values explicitly so both
-  // stay accurate even though scoring itself only sees the in-stock subset.
+  // stay accurate even though scoring itself only sees the in-stock,
+  // published subset.
   const realPositionByProductId = new Map(
     input.products.map((product, index) => [product.id, index + 1])
   );
@@ -405,13 +424,13 @@ export async function buildCollectionRotationPlan(input: {
     realCollectionSize: productIds.length,
   });
 
-  const stockAwareOrder = [
+  const availabilityAwareOrder = [
     ...scores.map((score) => score.productId),
-    ...outOfStockProducts.map((product) => product.id),
+    ...unavailableProducts.map((product) => product.id),
   ];
   const targetProductIds = applyControlledPositions(
     productIds,
-    stockAwareOrder,
+    availabilityAwareOrder,
     input.rotation
   );
   const targetPosition = new Map(
@@ -440,12 +459,13 @@ export async function buildCollectionRotationPlan(input: {
     weights: configuredWeights(input.rotation),
     targetProductIds,
     scores,
-    // Out-of-stock products excluded from `scores` above, still present
-    // (moved to the end of the collection, in their existing relative
-    // order) in `targetProductIds`. Surfaced separately so the UI can be
-    // transparent about why the count here is lower than the collection's
-    // total product count.
-    outOfStockCount: outOfStockProducts.length,
+    // Out-of-stock and archived/draft products are both excluded from
+    // `scores` above, still present (moved to the end of the collection, in
+    // their existing relative order) in `targetProductIds`. Surfaced
+    // separately, and split by reason, so the UI can be transparent about
+    // why the count here is lower than the collection's total product count.
+    outOfStockCount,
+    archivedCount,
     confidence,
     sources: [...sourceSet],
     runHistoryCount: recentRuns.length,

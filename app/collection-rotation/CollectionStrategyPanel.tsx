@@ -359,6 +359,7 @@ export default function CollectionStrategyPanel({
     sources: string[];
     runHistoryCount: number;
     outOfStockCount: number;
+    archivedCount: number;
   } | null>(null);
   // The preview endpoint already returns every product in the collection,
   // scored and sorted by proposed position (i.e. descending overall score) -
@@ -640,6 +641,7 @@ export default function CollectionStrategyPanel({
           sources: string[];
           runHistoryCount: number;
           outOfStockCount: number;
+          archivedCount: number;
         };
       }>(
         await fetch(
@@ -926,12 +928,12 @@ export default function CollectionStrategyPanel({
             <div>
               <h4>
                 {viewAllProducts
-                  ? `All ${scores.length} in-stock product${scores.length === 1 ? "" : "s"}, ranked by overall score`
+                  ? `All ${scores.length} scored product${scores.length === 1 ? "" : "s"}, ranked by overall score`
                   : "Proposed first 12 products"}
               </h4>
               <p>
                 {viewAllProducts
-                  ? "Every in-stock product in this collection with its full score breakdown, sorted highest to lowest — exactly the order the next shuffle would apply."
+                  ? "Every in-stock, active product in this collection with its full score breakdown, sorted highest to lowest — exactly the order the next shuffle would apply."
                   : "These are the products customers see first in collection grids and featured sliders."}
               </p>
             </div>
@@ -940,13 +942,23 @@ export default function CollectionStrategyPanel({
             </span>
           </div>
 
-          {previewMeta && previewMeta.outOfStockCount > 0 ? (
+          {previewMeta &&
+          (previewMeta.outOfStockCount > 0 ||
+            previewMeta.archivedCount > 0) ? (
             <p className="rotation-score-detail-note rotation-out-of-stock-note rotation-score-oos-summary">
-              {previewMeta.outOfStockCount} out-of-stock product
-              {previewMeta.outOfStockCount === 1 ? "" : "s"} excluded from
-              scoring — Shopify wouldn&apos;t show or sell them in a top slot
-              anyway, so they&apos;re left out of the ranking entirely and
-              moved to the end of the collection instead.
+              {[
+                previewMeta.outOfStockCount > 0
+                  ? `${previewMeta.outOfStockCount} out-of-stock product${previewMeta.outOfStockCount === 1 ? "" : "s"}`
+                  : null,
+                previewMeta.archivedCount > 0
+                  ? `${previewMeta.archivedCount} archived or unpublished product${previewMeta.archivedCount === 1 ? "" : "s"}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" and ")}{" "}
+              excluded from scoring — Shopify wouldn&apos;t show or sell them
+              in a top slot anyway, so they&apos;re left out of the ranking
+              entirely and moved to the end of the collection instead.
             </p>
           ) : null}
 
