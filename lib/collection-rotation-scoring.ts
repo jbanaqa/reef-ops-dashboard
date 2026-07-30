@@ -196,9 +196,10 @@ function percentileRanks(values: number[]) {
 // The top 12 positions are a fixed concept regardless of collection size -
 // they're literally what renders in the front-of-collection grid and
 // featured sliders - so this tier keeps the same absolute curve it always
-// had: 100% opportunity at position 1, decaying to a floor of 60% by
-// position 12.
-//
+// had: 100% opportunity at position 1, decaying linearly to exactly this
+// value by position 12 (1 - 11 * 0.035).
+const TOP_TIER_MIN_OPPORTUNITY = 1 - 11 * 0.035;
+
 // Past position 12, opportunity decays as a fraction of the collection's
 // ACTUAL remaining depth (0 just past the top 12, 1 at the very last
 // product) rather than a fixed absolute distance - so the decay always
@@ -214,21 +215,20 @@ function percentileRanks(values: number[]) {
 // the same 0-100 "need" range evenly across the ENTIRE tail, proportional
 // to how deep a product actually sits, so the Exposure weight has a real,
 // visible effect without needing to be turned up to dominate the score.
-// It's anchored at TOP_TIER_OPPORTUNITY_FLOOR so there's no jump at the
-// position-12/13 boundary, and runs all the way to 0 opportunity (100
+// It starts at TOP_TIER_MIN_OPPORTUNITY - the EXACT value position 12 ends
+// on, not a separately-chosen approximation - so there's truly no jump at
+// the position-12/13 boundary, and runs all the way to 0 opportunity (100
 // "need") at the true last position - the full range is always reachable,
 // regardless of collection size.
-const TOP_TIER_OPPORTUNITY_FLOOR = 0.6;
-
 function opportunityForPosition(position: number, totalProducts: number) {
   if (position <= 12) {
-    return Math.max(TOP_TIER_OPPORTUNITY_FLOOR, 1 - (position - 1) * 0.035);
+    return Math.max(TOP_TIER_MIN_OPPORTUNITY, 1 - (position - 1) * 0.035);
   }
 
   const tailLength = Math.max(1, totalProducts - 12);
   const depthIntoTail = clamp((position - 12) / tailLength, 0, 1);
 
-  return TOP_TIER_OPPORTUNITY_FLOOR * (1 - depthIntoTail);
+  return TOP_TIER_MIN_OPPORTUNITY * (1 - depthIntoTail);
 }
 
 function exposureBreakdown(

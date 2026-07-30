@@ -111,8 +111,17 @@ assert.ok(
 // bunched near the top - proof the linear curve actually uses the full
 // scale instead of saturating early.
 assert.ok(
-  Math.abs(byId.get("P150")!.exposure - 68.75) < 0.5,
-  `Expected position 150 of 300 to land near the middle of the range (~68.75), got ${byId.get("P150")!.exposure}`
+  Math.abs(byId.get("P150")!.exposure - 67.97) < 0.5,
+  `Expected position 150 of 300 to land near the middle of the range (~67.97), got ${byId.get("P150")!.exposure}`
+);
+
+// Position 12 (the last top-tier slot) and position 13 (the first tail
+// slot) should read as nearly identical - proof the tail curve is
+// genuinely anchored to the top tier's actual ending value, not a
+// separately-chosen approximation that happens to be close.
+assert.ok(
+  Math.abs(byId.get("P12")!.exposure - byId.get("P13")!.exposure) < 1,
+  `Expected no meaningful jump between position 12 and 13, got ${byId.get("P12")!.exposure} vs ${byId.get("P13")!.exposure}`
 );
 
 // Now prove scale-invariance still holds: the SAME relative depth (e.g.
@@ -147,12 +156,13 @@ assert.ok(
   `Expected exposure at the same relative tail depth to be scale-invariant, got ${smallCollectionMidTail} (60 products) vs ${largeCollectionMidTail} (600 products)`
 );
 
-// The linear formula puts 50% tail depth at exactly 70.0 need
-// (opportunity = 0.6 * (1 - 0.5) = 0.3, need = 70) - pin that down
-// explicitly so a future change can't silently drift the curve's shape.
+// The linear formula puts 50% tail depth at exactly 69.25 need
+// (opportunity = 0.615 * (1 - 0.5) = 0.3075, need = 69.25, where 0.615 is
+// the exact opportunity position 12 ends on) - pin that down explicitly so
+// a future change can't silently drift the curve's shape.
 assert.ok(
-  Math.abs(smallCollectionMidTail - 70) < 0.5,
-  `Expected 50% tail depth to land at exactly 70.0 need, got ${smallCollectionMidTail}`
+  Math.abs(smallCollectionMidTail - 69.25) < 0.5,
+  `Expected 50% tail depth to land at exactly 69.25 need, got ${smallCollectionMidTail}`
 );
 
 console.log("Exposure scaling verification passed.");
