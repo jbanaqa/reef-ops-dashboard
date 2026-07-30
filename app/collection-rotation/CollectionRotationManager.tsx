@@ -25,6 +25,8 @@ type CollectionSummary = {
   strategy: string;
   controlledTopCount: number;
   controlledAssignedCount: number;
+  controlledBottomCount: number;
+  controlledBottomAssignedCount: number;
   lastShuffledAt: string | null;
   lastStatus: string | null;
   lastError: string | null;
@@ -60,12 +62,20 @@ type ControlAssignment = {
   productId: string;
 };
 
+// "TOP" pins count down from the front of the collection (position 1 = the
+// very first slot); "BOTTOM" pins count up from the end (position 1 = the
+// very last slot, position 2 = second-to-last, etc.) - mirrors the zone
+// concept in applyControlledPositions() on the server.
+type ControlZone = "TOP" | "BOTTOM";
+
 type ControlEditor = {
   collectionId: string;
   collectionTitle: string;
   productCount: number;
   controlledTopCount: number;
   assignments: ControlAssignment[];
+  controlledBottomCount: number;
+  bottomAssignments: ControlAssignment[];
   products: ControlProduct[];
 };
 
@@ -200,11 +210,12 @@ export default function CollectionRotationManager() {
   );
 
   const [
-    selectedControlPosition,
-    setSelectedControlPosition,
-  ] = useState<number | null>(
-    null
-  );
+    selectedControlSlot,
+    setSelectedControlSlot,
+  ] = useState<{
+    zone: ControlZone;
+    position: number;
+  } | null>(null);
 
   const [
     productSearch,
@@ -508,19 +519,42 @@ export default function CollectionRotationManager() {
           .trim()
           .toLowerCase();
 
+      const isCurrentSlot = (
+        zone: ControlZone,
+        position: number
+      ) =>
+        selectedControlSlot?.zone ===
+          zone &&
+        selectedControlSlot?.position ===
+          position;
+
       const assignedIds =
-        new Set(
-          controlEditor.assignments
+        new Set([
+          ...controlEditor.assignments
             .filter(
               (assignment) =>
-                assignment.position !==
-                selectedControlPosition
+                !isCurrentSlot(
+                  "TOP",
+                  assignment.position
+                )
             )
             .map(
               (assignment) =>
                 assignment.productId
+            ),
+          ...controlEditor.bottomAssignments
+            .filter(
+              (assignment) =>
+                !isCurrentSlot(
+                  "BOTTOM",
+                  assignment.position
+                )
             )
-        );
+            .map(
+              (assignment) =>
+                assignment.productId
+            ),
+        ]);
 
       return controlEditor.products
         .filter(
@@ -550,7 +584,7 @@ export default function CollectionRotationManager() {
     }, [
       controlEditor,
       productSearch,
-      selectedControlPosition,
+      selectedControlSlot,
     ]);
 
   const completedCount =
@@ -805,6 +839,9 @@ export default function CollectionRotationManager() {
           controlledTopCount: number;
           assignments:
             ControlAssignment[];
+          controlledBottomCount: number;
+          bottomAssignments:
+            ControlAssignment[];
           products:
             ControlProduct[];
         }>(response);
@@ -820,14 +857,24 @@ export default function CollectionRotationManager() {
           data.controlledTopCount,
         assignments:
           data.assignments,
+        controlledBottomCount:
+          data.controlledBottomCount,
+        bottomAssignments:
+          data.bottomAssignments,
         products:
           data.products,
       });
 
-      setSelectedControlPosition(
+      setSelectedControlSlot(
         data.controlledTopCount > 0
-          ? 1
-          : null
+          ? { zone: "TOP", position: 1 }
+          : data.controlledBottomCount >
+              0
+            ? {
+                zone: "BOTTOM",
+                position: 1,
+              }
+            : null
       );
 
       setProductSearch("");
@@ -891,7 +938,29 @@ export default function CollectionRotationManager() {
     return "";
   }
 
-  function updateControlledTopCount(
+  // Field names differ (controlledTopCount/assignments vs.
+  // controlledBottomCount/bottomAssignments) rather than a single indexed
+  // record, so ControlEditor stays a flat, easily-serialized shape matching
+  // the API's request/response bodies - these two small helpers translate
+  // "which zone" into "which field" everywhere below.
+  function countField(
+    zone: ControlZone
+  ): "controlledTopCount" | "controlledBottomCount" {
+    return zone === "TOP"
+      ? "controlledTopCount"
+      : "controlledBottomCount";
+  }
+
+  function assignmentsField(
+    zone: ControlZone
+  ): "assignments" | "bottomAssignments" {
+    return zone === "TOP"
+      ? "assignments"
+      : "bottomAssignments";
+  }
+
+  function updateControlledCount(
+    zone: ControlZone,
     nextCount: number
   ) {
     setControlEditor(
@@ -899,6 +968,11 @@ export default function CollectionRotationManager() {
         if (!currentEditor) {
           return currentEditor;
         }
+
+        const otherZoneCount =
+          zone === "TOP"
+            ? currentEditor.controlledBottomCount
+            : currentEditor.controlledTopCount;
 
         const normalizedCount =
           Math.min(
@@ -908,15 +982,21 @@ export default function CollectionRotationManager() {
               ),
               0
             ),
-            currentEditor.productCount
+            Math.max(
+              currentEditor.productCount -
+                otherZoneCount,
+              0
+            )
           );
 
         return {
           ...currentEditor,
-          controlledTopCount:
+          [countField(zone)]:
             normalizedCount,
-          assignments:
-            currentEditor.assignments.filter(
+          [assignmentsField(zone)]:
+            currentEditor[
+              assignmentsField(zone)
+            ].filter(
               (assignment) =>
                 assignment.position <=
                 normalizedCount
@@ -925,19 +1005,24 @@ export default function CollectionRotationManager() {
       }
     );
 
-    setSelectedControlPosition(
-      (currentPosition) => {
+    setSelectedControlSlot(
+      (currentSlot) => {
         if (
-          !currentPosition ||
-          currentPosition >
-            nextCount
+          currentSlot?.zone !== zone
+        ) {
+          return currentSlot;
+        }
+
+        if (
+          currentSlot.position >
+          nextCount
         ) {
           return nextCount > 0
-            ? 1
+            ? { zone, position: 1 }
             : null;
         }
 
-        return currentPosition;
+        return currentSlot;
       }
     );
   }
@@ -947,10 +1032,13 @@ export default function CollectionRotationManager() {
   ) {
     if (
       !controlEditor ||
-      !selectedControlPosition
+      !selectedControlSlot
     ) {
       return;
     }
+
+    const { zone, position } =
+      selectedControlSlot;
 
     setControlEditor(
       (currentEditor) => {
@@ -958,20 +1046,24 @@ export default function CollectionRotationManager() {
           return currentEditor;
         }
 
+        const field =
+          assignmentsField(zone);
+
         const withoutCurrentPosition =
-          currentEditor.assignments.filter(
+          currentEditor[
+            field
+          ].filter(
             (assignment) =>
               assignment.position !==
-              selectedControlPosition
+              position
           );
 
         return {
           ...currentEditor,
-          assignments: [
+          [field]: [
             ...withoutCurrentPosition,
             {
-              position:
-                selectedControlPosition,
+              position,
               productId,
             },
           ].sort(
@@ -985,6 +1077,7 @@ export default function CollectionRotationManager() {
   }
 
   function removePositionAssignment(
+    zone: ControlZone,
     position: number
   ) {
     setControlEditor(
@@ -993,20 +1086,25 @@ export default function CollectionRotationManager() {
           return currentEditor;
         }
 
+        const field =
+          assignmentsField(zone);
+
         return {
           ...currentEditor,
-          assignments:
-            currentEditor.assignments.filter(
-              (assignment) =>
-                assignment.position !==
-                position
-            ),
+          [field]: currentEditor[
+            field
+          ].filter(
+            (assignment) =>
+              assignment.position !==
+              position
+          ),
         };
       }
     );
   }
 
   function moveAssignment(
+    zone: ControlZone,
     position: number,
     direction: -1 | 1
   ) {
@@ -1017,13 +1115,20 @@ export default function CollectionRotationManager() {
     const targetPosition =
       position + direction;
 
+    const zoneCount =
+      zone === "TOP"
+        ? controlEditor.controlledTopCount
+        : controlEditor.controlledBottomCount;
+
     if (
       targetPosition < 1 ||
-      targetPosition >
-        controlEditor.controlledTopCount
+      targetPosition > zoneCount
     ) {
       return;
     }
+
+    const field =
+      assignmentsField(zone);
 
     setControlEditor(
       (currentEditor) => {
@@ -1032,7 +1137,9 @@ export default function CollectionRotationManager() {
         }
 
         const sourceAssignment =
-          currentEditor.assignments.find(
+          currentEditor[
+            field
+          ].find(
             (assignment) =>
               assignment.position ===
               position
@@ -1043,7 +1150,9 @@ export default function CollectionRotationManager() {
         }
 
         const targetAssignment =
-          currentEditor.assignments.find(
+          currentEditor[
+            field
+          ].find(
             (assignment) =>
               assignment.position ===
               targetPosition
@@ -1051,41 +1160,43 @@ export default function CollectionRotationManager() {
 
         return {
           ...currentEditor,
-          assignments:
-            currentEditor.assignments.map(
-              (assignment) => {
-                if (
-                  assignment.position ===
-                  position
-                ) {
-                  return {
-                    ...assignment,
-                    position:
-                      targetPosition,
-                  };
-                }
-
-                if (
-                  targetAssignment &&
-                  assignment.position ===
-                    targetPosition
-                ) {
-                  return {
-                    ...assignment,
-                    position,
-                  };
-                }
-
-                return assignment;
+          [field]: currentEditor[
+            field
+          ].map(
+            (assignment) => {
+              if (
+                assignment.position ===
+                position
+              ) {
+                return {
+                  ...assignment,
+                  position:
+                    targetPosition,
+                };
               }
-            ),
+
+              if (
+                targetAssignment &&
+                assignment.position ===
+                  targetPosition
+              ) {
+                return {
+                  ...assignment,
+                  position,
+                };
+              }
+
+              return assignment;
+            }
+          ),
         };
       }
     );
 
-    setSelectedControlPosition(
-      targetPosition
-    );
+    setSelectedControlSlot({
+      zone,
+      position: targetPosition,
+    });
   }
 
   async function saveControlEditor() {
@@ -1115,6 +1226,10 @@ export default function CollectionRotationManager() {
               controlEditor.controlledTopCount,
             assignments:
               controlEditor.assignments,
+            controlledBottomCount:
+              controlEditor.controlledBottomCount,
+            bottomAssignments:
+              controlEditor.bottomAssignments,
           }),
         }
       );
@@ -1124,19 +1239,32 @@ export default function CollectionRotationManager() {
           ok: true;
           controlledTopCount: number;
           controlledAssignedCount: number;
+          controlledBottomCount: number;
+          controlledBottomAssignedCount: number;
         }>(response);
 
+      const summaryParts = [
+        `top ${data.controlledTopCount} (${data.controlledAssignedCount} assigned)`,
+      ];
+
+      if (data.controlledBottomCount > 0) {
+        summaryParts.push(
+          `bottom ${data.controlledBottomCount} (${data.controlledBottomAssignedCount} assigned)`
+        );
+      }
+
       setSuccessMessage(
-        `${controlEditor.collectionTitle}: top ${data.controlledTopCount} positions saved with ${data.controlledAssignedCount} assigned product${
-          data.controlledAssignedCount ===
+        `${controlEditor.collectionTitle}: ${summaryParts.join(", ")} position${
+          data.controlledTopCount +
+            data.controlledBottomCount ===
           1
             ? ""
             : "s"
-        }.`
+        } saved.`
       );
 
       setControlEditor(null);
-      setSelectedControlPosition(
+      setSelectedControlSlot(
         null
       );
 
@@ -1271,13 +1399,30 @@ export default function CollectionRotationManager() {
               movesCount: number;
               controlledTopCount: number;
               controlledAssignedCount: number;
+              controlledBottomCount: number;
+              controlledBottomAssignedCount: number;
             };
           }>(response);
 
-        const controlMessage =
-          data.result
+        const controlMessageParts = [
+          ...(data.result
             .controlledTopCount > 0
-            ? ` Top ${data.result.controlledTopCount} controlled; ${data.result.controlledAssignedCount} specifically assigned.`
+            ? [
+                `top ${data.result.controlledTopCount} controlled (${data.result.controlledAssignedCount} assigned)`,
+              ]
+            : []),
+          ...(data.result
+            .controlledBottomCount > 0
+            ? [
+                `bottom ${data.result.controlledBottomCount} controlled (${data.result.controlledBottomAssignedCount} assigned)`,
+              ]
+            : []),
+        ];
+
+        const controlMessage =
+          controlMessageParts.length >
+          0
+            ? ` ${controlMessageParts.join("; ")}.`
             : "";
 
         setBatchResults(
@@ -1388,6 +1533,168 @@ export default function CollectionRotationManager() {
     } finally {
       setActiveUndoId(null);
     }
+  }
+
+  function renderControlPositionPanel(
+    zone: ControlZone,
+    title: string,
+    helpText: string,
+    count: number,
+    assignments: ControlAssignment[]
+  ) {
+    if (!controlEditor) {
+      return null;
+    }
+
+    return (
+      <div className="rotation-position-panel">
+        <h4 className="rotation-control-panel-title">
+          {title}
+        </h4>
+
+        <p className="rotation-control-panel-subtitle">
+          {helpText}
+        </p>
+
+        {count === 0 ? (
+          <div className="rotation-control-empty">
+            This collection is fully
+            random. Increase the
+            controlled count to assign
+            products.
+          </div>
+        ) : (
+          <div className="rotation-position-list">
+            {Array.from(
+              { length: count },
+              (_, index) => index + 1
+            ).map((position) => {
+              const assignment =
+                assignments.find(
+                  (item) =>
+                    item.position ===
+                    position
+                );
+
+              const product =
+                assignment
+                  ? controlEditor.products.find(
+                      (item) =>
+                        item.id ===
+                        assignment.productId
+                    )
+                  : null;
+
+              const isActive =
+                selectedControlSlot?.zone ===
+                  zone &&
+                selectedControlSlot?.position ===
+                  position;
+
+              return (
+                <button
+                  key={`${zone}-${position}`}
+                  type="button"
+                  className={`rotation-position-slot ${
+                    isActive
+                      ? "rotation-position-slot-active"
+                      : ""
+                  }`}
+                  onClick={() =>
+                    setSelectedControlSlot({
+                      zone,
+                      position,
+                    })
+                  }
+                >
+                  <span className="rotation-position-number">
+                    {position}
+                  </span>
+
+                  {product ? (
+                    <>
+                      {product.imageUrl ? (
+                        <img
+                          src={
+                            product.imageUrl
+                          }
+                          alt=""
+                          className="rotation-position-image"
+                        />
+                      ) : (
+                        <div className="rotation-position-image rotation-position-image-empty">
+                          No image
+                        </div>
+                      )}
+
+                      <span className="rotation-position-product">
+                        {product.title}
+                      </span>
+
+                      <span className="rotation-position-buttons">
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(
+                            event
+                          ) => {
+                            event.stopPropagation();
+                            moveAssignment(
+                              zone,
+                              position,
+                              -1
+                            );
+                          }}
+                        >
+                          ↑
+                        </span>
+
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(
+                            event
+                          ) => {
+                            event.stopPropagation();
+                            moveAssignment(
+                              zone,
+                              position,
+                              1
+                            );
+                          }}
+                        >
+                          ↓
+                        </span>
+
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(
+                            event
+                          ) => {
+                            event.stopPropagation();
+                            removePositionAssignment(
+                              zone,
+                              position
+                            );
+                          }}
+                        >
+                          ×
+                        </span>
+                      </span>
+                    </>
+                  ) : (
+                    <span className="rotation-position-random">
+                      Random product
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -1711,18 +2018,40 @@ export default function CollectionRotationManager() {
 
                       <td>
                         {collection.controlledTopCount >
-                        0 ? (
-                          <span className="rotation-control-pill">
-                            Top{" "}
-                            {
-                              collection.controlledTopCount
-                            }
-                            :{" "}
-                            {
-                              collection.controlledAssignedCount
-                            }{" "}
-                            assigned
-                          </span>
+                          0 ||
+                        collection.controlledBottomCount >
+                          0 ? (
+                          <>
+                            {collection.controlledTopCount >
+                            0 ? (
+                              <span className="rotation-control-pill">
+                                Top{" "}
+                                {
+                                  collection.controlledTopCount
+                                }
+                                :{" "}
+                                {
+                                  collection.controlledAssignedCount
+                                }{" "}
+                                assigned
+                              </span>
+                            ) : null}
+
+                            {collection.controlledBottomCount >
+                            0 ? (
+                              <span className="rotation-control-pill">
+                                Bottom{" "}
+                                {
+                                  collection.controlledBottomCount
+                                }
+                                :{" "}
+                                {
+                                  collection.controlledBottomAssignedCount
+                                }{" "}
+                                assigned
+                              </span>
+                            ) : null}
+                          </>
                         ) : (
                           <span className="rotation-muted-text">
                             {strategyLabel(
@@ -1981,14 +2310,16 @@ export default function CollectionRotationManager() {
                   type="number"
                   min={0}
                   max={
-                    controlEditor.productCount
+                    controlEditor.productCount -
+                    controlEditor.controlledBottomCount
                   }
                   className="form-input rotation-control-count-input"
                   value={
                     controlEditor.controlledTopCount
                   }
                   onChange={(event) =>
-                    updateControlledTopCount(
+                    updateControlledCount(
+                      "TOP",
                       Number(
                         event.target.value
                       )
@@ -2005,158 +2336,63 @@ export default function CollectionRotationManager() {
               </p>
             </div>
 
+            <div className="rotation-control-count-row">
+              <div>
+                <label
+                  className="form-label"
+                  htmlFor="controlled-bottom-count"
+                >
+                  Number of controlled bottom
+                  positions
+                </label>
+
+                <input
+                  id="controlled-bottom-count"
+                  type="number"
+                  min={0}
+                  max={
+                    controlEditor.productCount -
+                    controlEditor.controlledTopCount
+                  }
+                  className="form-input rotation-control-count-input"
+                  value={
+                    controlEditor.controlledBottomCount
+                  }
+                  onChange={(event) =>
+                    updateControlledCount(
+                      "BOTTOM",
+                      Number(
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+              </div>
+
+              <p className="rotation-control-explanation">
+                Counted from the end of the
+                collection - bottom position 1
+                is the very last item, position
+                2 is second-to-last, and so on.
+              </p>
+            </div>
+
             <div className="rotation-control-editor-grid">
-              <div className="rotation-position-panel">
-                <h4 className="rotation-control-panel-title">
-                  Top positions
-                </h4>
+              <div className="rotation-position-panel-group">
+                {renderControlPositionPanel(
+                  "TOP",
+                  "Top positions",
+                  "Position 1 is the first item in the collection.",
+                  controlEditor.controlledTopCount,
+                  controlEditor.assignments
+                )}
 
-                {controlEditor.controlledTopCount ===
-                0 ? (
-                  <div className="rotation-control-empty">
-                    This collection is fully
-                    random. Increase the
-                    controlled count to assign
-                    products.
-                  </div>
-                ) : (
-                  <div className="rotation-position-list">
-                    {Array.from(
-                      {
-                        length:
-                          controlEditor.controlledTopCount,
-                      },
-                      (_, index) =>
-                        index + 1
-                    ).map(
-                      (position) => {
-                        const assignment =
-                          controlEditor.assignments.find(
-                            (item) =>
-                              item.position ===
-                              position
-                          );
-
-                        const product =
-                          assignment
-                            ? controlEditor.products.find(
-                                (item) =>
-                                  item.id ===
-                                  assignment.productId
-                              )
-                            : null;
-
-                        return (
-                          <button
-                            key={
-                              position
-                            }
-                            type="button"
-                            className={`rotation-position-slot ${
-                              selectedControlPosition ===
-                              position
-                                ? "rotation-position-slot-active"
-                                : ""
-                            }`}
-                            onClick={() =>
-                              setSelectedControlPosition(
-                                position
-                              )
-                            }
-                          >
-                            <span className="rotation-position-number">
-                              {
-                                position
-                              }
-                            </span>
-
-                            {product ? (
-                              <>
-                                {product.imageUrl ? (
-                                  <img
-                                    src={
-                                      product.imageUrl
-                                    }
-                                    alt=""
-                                    className="rotation-position-image"
-                                  />
-                                ) : (
-                                  <div className="rotation-position-image rotation-position-image-empty">
-                                    No image
-                                  </div>
-                                )}
-
-                                <span className="rotation-position-product">
-                                  {
-                                    product.title
-                                  }
-                                </span>
-
-                                <span className="rotation-position-buttons">
-                                  <span
-                                    role="button"
-                                    tabIndex={
-                                      0
-                                    }
-                                    onClick={(
-                                      event
-                                    ) => {
-                                      event.stopPropagation();
-                                      moveAssignment(
-                                        position,
-                                        -1
-                                      );
-                                    }}
-                                  >
-                                    ↑
-                                  </span>
-
-                                  <span
-                                    role="button"
-                                    tabIndex={
-                                      0
-                                    }
-                                    onClick={(
-                                      event
-                                    ) => {
-                                      event.stopPropagation();
-                                      moveAssignment(
-                                        position,
-                                        1
-                                      );
-                                    }}
-                                  >
-                                    ↓
-                                  </span>
-
-                                  <span
-                                    role="button"
-                                    tabIndex={
-                                      0
-                                    }
-                                    onClick={(
-                                      event
-                                    ) => {
-                                      event.stopPropagation();
-                                      removePositionAssignment(
-                                        position
-                                      );
-                                    }}
-                                  >
-                                    ×
-                                  </span>
-                                </span>
-                              </>
-                            ) : (
-                              <span className="rotation-position-random">
-                                Random product
-                              </span>
-                            )}
-                          </button>
-                        );
-                      }
-                    )}
-                  </div>
+                {renderControlPositionPanel(
+                  "BOTTOM",
+                  "Bottom positions",
+                  "Position 1 is the last item in the collection.",
+                  controlEditor.controlledBottomCount,
+                  controlEditor.bottomAssignments
                 )}
               </div>
 
@@ -2165,14 +2401,18 @@ export default function CollectionRotationManager() {
                   Product picker
                 </h4>
 
-                {selectedControlPosition ? (
+                {selectedControlSlot ? (
                   <>
                     <p className="rotation-picker-position-label">
-                      Selecting product for
+                      Selecting product for{" "}
+                      {selectedControlSlot.zone ===
+                      "TOP"
+                        ? "top"
+                        : "bottom"}{" "}
                       position{" "}
                       <strong>
                         {
-                          selectedControlPosition
+                          selectedControlSlot.position
                         }
                       </strong>
                     </p>

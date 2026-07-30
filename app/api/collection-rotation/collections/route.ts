@@ -28,6 +28,7 @@ export async function GET() {
             controlledProducts: {
               select: {
                 id: true,
+                zone: true,
               },
             },
 
@@ -98,7 +99,25 @@ export async function GET() {
             controlledAssignedCount:
               rotation
                 ?.controlledProducts
-                .length ?? 0,
+                .filter(
+                  (product) =>
+                    product.zone ===
+                    "TOP"
+                ).length ?? 0,
+
+            controlledBottomCount:
+              rotation
+                ?.controlledBottomCount ??
+              0,
+
+            controlledBottomAssignedCount:
+              rotation
+                ?.controlledProducts
+                .filter(
+                  (product) =>
+                    product.zone ===
+                    "BOTTOM"
+                ).length ?? 0,
 
             lastShuffledAt:
               rotation?.lastShuffledAt

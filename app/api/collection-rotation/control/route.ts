@@ -25,6 +25,8 @@ type SaveControlBody = {
   collectionId?: unknown;
   controlledTopCount?: unknown;
   assignments?: unknown;
+  controlledBottomCount?: unknown;
+  bottomAssignments?: unknown;
 };
 
 function normalizeCollectionId(
@@ -90,6 +92,30 @@ export async function GET(
         }),
       ]);
 
+    const topAssignments =
+      rotation?.controlledProducts
+        .filter(
+          (assignment) =>
+            assignment.zone === "TOP"
+        )
+        .map((assignment) => ({
+          position: assignment.position,
+          productId:
+            assignment.shopifyProductId,
+        })) ?? [];
+
+    const bottomAssignments =
+      rotation?.controlledProducts
+        .filter(
+          (assignment) =>
+            assignment.zone === "BOTTOM"
+        )
+        .map((assignment) => ({
+          position: assignment.position,
+          productId:
+            assignment.shopifyProductId,
+        })) ?? [];
+
     return NextResponse.json({
       ok: true,
 
@@ -105,15 +131,13 @@ export async function GET(
         rotation?.controlledTopCount ??
         0,
 
-      assignments:
-        rotation?.controlledProducts.map(
-          (assignment) => ({
-            position:
-              assignment.position,
-            productId:
-              assignment.shopifyProductId,
-          })
-        ) ?? [],
+      assignments: topAssignments,
+
+      controlledBottomCount:
+        rotation?.controlledBottomCount ??
+        0,
+
+      bottomAssignments: bottomAssignments,
 
       products:
         collection.products.map(
@@ -212,10 +236,44 @@ export async function POST(
         collection.products.length
       );
 
-    const rawAssignments =
-      Array.isArray(body.assignments)
-        ? (body.assignments as ControlledAssignmentInput[])
-        : [];
+    const requestedBottomCount =
+      typeof body.controlledBottomCount ===
+      "number"
+        ? Math.floor(
+            body.controlledBottomCount
+          )
+        : Number(
+            body.controlledBottomCount ?? 0
+          );
+
+    if (
+      !Number.isFinite(
+        requestedBottomCount
+      ) ||
+      requestedBottomCount < 0
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "controlledBottomCount must be zero or greater.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    // The top and bottom zones can never overlap in the middle of the
+    // collection - bottom claims whatever room the top zone hasn't already
+    // taken, same "clamp down" behavior controlledTopCount already gets
+    // above when it exceeds the collection's actual product count.
+    const controlledBottomCount =
+      Math.min(
+        requestedBottomCount,
+        collection.products.length -
+          controlledTopCount
+      );
 
     const productById =
       new Map(
@@ -227,14 +285,23 @@ export async function POST(
         )
       );
 
-    const usedPositions =
-      new Set<number>();
-
     const usedProductIds =
       new Set<string>();
 
-    const assignments =
-      rawAssignments.map(
+    function parseZoneAssignments(
+      zone: "TOP" | "BOTTOM",
+      rawInput: unknown,
+      zoneCount: number
+    ) {
+      const rawAssignments =
+        Array.isArray(rawInput)
+          ? (rawInput as ControlledAssignmentInput[])
+          : [];
+
+      const usedPositions =
+        new Set<number>();
+
+      return rawAssignments.map(
         (assignment) => {
           const position =
             typeof assignment.position ===
@@ -255,11 +322,10 @@ export async function POST(
           if (
             !Number.isInteger(position) ||
             position < 1 ||
-            position >
-              controlledTopCount
+            position > zoneCount
           ) {
             throw new Error(
-              `Position ${position} is outside the controlled range.`
+              `Position ${position} is outside the controlled ${zone === "TOP" ? "top" : "bottom"} range.`
             );
           }
 
@@ -276,7 +342,7 @@ export async function POST(
             usedPositions.has(position)
           ) {
             throw new Error(
-              `Position ${position} was assigned more than once.`
+              `${zone === "TOP" ? "Top" : "Bottom"} position ${position} was assigned more than once.`
             );
           }
 
@@ -284,7 +350,7 @@ export async function POST(
             usedProductIds.has(productId)
           ) {
             throw new Error(
-              `${product.title} was assigned more than once.`
+              `${product.title} was assigned more than once - a product can only be pinned to one position.`
             );
           }
 
@@ -292,6 +358,7 @@ export async function POST(
           usedProductIds.add(productId);
 
           return {
+            zone,
             position,
             shopifyProductId:
               product.id,
@@ -305,6 +372,26 @@ export async function POST(
           };
         }
       );
+    }
+
+    const topAssignments =
+      parseZoneAssignments(
+        "TOP",
+        body.assignments,
+        controlledTopCount
+      );
+
+    const bottomAssignments =
+      parseZoneAssignments(
+        "BOTTOM",
+        body.bottomAssignments,
+        controlledBottomCount
+      );
+
+    const assignments = [
+      ...topAssignments,
+      ...bottomAssignments,
+    ];
 
     const shop =
       getShopifyShopDomain();
@@ -324,6 +411,7 @@ export async function POST(
           collectionHandle:
             collection.handle,
           controlledTopCount,
+          controlledBottomCount,
         },
         create: {
           shop,
@@ -334,6 +422,7 @@ export async function POST(
           collectionHandle:
             collection.handle,
           controlledTopCount,
+          controlledBottomCount,
         },
       });
 
@@ -363,7 +452,10 @@ export async function POST(
       ok: true,
       controlledTopCount,
       controlledAssignedCount:
-        assignments.length,
+        topAssignments.length,
+      controlledBottomCount,
+      controlledBottomAssignedCount:
+        bottomAssignments.length,
     });
   } catch (error) {
     console.error(

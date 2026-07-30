@@ -57,10 +57,12 @@ type ProductMove = {
 type ControlledProductRule = {
   shopifyProductId: string;
   position: number;
+  zone: string;
 };
 
 type CollectionControlRules = {
   controlledTopCount: number;
+  controlledBottomCount: number;
   controlledProducts: ControlledProductRule[];
 };
 
@@ -628,10 +630,12 @@ async function getControlRules(
       },
       select: {
         controlledTopCount: true,
+        controlledBottomCount: true,
         controlledProducts: {
           select: {
             shopifyProductId: true,
             position: true,
+            zone: true,
           },
           orderBy: {
             position: "asc",
@@ -643,6 +647,8 @@ async function getControlRules(
   return {
     controlledTopCount:
       rotation?.controlledTopCount ?? 0,
+    controlledBottomCount:
+      rotation?.controlledBottomCount ?? 0,
     controlledProducts:
       rotation?.controlledProducts ?? [],
   };
@@ -864,6 +870,7 @@ export async function shuffleCollection(
           select: {
             shopifyProductId: true,
             position: true,
+            zone: true,
           },
         },
       },
@@ -1046,6 +1053,20 @@ export async function shuffleCollection(
       controlledAssignedCount:
         controlRules.controlledProducts.filter(
           (rule) =>
+            rule.zone === "TOP" &&
+            verifiedProductIds.includes(
+              rule.shopifyProductId
+            )
+        ).length,
+      controlledBottomCount:
+        Math.min(
+          controlRules.controlledBottomCount,
+          verifiedProductIds.length
+        ),
+      controlledBottomAssignedCount:
+        controlRules.controlledProducts.filter(
+          (rule) =>
+            rule.zone === "BOTTOM" &&
             verifiedProductIds.includes(
               rule.shopifyProductId
             )

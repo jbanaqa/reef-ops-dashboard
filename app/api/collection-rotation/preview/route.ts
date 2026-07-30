@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
       },
       include: {
         controlledProducts: {
-          select: { shopifyProductId: true, position: true },
+          select: { shopifyProductId: true, position: true, zone: true },
         },
       },
     });

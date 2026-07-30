@@ -357,7 +357,8 @@ model CollectionRotation {
   isEnabled Boolean @default(false)
   isStarred Boolean @default(false)
 
-  controlledTopCount Int @default(0)
+  controlledTopCount    Int @default(0)
+  controlledBottomCount Int @default(0)
 
   strategy              String @default("BALANCED")
   performanceWeight     Int    @default(45)
@@ -382,6 +383,7 @@ model CollectionRotation {
   @@index([isEnabled])
   @@index([isStarred])
   @@index([controlledTopCount])
+  @@index([controlledBottomCount])
   @@index([lastShuffledAt])
 }
 
@@ -519,15 +521,29 @@ model CollectionControlledProduct {
   productHandle    String?
   imageUrl         String?
 
+  // "TOP" pins a product counting down from the front of the collection
+  // (position 1 = first slot); "BOTTOM" pins counting up from the end
+  // (position 1 = last slot, position 2 = second-to-last, etc.) - see
+  // applyControlledPositions() in collection-rotation-plan.ts for how each
+  // zone's position resolves to an actual index.
+  zone String @default("TOP")
+
   position Int
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([rotationId, position])
+  // A position number is only unique within its own zone - "TOP position 1"
+  // and "BOTTOM position 1" are different slots (opposite ends of the
+  // collection), so the zone must be part of the composite key.
+  @@unique([rotationId, zone, position])
+  // A product can only hold ONE controlled assignment total, whether top or
+  // bottom - this stays a plain (rotationId, shopifyProductId) key so the
+  // same product can't be pinned to both ends at once.
   @@unique([rotationId, shopifyProductId])
   @@index([rotationId])
   @@index([shopifyProductId])
+  @@index([zone])
 }
 
 model CollectionRotationScheduleRun {

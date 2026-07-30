@@ -1674,6 +1674,13 @@ body {
   overflow: hidden;
 }
 
+.rotation-position-panel-group {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .rotation-position-panel,
 .rotation-product-picker-panel {
   min-height: 0;
@@ -1686,11 +1693,22 @@ body {
   background: var(--surface-muted);
 }
 
+.rotation-position-panel + .rotation-position-panel {
+  border-top: 1px solid var(--border);
+}
+
 .rotation-control-panel-title {
   margin: 0 0 14px;
   color: var(--text-main);
   font-size: 15px;
   font-weight: 800;
+}
+
+.rotation-control-panel-subtitle {
+  margin: -10px 0 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .rotation-position-list {
@@ -2373,8 +2391,11 @@ body {
     grid-template-columns: minmax(340px, 0.9fr) minmax(420px, 1.1fr);
   }
 
-  .rotation-position-panel {
+  .rotation-position-panel-group {
     border-right: 1px solid var(--border);
+  }
+
+  .rotation-position-panel {
     border-bottom: none;
   }
 }
@@ -2398,6 +2419,7 @@ body {
     overflow-y: auto;
   }
 
+  .rotation-position-panel-group,
   .rotation-position-panel,
   .rotation-product-picker-panel {
     overflow: visible;

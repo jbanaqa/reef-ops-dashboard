@@ -23,9 +23,11 @@ type RotationConfiguration = {
   explorationWeight: number;
   analyticsLookbackDays: number;
   controlledTopCount: number;
+  controlledBottomCount: number;
   controlledProducts: Array<{
     shopifyProductId: string;
     position: number;
+    zone: string;
   }>;
 };
 
@@ -66,27 +68,50 @@ function applyControlledPositions(
     Math.max(0, rotation.controlledTopCount),
     productIds.length
   );
+  // Bottom pins claim slots counting up from the end of the collection, so
+  // clamp against whatever room the top zone hasn't already claimed - the two
+  // zones are never allowed to overlap in the middle.
+  const controlledBottomCount = Math.min(
+    Math.max(0, rotation.controlledBottomCount),
+    productIds.length - controlledTopCount
+  );
   const validIds = new Set(productIds);
   const usedIds = new Set<string>();
-  const assignments = rotation.controlledProducts
-    .filter(
-      (rule) =>
-        rule.position >= 1 &&
-        rule.position <= controlledTopCount &&
-        validIds.has(rule.shopifyProductId) &&
-        !usedIds.has(rule.shopifyProductId)
-    )
-    .filter((rule) => {
-      usedIds.add(rule.shopifyProductId);
-      return true;
-    });
+
+  function collectAssignments(zone: "TOP" | "BOTTOM", zoneCount: number) {
+    return rotation.controlledProducts
+      .filter(
+        (rule) =>
+          rule.zone === zone &&
+          rule.position >= 1 &&
+          rule.position <= zoneCount &&
+          validIds.has(rule.shopifyProductId) &&
+          !usedIds.has(rule.shopifyProductId)
+      )
+      .filter((rule) => {
+        usedIds.add(rule.shopifyProductId);
+        return true;
+      });
+  }
+
+  // Top assignments claim products first so a product referenced by both a
+  // (now-invalid, since a product can only be pinned once) top and bottom
+  // rule always resolves to its top placement.
+  const topAssignments = collectAssignments("TOP", controlledTopCount);
+  const bottomAssignments = collectAssignments("BOTTOM", controlledBottomCount);
+
   const remaining = rankedProductIds.filter(
     (productId) => !usedIds.has(productId)
   );
   const target = new Array<string | null>(productIds.length).fill(null);
 
-  for (const assignment of assignments) {
+  for (const assignment of topAssignments) {
     target[assignment.position - 1] = assignment.shopifyProductId;
+  }
+
+  // Bottom position 1 = the very last slot, position 2 = second-to-last, etc.
+  for (const assignment of bottomAssignments) {
+    target[target.length - assignment.position] = assignment.shopifyProductId;
   }
 
   let remainingIndex = 0;
