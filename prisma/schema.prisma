@@ -569,3 +569,124 @@ model CollectionRotationScheduleRun {
   @@index([status])
   @@index([startedAt])
 }
+
+// SPECIES LIBRARY - enabled only in the Macroalgae Farms deployment.
+model SpeciesLibraryCard {
+  id                 String               @id @default(cuid())
+  shop               String
+  speciesKey         String
+  group              String
+  commonName         String
+  scientificName     String
+  schemaVersion      Int                  @default(1)
+  payload            Json
+  status             String               @default("APPROVED")
+  publishedVersionId String?
+  versions           SpeciesCardVersion[]
+  productLinks       SpeciesProductLink[]
+  reviewItems        SpeciesReviewItem[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@unique([shop, speciesKey])
+  @@index([shop])
+  @@index([group])
+  @@index([status])
+}
+
+model SpeciesCardVersion {
+  id          String             @id @default(cuid())
+  cardId      String
+  card        SpeciesLibraryCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  version     Int
+  payload     Json
+  imagePrompt String?
+  imageUrl    String?
+  source      String
+  createdBy   String?
+  createdAt   DateTime           @default(now())
+
+  @@unique([cardId, version])
+  @@index([cardId])
+  @@index([source])
+  @@index([createdAt])
+}
+
+model SpeciesProductLink {
+  id               String             @id @default(cuid())
+  shop             String
+  shopifyProductId String
+  productTitle     String
+  productHandle    String?
+  cardId           String
+  card             SpeciesLibraryCard @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  matchMethod      String
+  confidence       Float?
+  approvedAt       DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@unique([shop, shopifyProductId])
+  @@index([shop])
+  @@index([cardId])
+  @@index([approvedAt])
+}
+
+model SpeciesReviewItem {
+  id                 String              @id @default(cuid())
+  shop               String
+  shopifyProductId   String
+  productTitle       String
+  productHandle      String?
+  productStatus      String
+  productDescription String?
+  productImageUrls   Json?
+  productUpdatedAt   DateTime
+  sourceFingerprint  String
+  kind               String
+  status             String              @default("QUEUED")
+  textStatus         String              @default("NOT_STARTED")
+  imageStatus        String              @default("NOT_STARTED")
+  publicationStatus  String              @default("NOT_STARTED")
+  candidateCardId    String?
+  candidateCard      SpeciesLibraryCard? @relation(fields: [candidateCardId], references: [id], onDelete: SetNull)
+  matchConfidence    Float?
+  matchReasons       Json?
+  draftPayload       Json?
+  schemaVersion      Int                 @default(1)
+  imagePrompt        String?
+  imagePromptVersion Int?
+  generatedImageUrl  String?
+  attemptCount       Int                 @default(0)
+  lastError          String?
+  reviewNotes        String?
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  approvedAt         DateTime?
+  publishedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([shop, shopifyProductId, sourceFingerprint])
+  @@index([shop])
+  @@index([status])
+  @@index([kind])
+  @@index([candidateCardId])
+  @@index([productUpdatedAt])
+  @@index([createdAt])
+}
+
+model SpeciesSyncCheckpoint {
+  id                   String    @id @default(cuid())
+  shop                 String    @unique
+  lastProductUpdatedAt DateTime?
+  lastCursor           String?
+  lastStatus           String?
+  lastError            String?
+  lastCheckedAt        DateTime?
+  lastCompletedAt      DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([lastCompletedAt])
+}
