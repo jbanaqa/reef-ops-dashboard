@@ -14,13 +14,17 @@ const navigation = [
     { href: "/restock-waitlist", label: "Restock Alerts", icon: "restock" },
     { href: "/reorder-planner", label: "Reorder Planner", icon: "reorder" },
   ]},
-  { label: "Merchandising", items: [{ href: "/collection-rotation", label: "Collection Rotation", icon: "rotation" }] },
+  { label: "Merchandising", items: [
+    { href: "/collection-rotation", label: "Collection Rotation", icon: "rotation" },
+    { href: "/species-library", label: "Species Library", icon: "species" },
+  ]},
   { label: "Insights", items: [{ href: "/feedback", label: "Customer Intelligence", icon: "intelligence" }] },
 ];
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard", "/inventory-monitor": "Inventory Monitor", "/restock-waitlist": "Restock Alerts",
   "/reorder-planner": "Reorder Planner", "/collection-rotation": "Collection Rotation",
+  "/species-library": "Species Library",
   "/feedback": "Customer Intelligence", "/feedback/new": "Add Customer Signal", "/monitoring": "Customer Intelligence",
 };
 
