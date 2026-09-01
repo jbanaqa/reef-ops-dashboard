@@ -5,7 +5,9 @@ import { assertSpeciesLibraryShop } from "./species-library";
 import { macroalgaeGraphql } from "./macroalgae-shopify";
 
 const SHOP_METAFIELD_NAMESPACE = "reef_ops";
-const SHOP_METAFIELD_KEY = "species_library";
+const SHOP_METAFIELD_MANIFEST_KEY = "species_library_manifest";
+const MAX_CHUNKS = 12;
+const MAX_CHUNK_BYTES = 120_000;
 
 type ShopResponse = { data?: { shop?: { id: string } } };
 type MetafieldsSetResponse = { data?: { metafieldsSet?: { metafields?: Array<{ id: string; namespace: string; key: string; updatedAt: string }>; userErrors?: Array<{ field?: string[]; message: string; code?: string }> } } };
@@ -43,6 +45,25 @@ function publicationIntegrity<T extends { speciesKey: string; payload: unknown }
   });
   return { canonicalSet, missingCanonical, mismatchedIds, ordered, newCards: cards.filter((card) => !canonicalSet.has(card.speciesKey)).length };
 }
+function chunkSpeciesPayloads(payloads: unknown[]) {
+  const chunks: unknown[][] = [];
+  let current: unknown[] = [];
+  for (const payload of payloads) {
+    const singleBytes = Buffer.byteLength(JSON.stringify([payload]), "utf8");
+    if (singleBytes > MAX_CHUNK_BYTES) throw new SpeciesPublicationError("A single species card exceeds Shopify's safe metafield chunk size.", 413);
+    const candidate = [...current, payload];
+    if (current.length && Buffer.byteLength(JSON.stringify(candidate), "utf8") > MAX_CHUNK_BYTES) {
+      chunks.push(current);
+      current = [payload];
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length) chunks.push(current);
+  if (chunks.length > MAX_CHUNKS) throw new SpeciesPublicationError(`Species Library requires ${chunks.length} chunks, exceeding the configured maximum of ${MAX_CHUNKS}.`, 413);
+  return chunks;
+}
+
 
 export async function getSpeciesPublicationReadiness() {
   const shop = assertSpeciesLibraryShop();
@@ -74,21 +95,24 @@ export async function publishSpeciesLibrary(reviewer: string) {
   const missingVersions = cards.filter((card) => !card.versions[0]);
   if (missingVersions.length) throw new SpeciesPublicationError("Every card must have a version before publication.", 409, missingVersions.map((card) => card.speciesKey));
 
-  const value = JSON.stringify(cards.map((card) => card.payload));
-  if (Buffer.byteLength(value, "utf8") > 2_000_000) throw new SpeciesPublicationError("Species Library snapshot exceeds Shopify's safe JSON metafield size.", 413);
+  const payloads = cards.map((card) => card.payload);
+  const chunks = chunkSpeciesPayloads(payloads);
+  const bytes = Buffer.byteLength(JSON.stringify(payloads), "utf8");
+  const publishedAt = new Date();
   const shopResponse = await macroalgaeGraphql<ShopResponse>(`query SpeciesPublicationShop { shop { id } }`);
   const ownerId = shopResponse.data?.shop?.id;
   if (!ownerId) throw new SpeciesPublicationError("Shopify did not return the Macroalgae Farms shop ID.", 502);
+  const metafields = Array.from({ length: MAX_CHUNKS }, (_, index) => ({ ownerId, namespace: SHOP_METAFIELD_NAMESPACE, key: `species_library_${index + 1}`, type: "json", value: JSON.stringify(chunks[index] || []) }));
+  metafields.push({ ownerId, namespace: SHOP_METAFIELD_NAMESPACE, key: SHOP_METAFIELD_MANIFEST_KEY, type: "json", value: JSON.stringify({ schemaVersion: 1, cards: cards.length, chunks: chunks.length, bytes, publishedAt: publishedAt.toISOString() }) });
   const response = await macroalgaeGraphql<MetafieldsSetResponse>(`mutation PublishSpeciesLibrary($metafields: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $metafields) { metafields { id namespace key updatedAt } userErrors { field message code } } }`, {
-    metafields: [{ ownerId, namespace: SHOP_METAFIELD_NAMESPACE, key: SHOP_METAFIELD_KEY, type: "json", value }],
+    metafields,
   });
   const result = response.data?.metafieldsSet;
   if (!result) throw new SpeciesPublicationError("Shopify returned no metafield publication result.", 502);
   if (result.userErrors?.length) throw new SpeciesPublicationError("Shopify rejected the Species Library publication.", 422, result.userErrors);
-  const publishedAt = new Date();
   await prisma.$transaction(async (tx) => {
     for (const card of cards) await tx.speciesLibraryCard.update({ where: { id: card.id }, data: { publishedVersionId: card.versions[0].id } });
     await tx.speciesReviewItem.updateMany({ where: { shop, candidateCardId: { in: cards.map((card) => card.id) }, status: "APPROVED" }, data: { publicationStatus: "PUBLISHED", publishedAt, reviewedBy: reviewer } });
   });
-  return { shop, cards: cards.length, canonicalCards: canonicalKeys.length, newCards: integrity.newCards, bytes: Buffer.byteLength(value, "utf8"), publishedAt: publishedAt.toISOString(), metafield: result.metafields?.[0] || null };
+  return { shop, cards: cards.length, canonicalCards: canonicalKeys.length, newCards: integrity.newCards, chunks: chunks.length, bytes, publishedAt: publishedAt.toISOString(), metafields: result.metafields || [] };
 }
