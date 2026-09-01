@@ -4,7 +4,7 @@ export const SPECIES_SCHEMA_VERSION = 1;
 
 export const SPECIES_GROUPS = [
   "green", "red", "blue", "brown", "purple", "seagrass",
-  "fish", "cuc", "coral", "invertebrate",
+  "fish", "cuc", "coral",
 ] as const;
 
 export type SpeciesGroup = (typeof SPECIES_GROUPS)[number];
@@ -49,7 +49,6 @@ const GROUP_FIELDS: Record<SpeciesGroup, readonly string[]> = {
   fish: [],
   cuc: ["cucType", "minTankSize", "dwelling", "diet", "tankRole"],
   coral: ["coralType", "lighting", "flow", "tankRole"],
-  invertebrate: ["lighting", "flow", "growthRate", "maxSize", "roles", "tankRole", "propagation"],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

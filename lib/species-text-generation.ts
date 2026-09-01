@@ -9,7 +9,7 @@ const CARD_SCHEMA = {
   required: ["id", "commonName", "scientificName", "group", "img", "careLevel", "reefSafe", "description", "fullDesc", "habitat", "careNotes", "compatibility", "distribution", "taxonomy", "funFact", "waterParams", "para2", "shopType", "shopUrl"],
   properties: {
     id: { type: "string" }, commonName: { type: "string" }, scientificName: { type: "string" },
-    group: { type: "string", enum: ["green", "red", "blue", "brown", "purple", "seagrass", "fish", "cuc", "coral", "invertebrate"] },
+    group: { type: "string", enum: ["green", "red", "blue", "brown", "purple", "seagrass", "fish", "cuc", "coral"] },
     img: { type: "string" }, careLevel: { type: "string" }, reefSafe: { type: "string" },
     description: { type: "string" }, fullDesc: { type: "string" }, habitat: { type: "string" },
     careNotes: { type: "string" }, compatibility: { type: "string" }, distribution: { type: "string" },
