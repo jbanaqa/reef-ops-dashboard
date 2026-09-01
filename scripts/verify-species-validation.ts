@@ -37,9 +37,16 @@ assert.equal(generated.commonName, "Tube Anemone");
 assert.equal(generated.scientificName, "Cerianthus sp.");
 assert.equal(generated.careLevel, "intermediate");
 assert.equal(generated.cucType, "other");
-assert.equal(generated.minTankSize, 40);
+assert.equal(generated.minTankSize, 30);
 assert.equal(generated.dwelling, "sand");
-assert.deepEqual(generated.diet, ["Mysis shrimp"]);
+assert.deepEqual(generated.diet, ["Meaty Marine Foods", "Mysis Shrimp", "Finely Chopped Seafood"]);
+assert.deepEqual(generated.tankRole, ["Display"]);
+assert.equal(generated.cleanupCrew, false);
+assert.deepEqual(generated.waterParams, {
+  lighting: "Not photosynthetically required; low to moderate display lighting is appropriate.",
+  flow: "Low to moderate indirect flow; avoid strong direct jets.", temp: "72–80°F", salinity: "1.023–1.026",
+  notes: "Provide stable conditions, a deep sandbed, regular target feeding, and sufficient clearance from neighboring livestock.",
+});
 assert.equal(generated.shopType, "unavailable");
 assert.equal(generated.shopUrl, "#");
 assert.equal(generated.lighting, undefined);
