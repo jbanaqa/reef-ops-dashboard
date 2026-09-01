@@ -8,6 +8,7 @@ import {
   type SpeciesCardPayload,
   validateSpeciesCard,
 } from "../lib/species-library";
+import { normalizeLegacyCommerce } from "../lib/species-commerce";
 
 async function main() {
   const shop = assertSpeciesLibraryShop();
@@ -40,17 +41,23 @@ async function main() {
     }
 
     const payload = card as Prisma.InputJsonValue;
+    const commerce = normalizeLegacyCommerce(card);
     const stored = await prisma.speciesLibraryCard.upsert({
       where: { shop_speciesKey: { shop, speciesKey: card.id } },
       create: {
         shop, speciesKey: card.id, group: card.group,
         commonName: card.commonName, scientificName: card.scientificName,
         schemaVersion: SPECIES_SCHEMA_VERSION, payload, status,
+        commerceMode: commerce.mode, commerceProductHandle: commerce.productHandle,
+        commerceSearchQuery: commerce.searchQuery, commerceShopUrl: commerce.shopUrl,
+        commerceReviewStatus: "LEGACY_APPROVED",
       },
       update: {
         group: card.group, commonName: card.commonName,
         scientificName: card.scientificName,
         schemaVersion: SPECIES_SCHEMA_VERSION, payload, status,
+        commerceMode: commerce.mode, commerceProductHandle: commerce.productHandle,
+        commerceSearchQuery: commerce.searchQuery, commerceShopUrl: commerce.shopUrl,
       },
       select: { id: true },
     });

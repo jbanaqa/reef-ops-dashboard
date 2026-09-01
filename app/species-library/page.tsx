@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getSpeciesDashboardData, parseSpeciesQueueFilters } from "@/lib/species-library-dashboard";
 import { SpeciesReviewQueue } from "./SpeciesReviewQueue";
+import { SpeciesCommerceSection } from "./SpeciesCommerceSection";
 
 export const dynamic = "force-dynamic";
 
@@ -50,5 +51,6 @@ export default async function SpeciesLibraryPage({ searchParams }: { searchParam
       </nav>}
       <div className="species-flow">{stages.map(([number, title, description]) => <article key={number}><i>{number}</i><div><strong>{title}</strong><p>{description}</p></div></article>)}</div>
     </section>
+    <SpeciesCommerceSection />
   </div>;
 }

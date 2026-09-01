@@ -582,6 +582,13 @@ model SpeciesLibraryCard {
   payload            Json
   status             String               @default("APPROVED")
   publishedVersionId String?
+  commerceMode        String               @default("UNREVIEWED")
+  commerceProductHandle String?
+  commerceSearchQuery String?
+  commerceShopUrl     String?
+  commerceReviewStatus String              @default("NEEDS_REVIEW")
+  commerceReviewedAt DateTime?
+  commerceReviewedBy String?
   versions           SpeciesCardVersion[]
   productLinks       SpeciesProductLink[]
   reviewItems        SpeciesReviewItem[]
@@ -592,6 +599,7 @@ model SpeciesLibraryCard {
   @@index([shop])
   @@index([group])
   @@index([status])
+  @@index([commerceReviewStatus])
 }
 
 model SpeciesCardVersion {

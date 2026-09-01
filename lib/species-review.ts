@@ -1,6 +1,7 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "./prisma";
 import { assertSpeciesLibraryShop, SPECIES_SCHEMA_VERSION, type SpeciesCardPayload, validateSpeciesCard } from "./species-library";
+import { markCommerceReviewRequired } from "./species-commerce";
 
 export type ReviewAction = "REJECT" | "SAVE_DRAFT" | "APPROVE_LINK" | "APPROVE_CARD" | "REASSIGN_LINK";
 export type ReviewInput = { action: ReviewAction; notes?: string; payload?: unknown; candidateCardId?: string };
@@ -65,6 +66,7 @@ export async function reviewSpeciesItem(id: string, input: ReviewInput, reviewer
           confidence: item.matchConfidence, approvedAt: new Date(),
         },
       });
+      await markCommerceReviewRequired(tx, [item.candidateCardId!]);
       return tx.speciesReviewItem.update({
         where: { id }, data: { status: "APPROVED", reviewedBy: reviewer, reviewedAt: new Date(), approvedAt: new Date(), reviewNotes: input.notes || null },
       });
@@ -95,6 +97,7 @@ export async function reviewSpeciesItem(id: string, input: ReviewInput, reviewer
         matchMethod: "HUMAN_CREATED", confidence: 1, approvedAt: new Date(),
       },
     });
+    await markCommerceReviewRequired(tx, [card.id]);
     return tx.speciesReviewItem.update({
       where: { id }, data: {
         status: "APPROVED", candidateCardId: card.id, draftPayload: payload as Prisma.InputJsonValue,
@@ -133,6 +136,7 @@ export async function approveHighConfidenceLinks(itemIds: string[], reviewer: st
         where: { id: item.id }, data: { status: "APPROVED", reviewedBy: reviewer, reviewedAt: approvedAt, approvedAt, reviewNotes: "Explicit high-confidence batch approval" },
       });
     }
+    await markCommerceReviewRequired(tx, items.map((item) => item.candidateCardId!));
     return { approved: items.length };
   });
 }
