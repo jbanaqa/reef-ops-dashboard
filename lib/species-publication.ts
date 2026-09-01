@@ -68,14 +68,20 @@ function chunkSpeciesPayloads(payloads: unknown[]) {
 export async function getSpeciesPublicationReadiness() {
   const shop = assertSpeciesLibraryShop();
   const [cards, pendingCommerce, canonicalKeys] = await Promise.all([
-    prisma.speciesLibraryCard.findMany({ where: { shop, status: { startsWith: "APPROVED" } }, select: { speciesKey: true, payload: true } }),
+    prisma.speciesLibraryCard.findMany({ where: { shop, status: { startsWith: "APPROVED" } }, select: { speciesKey: true, payload: true, publishedVersionId: true, versions: { orderBy: { version: "desc" }, take: 1, select: { id: true } } } }),
     prisma.speciesLibraryCard.count({ where: { shop, commerceReviewStatus: "NEEDS_REVIEW" } }),
     canonicalSpeciesKeys(),
   ]);
   const integrity = publicationIntegrity(cards, canonicalKeys);
   const latest = await prisma.speciesLibraryCard.findFirst({ where: { shop, publishedVersionId: { not: null } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } });
-  const blockReason = integrity.missingCanonical.length ? `${integrity.missingCanonical.length} existing card${integrity.missingCanonical.length === 1 ? " is" : "s are"} missing from the database.` : integrity.mismatchedIds.length ? `${integrity.mismatchedIds.length} card ID mismatch${integrity.mismatchedIds.length === 1 ? "" : "es"} must be corrected.` : null;
-  return { cards: cards.length, canonicalCards: canonicalKeys.length, newCards: integrity.newCards, pendingCommerce, blockReason, lastPublishedAt: latest?.updatedAt.toISOString() || null, ready: cards.length >= canonicalKeys.length && pendingCommerce === 0 && !blockReason };
+  const missingVersions = cards.filter((card) => !card.versions[0]);
+  const changedCards = cards.filter((card) => card.versions[0] && card.versions[0].id !== card.publishedVersionId).length;
+  const blockReason = integrity.missingCanonical.length
+    ? `${integrity.missingCanonical.length} existing card${integrity.missingCanonical.length === 1 ? " is" : "s are"} missing from the database.`
+    : integrity.mismatchedIds.length ? `${integrity.mismatchedIds.length} card ID mismatch${integrity.mismatchedIds.length === 1 ? "" : "es"} must be corrected.`
+    : missingVersions.length ? `${missingVersions.length} card${missingVersions.length === 1 ? " is" : "s are"} missing a version.` : null;
+  const structurallyReady = cards.length >= canonicalKeys.length && pendingCommerce === 0 && !blockReason;
+  return { cards: cards.length, canonicalCards: canonicalKeys.length, newCards: integrity.newCards, pendingCommerce, blockReason, lastPublishedAt: latest?.updatedAt.toISOString() || null, changedCards, upToDate: structurallyReady && changedCards === 0, ready: structurallyReady && changedCards > 0 };
 }
 
 export async function publishSpeciesLibrary(reviewer: string) {
@@ -94,6 +100,8 @@ export async function publishSpeciesLibrary(reviewer: string) {
   if (pending.length) throw new SpeciesPublicationError(`Resolve commerce review for ${pending.length} card${pending.length === 1 ? "" : "s"} before publishing.`, 409);
   const missingVersions = cards.filter((card) => !card.versions[0]);
   if (missingVersions.length) throw new SpeciesPublicationError("Every card must have a version before publication.", 409, missingVersions.map((card) => card.speciesKey));
+  const changedCards = cards.filter((card) => card.versions[0].id !== card.publishedVersionId).length;
+  if (!changedCards) throw new SpeciesPublicationError("Species Library is already up to date; no card versions need publication.", 409);
 
   const payloads = cards.map((card) => card.payload);
   const chunks = chunkSpeciesPayloads(payloads);
@@ -114,5 +122,5 @@ export async function publishSpeciesLibrary(reviewer: string) {
     for (const card of cards) await tx.speciesLibraryCard.update({ where: { id: card.id }, data: { publishedVersionId: card.versions[0].id } });
     await tx.speciesReviewItem.updateMany({ where: { shop, candidateCardId: { in: cards.map((card) => card.id) }, status: "APPROVED" }, data: { publicationStatus: "PUBLISHED", publishedAt, reviewedBy: reviewer } });
   });
-  return { shop, cards: cards.length, canonicalCards: canonicalKeys.length, newCards: integrity.newCards, chunks: chunks.length, bytes, publishedAt: publishedAt.toISOString(), metafields: result.metafields || [] };
+  return { shop, cards: cards.length, changedCards, canonicalCards: canonicalKeys.length, newCards: integrity.newCards, chunks: chunks.length, bytes, publishedAt: publishedAt.toISOString(), metafields: result.metafields || [] };
 }
