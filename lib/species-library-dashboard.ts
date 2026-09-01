@@ -93,7 +93,7 @@ export async function getSpeciesDashboardData(filters = DEFAULT_FILTERS): Promis
     const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
     const page = Math.min(filters.page, totalPages);
     const recentItems = await prisma.speciesReviewItem.findMany({
-      where: queueWhere, orderBy: [{ matchConfidence: "desc" }, { updatedAt: "asc" }],
+      where: queueWhere, orderBy: [{ matchConfidence: "desc" }, { createdAt: "asc" }],
       skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE,
       select: {
         id: true, productTitle: true, productHandle: true, kind: true, status: true,
