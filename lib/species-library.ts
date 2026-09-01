@@ -47,7 +47,7 @@ const GROUP_FIELDS: Record<SpeciesGroup, readonly string[]> = {
   purple: ["lighting", "flow", "growthRate", "roles", "tankRole", "propagation"],
   seagrass: ["lighting", "flow", "growthRate", "roles", "tankRole", "propagation"],
   fish: [],
-  cuc: ["cucType", "minTankSize", "dwelling", "diet", "tankRole"],
+  cuc: ["cucType", "minTankSize", "dwelling", "diet", "tankRole", "cleanupCrew"],
   coral: ["coralType", "lighting", "flow", "tankRole"],
 };
 
@@ -76,6 +76,22 @@ export function validateSpeciesCard(payload: unknown, options: { requireImage?: 
     for (const field of GROUP_FIELDS[group as SpeciesGroup]) {
       if (!hasValue(payload[field])) errors.push(`Missing ${group} field: ${field}`);
     }
+  }
+
+  if (typeof payload.careLevel === "string" && !["beginner", "intermediate", "advanced", "expert"].includes(payload.careLevel)) errors.push("careLevel must be beginner, intermediate, advanced, or expert.");
+  if (payload.reefSafe !== true && payload.reefSafe !== false && payload.reefSafe !== "caution") errors.push("reefSafe must be true, false, or caution.");
+  if (group === "cuc") {
+    if (!["conch", "crab", "other", "shrimp", "snail", "star", "urchin"].includes(String(payload.cucType))) errors.push("cucType is not an established library value.");
+    if (typeof payload.minTankSize !== "number" || !Number.isFinite(payload.minTankSize) || payload.minTankSize < 0) errors.push("minTankSize must be a non-negative number of gallons.");
+    if (!["sand", "rock", "both"].includes(String(payload.dwelling))) errors.push("dwelling must be sand, rock, or both.");
+    if (!Array.isArray(payload.diet) || !payload.diet.length) errors.push("diet must be a non-empty array.");
+    if (!Array.isArray(payload.tankRole) || !payload.tankRole.length) errors.push("tankRole must be a non-empty array.");
+    if (typeof payload.cleanupCrew !== "boolean") errors.push("cleanupCrew must be true or false.");
+  }
+  if (payload.shopType !== "unavailable" && payload.shopType !== "direct" && payload.shopType !== "search") errors.push("shopType must be unavailable, direct, or search.");
+  if (payload.shopType === "unavailable" && payload.shopUrl !== "#") errors.push("Unavailable cards must use # as shopUrl.");
+  if ((payload.shopType === "direct" || payload.shopType === "search") && typeof payload.shopUrl === "string") {
+    try { new URL(payload.shopUrl); } catch { errors.push("Active commerce cards must use a plain absolute shopUrl, not Markdown."); }
   }
 
   if (!isRecord(payload.taxonomy)) {
