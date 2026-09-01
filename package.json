@@ -9,7 +9,7 @@
     "lint": "eslint",
     "db:push": "prisma db push",
     "migrate:deploy": "prisma migrate deploy",
-    "species-library:import": "tsx scripts/import-species-library.ts",
+    "species-library:import": "prisma generate && tsx scripts/import-species-library.ts",
     "species-library:verify-matcher": "tsx scripts/verify-species-matcher.ts",
     "species-library:verify-webhook": "tsx scripts/verify-species-webhook.ts",
     "collection-rotation:scheduled": "tsx scripts/run-collection-rotations.ts"
