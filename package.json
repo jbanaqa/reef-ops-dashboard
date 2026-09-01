@@ -12,6 +12,7 @@
     "species-library:import": "prisma generate && tsx scripts/import-species-library.ts",
     "species-library:verify-matcher": "tsx scripts/verify-species-matcher.ts",
     "species-library:verify-webhook": "tsx scripts/verify-species-webhook.ts",
+    "species-library:verify-validation": "tsx scripts/verify-species-validation.ts",
     "collection-rotation:scheduled": "tsx scripts/run-collection-rotations.ts"
   },
   "dependencies": {

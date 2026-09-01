@@ -49,6 +49,7 @@ export function SpeciesReviewQueue({ items, databaseReady, candidateCards }: { i
       const response = await fetch(`/api/species-library/generate-text/${item.id}`, { method: "POST" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Text generation failed.");
+      if (body.result?.warnings?.length) setError(`Draft saved, but it still needs review: ${body.result.warnings.join("; ")}`);
       router.refresh();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Text generation failed."); }
     finally { setBusy(null); }

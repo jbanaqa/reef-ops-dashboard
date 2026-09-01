@@ -1,6 +1,6 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "./prisma";
-import { assertSpeciesLibraryShop, SPECIES_SCHEMA_VERSION, type SpeciesCardPayload, validateSpeciesCard } from "./species-library";
+import { assertSpeciesLibraryShop, SPECIES_SCHEMA_VERSION, type SpeciesCardPayload, validateSpeciesCard, validateSpeciesCardDraft } from "./species-library";
 import { markCommerceReviewRequired } from "./species-commerce";
 
 export type ReviewAction = "REJECT" | "SAVE_DRAFT" | "APPROVE_LINK" | "APPROVE_CARD" | "REASSIGN_LINK";
@@ -39,7 +39,7 @@ export async function reviewSpeciesItem(id: string, input: ReviewInput, reviewer
 
   if (input.action === "SAVE_DRAFT") {
     if (!input.payload || typeof input.payload !== "object") throw new SpeciesReviewError("Draft payload must be a JSON object.");
-    const validation = validateSpeciesCard(input.payload);
+    const validation = validateSpeciesCardDraft(input.payload);
     return prisma.speciesReviewItem.update({
       where: { id }, data: {
         draftPayload: input.payload as Prisma.InputJsonValue,

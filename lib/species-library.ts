@@ -59,11 +59,13 @@ function hasValue(value: unknown) {
   return value !== undefined && value !== null && value !== "";
 }
 
-export function validateSpeciesCard(payload: unknown) {
+export function validateSpeciesCard(payload: unknown, options: { requireImage?: boolean } = {}) {
+  const requireImage = options.requireImage ?? true;
   const errors: string[] = [];
   if (!isRecord(payload)) return { valid: false, errors: ["Card must be an object."] };
 
   for (const field of CORE_FIELDS) {
+    if (field === "img" && !requireImage) continue;
     if (!hasValue(payload[field])) errors.push(`Missing required field: ${field}`);
   }
 
@@ -86,6 +88,10 @@ export function validateSpeciesCard(payload: unknown) {
 
   if (!isRecord(payload.waterParams)) errors.push("waterParams must be an object.");
   return { valid: errors.length === 0, errors };
+}
+
+export function validateSpeciesCardDraft(payload: unknown) {
+  return validateSpeciesCard(payload, { requireImage: false });
 }
 
 export function normalizeShopDomain(value: string) {
