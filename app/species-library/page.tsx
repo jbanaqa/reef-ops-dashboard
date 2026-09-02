@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getSpeciesDashboardData, parseSpeciesQueueFilters } from "@/lib/species-library-dashboard";
 import { SpeciesReviewQueue } from "./SpeciesReviewQueue";
 import { SpeciesCommerceSection } from "./SpeciesCommerceSection";
+import { ApprovedCardsSection } from "./ApprovedCardsSection";
 import { SpeciesPublicationSection } from "./SpeciesPublicationSection";
 
 export const dynamic = "force-dynamic";
@@ -26,13 +27,14 @@ export default async function SpeciesLibraryPage({ searchParams }: { searchParam
   const params = await searchParams;
   const filters = parseSpeciesQueueFilters(params);
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
-  const view = requestedView === "commerce" || requestedView === "publish" ? requestedView : "queue";
+  const view = requestedView === "commerce" || requestedView === "publish" || requestedView === "cards" ? requestedView : "queue";
   const data = await getSpeciesDashboardData(filters);
   return <div className="page-stack species-page">
     <section><p className="page-header-eyebrow">Macroalgae Farms · Merchandising</p><h2 className="page-title">Species Library</h2><p className="page-description">Review product-to-species links and prepare complete species cards without allowing AI or Shopify events to publish automatically.</p></section>
     <nav className="species-view-tabs" aria-label="Species Library views">
       <Link className={view === "queue" ? "active" : ""} href="/species-library">Approval queue <span>{data.awaitingReview}</span></Link>
       <Link className={view === "commerce" ? "active" : ""} href="/species-library?view=commerce">Commerce review</Link>
+      <Link className={view === "cards" ? "active" : ""} href="/species-library?view=cards">Approved cards <span>{data.approvedCards}</span></Link>
       <Link className={view === "publish" ? "active" : ""} href="/species-library?view=publish">Publish to Shopify</Link>
     </nav>
     <section className="species-safety-banner"><div><span className="reef-live-dot" /><strong>Store isolation</strong></div><p>{data.databaseReady ? "Macroalgae Farms boundary and Species Library database are ready. Shopify events can only add approval-queue items." : data.configured ? "Macroalgae Farms boundary configured. Apply the database migration and import the approved cards next." : "Inactive until SPECIES_LIBRARY_SHOP_DOMAIN is configured for Macroalgae Farms."}</p></section>
@@ -60,6 +62,7 @@ export default async function SpeciesLibraryPage({ searchParams }: { searchParam
       </nav>}
       <div className="species-flow">{stages.map(([number, title, description]) => <article key={number}><i>{number}</i><div><strong>{title}</strong><p>{description}</p></div></article>)}</div>
     </section>}
+    {view === "cards" && <ApprovedCardsSection />}
     {view === "commerce" && <SpeciesCommerceSection />}
     {view === "publish" && <SpeciesPublicationSection />}
   </div>;
