@@ -1,6 +1,7 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "./prisma";
 import { assertSpeciesLibraryShop, SPECIES_SCHEMA_VERSION, type SpeciesCardPayload, validateSpeciesCard, validateSpeciesCardDraft } from "./species-library";
+import { matchProductToSpecies } from "./species-library-matcher";
 import { markCommerceReviewRequired } from "./species-commerce";
 
 export type ReviewAction = "REJECT" | "SAVE_DRAFT" | "APPROVE_LINK" | "APPROVE_CARD" | "REASSIGN_LINK";
@@ -97,6 +98,36 @@ export async function reviewSpeciesItem(id: string, input: ReviewInput, reviewer
         matchMethod: "HUMAN_CREATED", confidence: 1, approvedAt: new Date(),
       },
     });
+    // A newly approved general card may resolve other products that were
+    // queued before the card existed. Reclassify only positive matches;
+    // final product linking still requires explicit human approval.
+    const pendingCreateItems = await tx.speciesReviewItem.findMany({
+      where: { shop, status: "AWAITING_REVIEW", kind: "CREATE_CARD", id: { not: item.id } },
+    });
+    for (const pending of pendingCreateItems) {
+      const match = matchProductToSpecies({
+        id: pending.shopifyProductId,
+        title: pending.productTitle,
+        handle: pending.productHandle || "",
+        status: pending.productStatus,
+        descriptionHtml: pending.productDescription || "",
+        productType: "",
+        vendor: "",
+        tags: [],
+        updatedAt: pending.productUpdatedAt.toISOString(),
+        imageUrls: Array.isArray(pending.productImageUrls) ? pending.productImageUrls.map(String) : [],
+      }, [{
+        id: card.id,
+        speciesKey: card.speciesKey,
+        commonName: card.commonName,
+        scientificName: card.scientificName,
+        payload: card.payload,
+      }]);
+      if (match) await tx.speciesReviewItem.update({
+        where: { id: pending.id },
+        data: { kind: "LINK_EXISTING", candidateCardId: card.id, matchConfidence: match.confidence, matchReasons: match.reasons },
+      });
+    }
     await markCommerceReviewRequired(tx, [card.id]);
     return tx.speciesReviewItem.update({
       where: { id }, data: {

@@ -48,6 +48,7 @@ const GENERATION_RULES = [
   "Use group cuc for marine invertebrates including anemones; use cucType other when no narrower value applies and cleanupCrew false for display-only invertebrates.",
   "Do not include fields belonging to another group. Put detailed light and flow guidance in waterParams for CUC cards; fish propagation describes captive breeding rather than fragging.",
   "Use conservative qualified language where evidence is limited. Never invent taxonomy, distribution, reproduction, compatibility, maximum size, or universal thresholds.",
+  "When a supported temperature range is known, waterParams.temp must use a practical numeric Fahrenheit range rather than vague wording such as stable reef temperatures.",
   "Descriptions must be evergreen and factual, without sales language, stock status, specimen guarantees, Markdown, or references to the listing.",
   "Set img to an empty string, shopType to unavailable, and shopUrl to #. Never generate Markdown links or decide commerce behavior; those are separate human-review stages.",
 ];
