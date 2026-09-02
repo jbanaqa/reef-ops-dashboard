@@ -84,7 +84,7 @@ export function SpeciesReviewQueue({ items, databaseReady, candidateCards }: { i
   if (!items.length) return <div className="species-empty-queue"><strong>{databaseReady ? "No matching queue items" : "Database activation pending"}</strong><p>{databaseReady ? "Adjust the filters or wait for a new Shopify event." : "No migration or import has been run from this workspace."}</p></div>;
 
   return <div className="species-review-workspace">
-    <div aria-live="polite">{generating && <p className="species-publication-message">Generating the species-card draft. This may take a moment…</p>}{notice && <p className="species-publication-message">{notice}</p>}{error && <p className="species-review-error">{error}</p>}</div>
+    <div className="species-toast-stack" aria-live="polite">{generating && <p className="species-publication-message">Generating the species-card draft. This may take a moment…</p>}{notice && <p className="species-publication-message">{notice}</p>}{error && <p className="species-review-error">{error}</p>}</div>
     {highConfidenceIds.length > 0 && <div className="species-batch-bar">
       <button className="button-secondary" type="button" onClick={toggleAllHighConfidence}>{highConfidenceIds.every((id) => selected.has(id)) ? "Clear page selection" : `Select ${highConfidenceIds.length} high-confidence on page`}</button>
       <label><input type="checkbox" checked={batchConfirmed} onChange={(event) => setBatchConfirmed(event.target.checked)} /><span>I reviewed the selected product-to-card mappings</span></label>

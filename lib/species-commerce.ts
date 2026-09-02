@@ -88,3 +88,25 @@ export async function reviewSpeciesCommerce(cardId: string, input: { mode: Speci
     return updated;
   });
 }
+
+export async function returnSpeciesCommerceLinksToReview(cardId: string) {
+  const shop = assertSpeciesLibraryShop();
+  return (await import("./prisma")).prisma.$transaction(async (tx) => {
+    const card = await tx.speciesLibraryCard.findFirst({ where: { id: cardId, shop }, select: { id: true } });
+    if (!card) throw new Error("Species card not found.");
+    const links = await tx.speciesProductLink.findMany({ where: { shop, cardId }, select: { shopifyProductId: true } });
+    const productIds = links.map((link) => link.shopifyProductId);
+    if (productIds.length) {
+      await tx.speciesProductLink.deleteMany({ where: { shop, cardId, shopifyProductId: { in: productIds } } });
+      await tx.speciesReviewItem.updateMany({
+        where: { shop, candidateCardId: cardId, shopifyProductId: { in: productIds } },
+        data: { kind: "LINK_EXISTING", status: "AWAITING_REVIEW", publicationStatus: "NOT_STARTED", reviewedAt: null, approvedAt: null, publishedAt: null },
+      });
+    }
+    await tx.speciesLibraryCard.update({
+      where: { id: cardId },
+      data: { commerceReviewStatus: "NEEDS_REVIEW", commerceReviewedAt: null, commerceReviewedBy: null },
+    });
+    return { returnedLinks: productIds.length };
+  });
+}
