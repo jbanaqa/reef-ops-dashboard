@@ -40,14 +40,27 @@ const GROUP_REQUIREMENTS = {
 };
 
 const GENERATION_RULES = [
-  "The card represents a reusable biological and husbandry unit, not a product SKU, size, sale label, or cosmetic color variant.",
-  "Generalize color-only tube-anemone products (Peach, Purple, Orange, etc.) to id tube-anemone, commonName Tube Anemone, scientificName Cerianthus sp.; do not generalize genuinely different species or established clownfish types.",
+  "The card represents a reusable biological and husbandry unit, never a size, pack, sale label, inventory state, or cosmetic SKU.",
+  "Collapse cosmetic color forms only when evidence supports the same taxon and husbandry; keep genuinely different species and established trade identities, including distinct clownfish types, separate.",
+  "Never infer a species from color or marketing language. Use genus-level identification when the source does not support greater certainty.",
   "Use only established library values: careLevel beginner/intermediate/advanced/expert; reefSafe true/false/caution.",
   "For CUC, diet and tankRole are arrays, minTankSize is a number, dwelling is sand/rock/both, and cucType uses the supplied enum.",
-  "Do not include fields belonging to another group. Put detailed light and flow guidance in waterParams for CUC cards.",
-  "Do not make species-level claims when the trade identification is only genus-level. Avoid unsupported claims about reproduction, predation, distribution, or universal husbandry thresholds.",
+  "Use group cuc for marine invertebrates including anemones; use cucType other when no narrower value applies and cleanupCrew false for display-only invertebrates.",
+  "Do not include fields belonging to another group. Put detailed light and flow guidance in waterParams for CUC cards; fish propagation describes captive breeding rather than fragging.",
+  "Use conservative qualified language where evidence is limited. Never invent taxonomy, distribution, reproduction, compatibility, maximum size, or universal thresholds.",
+  "Descriptions must be evergreen and factual, without sales language, stock status, specimen guarantees, Markdown, or references to the listing.",
   "Set img to an empty string, shopType to unavailable, and shopUrl to #. Never generate Markdown links or decide commerce behavior; those are separate human-review stages.",
 ];
+
+function balancedExamples(cards: { group: string; payload: Prisma.JsonValue }[]) {
+  const counts = new Map<string, number>();
+  return cards.filter((card) => {
+    const count = counts.get(card.group) || 0;
+    if (count >= 3) return false;
+    counts.set(card.group, count + 1);
+    return true;
+  }).map((card) => card.payload);
+}
 
 export async function generateSpeciesText(reviewItemId: string) {
   const shop = assertSpeciesLibraryShop();
@@ -60,26 +73,44 @@ export async function generateSpeciesText(reviewItemId: string) {
 
   await prisma.speciesReviewItem.update({ where: { id: item.id }, data: { textStatus: "RUNNING", lastError: null, attemptCount: { increment: 1 } } });
   try {
-    const examples = await prisma.speciesLibraryCard.findMany({ where: { shop, status: { startsWith: "APPROVED" } }, orderBy: { updatedAt: "desc" }, take: 3, select: { payload: true } });
+    const approvedCards = await prisma.speciesLibraryCard.findMany({
+      where: { shop, status: { startsWith: "APPROVED" } },
+      orderBy: [{ group: "asc" }, { updatedAt: "desc" }],
+      select: { group: true, payload: true },
+    });
+    const examples = balancedExamples(approvedCards);
     const openai = new OpenAI({ apiKey });
     const response = await openai.responses.create({
       model,
       store: false,
-      instructions: `Create a factual marine species-library card proposal. Match the supplied approved-card structure and tone without promotional filler. Never invent certainty: use conservative wording when product data is insufficient. Return JSON only. Include every field required for the selected group. ${Object.values(GROUP_REQUIREMENTS).join(" ")} ${GENERATION_RULES.join(" ")} This is a draft for human review, never a publishing instruction.`,
+      instructions: `Create a factual marine Species Library proposal for mandatory human review. First decide reusable biological scope, then write the complete card. Match approved-card field semantics and restrained tone. Return JSON only. ${Object.values(GROUP_REQUIREMENTS).join(" ")} ${GENERATION_RULES.join(" ")}`,
       input: JSON.stringify({
         product: {
           title: item.productTitle, handle: item.productHandle,
           descriptionHtml: item.productDescription,
           imageUrls: item.productImageUrls,
         },
-        approvedStyleExamples: examples.map((example) => example.payload),
+        approvedExamplesByGroup: examples,
         groupRequirements: GROUP_REQUIREMENTS,
         generationRules: GENERATION_RULES,
       }),
       text: { format: { type: "json_schema", name: "species_card_draft", strict: false, schema: CARD_SCHEMA } },
     });
-    const parsed = JSON.parse(response.output_text) as unknown;
-    const draft = normalizeGeneratedSpeciesDraft(parsed, item.productTitle);
+    if (!response.output_text) throw new Error("Initial generation returned no JSON.");
+    const initialDraft = normalizeGeneratedSpeciesDraft(JSON.parse(response.output_text) as unknown, item.productTitle);
+    const auditResponse = await openai.responses.create({
+      model,
+      store: false,
+      instructions: `Act as the final quality gate for a marine Species Library draft. Correct the JSON rather than describing problems. Verify biological scope, taxonomic certainty, group-specific fields and types, established enums, husbandry plausibility, internal consistency, neutral commerce, and evergreen wording. Remove cross-group and promotional fields. Preserve uncertainty instead of inventing facts. Return complete corrected JSON only. ${Object.values(GROUP_REQUIREMENTS).join(" ")} ${GENERATION_RULES.join(" ")}`,
+      input: JSON.stringify({
+        product: { title: item.productTitle, handle: item.productHandle, descriptionHtml: item.productDescription },
+        draftToAudit: initialDraft,
+        approvedExamplesByGroup: examples,
+      }),
+      text: { format: { type: "json_schema", name: "audited_species_card_draft", strict: false, schema: CARD_SCHEMA } },
+    });
+    if (!auditResponse.output_text) throw new Error("Draft audit returned no JSON.");
+    const draft = normalizeGeneratedSpeciesDraft(JSON.parse(auditResponse.output_text) as unknown, item.productTitle);
     const validation = validateSpeciesCardDraft(draft);
     const validationMessage = validation.valid ? null : `Generated draft needs review: ${validation.errors.join("; ")}`;
     await prisma.speciesReviewItem.update({
@@ -89,7 +120,7 @@ export async function generateSpeciesText(reviewItemId: string) {
         imageStatus: "PLACEHOLDER", lastError: validationMessage,
       },
     });
-    return { reviewItemId: item.id, model, responseId: response.id, draft, warnings: validation.errors };
+    return { reviewItemId: item.id, model, responseIds: [response.id, auditResponse.id], draft, warnings: validation.errors };
   } catch (error) {
     await prisma.speciesReviewItem.update({ where: { id: item.id }, data: { textStatus: "FAILED", lastError: error instanceof Error ? error.message : "Text generation failed." } });
     throw error;
