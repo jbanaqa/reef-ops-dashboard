@@ -37,8 +37,8 @@ test("segment window validation rejects NaN, fractions, and negative windows",()
   assert.deepEqual(segment({tag:"B2B",openedDays:365}),{tag:"b2b",openedDays:365});
 });
 test("B2B HTML copy is sanitized and preserves explicit HTTPS links",()=>{
-  const c=content({...defaultContent,template:"b2b-wholesale",body:"Hi {{ first_name|default:\"Friend!\" }}!\n\nCopy",bodyHtml:'<p><strong>Sale</strong> {{ first_name|default:"Friend!" }} <a href="https://coralsanonymous.com/sale">shop</a><script>alert(1)</script><a href="javascript:bad">bad</a></p>',logo:"data:image/png;base64,abc",logoWidth:420,footerImage:"data:image/png;base64,abc",footerWidth:500});
+  const c=content({...defaultContent,template:"b2b-wholesale",body:"Hi {{ first_name|default:\"Friend!\" }}!\n\nCopy",bodyHtml:'<p><strong>Sale</strong> {{ first_name|default:"Friend!" }} <a href="https://coralsanonymous.com/sale">shop</a><script>alert(1)</script><a href="javascript:bad">bad</a></p>',logo:"data:image/png;base64,abc",logoScale:1.5,footerImage:"data:image/png;base64,abc",footerScale:0.9});
   assert.ok(c.bodyHtml?.includes("<strong>Sale</strong>")); assert.ok(!c.bodyHtml?.includes("script")); assert.ok(!c.bodyHtml?.includes("javascript"));
   const html=render(c,"https://example.com/unsubscribe","123 Main Street","Jane Doe","Example Co");
-  assert.ok(html.includes("width:420px")); assert.ok(html.includes("width:500px")); assert.ok(html.includes('href="https://coralsanonymous.com/sale"')); assert.ok(html.includes('href="https://example.com/unsubscribe"')); assert.ok(html.includes("Jane"));
+  assert.ok(html.includes("width:390px")); assert.ok(html.includes("width:504px")); assert.ok(html.includes('href="https://coralsanonymous.com/sale"')); assert.ok(html.includes('href="https://example.com/unsubscribe"')); assert.ok(html.includes("Jane"));
 });
