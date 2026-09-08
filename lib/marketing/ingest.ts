@@ -52,7 +52,15 @@ export async function deliveryEvent(key: string, providerId: string, type: strin
   if (!allowed.includes(type)) return;
   return atomic(async tx => {
     const m = await tx.marketingMessage.findFirst({ where: { providerId, shop: shop() } });
-    if (!m) throw new Error("Message not recorded yet; retry event.");
+    if (!m) {
+      // Internal test sends are delivered through the provider without a
+      // MarketingMessage/profile row. Resolve their provider ID mapping so
+      // Resend can receive a successful response instead of retrying forever.
+      const test = await tx.marketingEvent.findUnique({ where: { shop_key: { shop: shop(), key: `test-provider:${providerId}` } } });
+      if (!test) throw new Error("Message not recorded yet; retry event.");
+      await record(tx, { key, type, occurredAt: at, payload: { ...((payload || {}) as object), test: true, providerId } });
+      return;
+    }
     if (at > new Date(Date.now() + 300000)) throw new Error("Invalid event time.");
     await record(tx, { key, type, profileId: m.profileId, messageId: m.id, occurredAt: at, payload });
     if (type === "OPENED" && m.channel === "EMAIL") await tx.marketingProfile.updateMany({ where: { id: m.profileId, OR: [{ lastOpenedAt: null }, { lastOpenedAt: { lt: at } }] }, data: { lastOpenedAt: at } });

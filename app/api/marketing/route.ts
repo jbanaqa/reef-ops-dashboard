@@ -69,8 +69,10 @@ export async function POST(request: Request) {
       if (!setup().emailReady) throw new Error("Complete email provider setup first.");
       const id = crypto.randomUUID();
       const s = await loadMarketingSettings();
-      await resendProvider.send({ id, to, channel: "EMAIL", subject: `[TEST] ${String(b.subject || "Campaign preview").slice(0, 190)}`, content: content(b.content), address: s.postalAddress, organizationName: s.organizationName, unsubscribe: `${process.env.APP_BASE_URL}/our-klaviyo/settings` });
-      await atomic(tx => record(tx, { key: `test:${id}`, type: "TEST_SENT", payload: { to } }));
+      const providerId = await resendProvider.send({ id, to, channel: "EMAIL", subject: `[TEST] ${String(b.subject || "Campaign preview").slice(0, 190)}`, content: content(b.content), address: s.postalAddress, organizationName: s.organizationName, unsubscribe: `${process.env.APP_BASE_URL}/our-klaviyo/settings` });
+      // Test sends do not have a profile/message row, so persist the provider
+      // ID under a deterministic key for delivery webhooks to resolve.
+      await atomic(tx => record(tx, { key: `test-provider:${providerId}`, type: "TEST_SENT", payload: { to, providerId } }));
       return Response.json({ ok: true });
     }
     if (b.action === "import") return Response.json({ results: await importProfiles(b.rows, b.dryRun !== false) });
