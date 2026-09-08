@@ -38,7 +38,7 @@ export async function ingestShopify(topic: string, key: string, p: Payload, hist
         const orderAt = date(p.created_at || at.toISOString());
         await record(tx, { key: orderKey, type: "ORDER", profileId: profile.id, messageId: historical ? undefined : await attribute(tx, profile.id, orderAt), occurredAt: orderAt, payload: { orderId: String(p.id), revenue: String(p.total_price || "0"), currency: p.currency || "UNKNOWN", model: "last-click-5d-else-open-1d", historical } });
         if (!profile.lastOrderAt || profile.lastOrderAt < orderAt) await tx.marketingProfile.update({ where: { id: profile.id }, data: { lastOrderAt: orderAt } });
-        await tx.marketingMessage.updateMany({ where: { profileId: profile.id, flowKey: "abandoned-cart", status: "PENDING", triggerAt: { lte: orderAt } }, data: { status: "CANCELLED", error: "Order placed" } });
+        await tx.marketingMessage.updateMany({ where: { profileId: profile.id, flowKey: "abandoned-cart", flowCondition: null, status: "PENDING", triggerAt: { lte: orderAt } }, data: { status: "CANCELLED", error: "Order placed" } });
       }
     }
     if (topic === "checkouts/create" && !historical && p.abandoned_checkout_url) await enroll(tx, "abandoned-cart", profile.id, String(p.token || p.id), at, { url: p.abandoned_checkout_url });

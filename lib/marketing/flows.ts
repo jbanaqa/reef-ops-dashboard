@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { Content, eligible } from "./rules";
 import { json, shop, Tx } from "./store";
-export type FlowConfig = { reviewed: boolean; description?: string; steps: { minutes: number; subject: string; channel: string; content: Content }[]; smsContent?: Content; internalProfileIds?: string[]; threshold?: number };
+export type FlowConfig = { reviewed: boolean; description?: string; steps: { minutes: number; subject: string; channel: string; content: Content }[]; smsContent?: Content; orderBranch?: { yes: { subject: string; content: Content }; no: { subject: string; content: Content } }; internalProfileIds?: string[]; threshold?: number };
 export async function enroll(tx: Tx, key: string, profileId: string, eventKey: string, at: Date, context: { url?: string; expectedDeliveryAt?: Date; stockText?: string } = {}) {
   const resource = await tx.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "FLOW", key } } });
   if (!resource?.enabled) return;
@@ -26,7 +26,11 @@ export async function enroll(tx: Tx, key: string, profileId: string, eventKey: s
     }
     const dueAt = key === "delivery-upsell" ? new Date(+context.expectedDeliveryAt! - 86400000) : new Date(+at + step.minutes * 60000);
     if (key === "delivery-upsell" && dueAt < new Date()) continue;
-    await tx.marketingMessage.upsert({ where: { key: `${base}:${i}` }, create: { shop: shop(), key: `${base}:${i}`, profileId, flowKey: key, channel: step.channel, subject: step.subject, content: json(c), dueAt, triggerAt: at }, update: {} });
+    await tx.marketingMessage.upsert({ where: { key: `${base}:${i}` }, create: { shop: shop(), key: `${base}:${i}`, profileId, flowKey: key, flowStep: i, channel: step.channel, subject: step.subject, content: json(c), dueAt, triggerAt: at }, update: {} });
+  }
+  if (key === "abandoned-cart" && config.orderBranch) {
+    const dueAt = new Date(+at + 1440 * 60000);
+    await tx.marketingMessage.upsert({ where: { key: `${base}:order-branch` }, create: { shop: shop(), key: `${base}:order-branch`, profileId, flowKey: key, flowStep: 2, flowCondition: "ORDER_PLACED", channel: "EMAIL", subject: config.orderBranch.no.subject, content: json(config.orderBranch.no.content), dueAt, triggerAt: at }, update: {} });
   }
 }
 export async function lowStock() {

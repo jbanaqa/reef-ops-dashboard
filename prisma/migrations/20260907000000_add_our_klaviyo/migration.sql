@@ -73,6 +73,8 @@ CREATE TABLE "MarketingMessage" (
     "profileId" TEXT NOT NULL,
     "campaignId" TEXT,
     "flowKey" TEXT,
+    "flowStep" INTEGER,
+    "flowCondition" TEXT,
     "channel" TEXT NOT NULL,
     "subject" TEXT NOT NULL,
     "content" JSONB NOT NULL,

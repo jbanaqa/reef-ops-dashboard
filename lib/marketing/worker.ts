@@ -38,7 +38,11 @@ export async function runMarketing() {
         const f = await tx.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: m.flowKey } } });
         if (!f?.enabled) reason = "Flow paused";
       }
-      if (m.flowKey === "abandoned-cart" && m.profile.lastOrderAt && m.triggerAt && m.profile.lastOrderAt >= m.triggerAt) reason = "Customer purchased after checkout";
+      if (m.flowKey === "abandoned-cart" && m.flowCondition === "ORDER_PLACED") {
+        const config = (await tx.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" } } }))?.data as { orderBranch?: { yes: { subject: string; content: Content }; no: { subject: string; content: Content } } } | undefined;
+        const branch = m.profile.lastOrderAt && m.triggerAt && m.profile.lastOrderAt >= m.triggerAt ? config?.orderBranch?.yes : config?.orderBranch?.no;
+        if (branch) { m.subject = branch.subject; m.content = branch.content as never; }
+      } else if (m.flowKey === "abandoned-cart" && m.profile.lastOrderAt && m.triggerAt && m.profile.lastOrderAt >= m.triggerAt) reason = "Customer purchased after checkout";
       if (m.channel !== "EMAIL") {
         if (!config.smsReady) return null;
         // Default to conservative recipient-local SMS hours; unknown timezone cannot send.

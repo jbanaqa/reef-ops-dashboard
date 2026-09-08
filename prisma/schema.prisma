@@ -87,6 +87,8 @@ model MarketingMessage {
   campaignId String?
   campaign MarketingCampaign? @relation(fields: [campaignId], references: [id])
   flowKey String?
+  flowStep Int?
+  flowCondition String?
   channel String
   subject String
   content Json
