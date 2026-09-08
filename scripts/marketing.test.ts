@@ -48,3 +48,10 @@ test("B2B full-layout HTML does not duplicate the heading or greeting",()=>{
   assert.equal((html.match(/Welcome to Corals Anonymous/g) || []).length,1);
   assert.equal((html.match(/Hi Jane/g) || []).length,1);
 });
+test("B2B styled h1 HTML survives sanitization and rendering",()=>{
+  const headingStyle="margin:0 0 45px;text-align:center;font-size:27px;line-height:1.15;";
+  const c=content({...defaultContent,template:"b2b-wholesale",body:'Hi {{ first_name|default:"Friend!" }}!\n\nCopy',bodyHtml:`<h1 style="${headingStyle}">Welcome to Corals Anonymous<br>Wholesale!</h1><p>Copy</p>`});
+  assert.ok(c.bodyHtml?.includes(`<h1 style="${headingStyle}">`));
+  const html=render(c,"https://example.com/unsubscribe","");
+  assert.ok(html.includes(`<h1 style="${headingStyle}">`));
+});
