@@ -11,7 +11,10 @@ export async function enroll(tx: Tx, key: string, profileId: string, eventKey: s
   const once = ["welcome", "b2b-welcome"].includes(key);
   const base = once ? `${key}:${profileId}` : `${key}:${profileId}:${eventKey}`;
   if (key === "abandoned-cart" && await tx.marketingMessage.findFirst({ where: { profileId, flowKey: key, triggerAt: { gte: new Date(+at - 86400000) }, status: { in: ["PENDING", "SENDING", "SENT"] } } })) return;
-  const steps = [...config.steps];
+  // The audited abandoned-cart flow has one pre-branch email, then a single
+  // conditional Email #2. Do not retain the former generic second email when
+  // the explicit order branch is configured.
+  const steps = key === "abandoned-cart" && config.orderBranch ? config.steps.slice(0, 1) : [...config.steps];
   if (key === "abandoned-cart" && config.smsContent) {
     const c = await tx.marketingConsent.findUnique({ where: { profileId_channel: { profileId, channel: "SMS_MARKETING" } } });
     if (eligible(c)) steps.push({ minutes: 30, subject: "Your cart", channel: "SMS_MARKETING", content: config.smsContent });
