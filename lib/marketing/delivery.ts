@@ -1,15 +1,15 @@
 import { Content, render } from "./rules";
 
-export type Delivery = { id: string; to: string; channel: string; subject: string; content: Content; unsubscribe: string; profileName?: string };
+export type Delivery = { id: string; to: string; channel: string; subject: string; content: Content; unsubscribe: string; profileName?: string; address?: string; organizationName?: string };
 export interface DeliveryProvider { send(message: Delivery): Promise<string> }
 export class DeliveryError extends Error { constructor(message: string, public uncertain = false, public retryable = false) { super(message); } }
 export const resendProvider: DeliveryProvider = {
   async send(m) {
-    const key = process.env.RESEND_API_KEY, from = process.env.RESEND_FROM_EMAIL, address = process.env.MARKETING_POSTAL_ADDRESS;
+    const key = process.env.RESEND_API_KEY, from = process.env.RESEND_FROM_EMAIL, address = m.address || process.env.MARKETING_POSTAL_ADDRESS, organizationName = m.organizationName || "Corals Anonymous";
     if (!key || !from || !address) throw new DeliveryError("Email sender and postal address are not configured.");
     let response: Response;
     try {
-      response = await fetch("https://api.resend.com/emails", { method: "POST", signal: AbortSignal.timeout(20000), headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": `marketing-${m.id}` }, body: JSON.stringify({ from, to: [m.to], subject: m.subject, html: render(m.content, m.unsubscribe, address, m.profileName), text: `${m.content.heading}\n\n${m.content.body}\n\n${m.content.url}\n\nCorals Anonymous\n${address}\nUnsubscribe: ${m.unsubscribe}`, headers: { "List-Unsubscribe": `<${m.unsubscribe}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }, tags: [{ name: "marketing_message", value: m.id }] }) });
+      response = await fetch("https://api.resend.com/emails", { method: "POST", signal: AbortSignal.timeout(20000), headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": `marketing-${m.id}` }, body: JSON.stringify({ from, to: [m.to], subject: m.subject, html: render(m.content, m.unsubscribe, address, m.profileName, organizationName), text: `${m.content.heading}\n\n${m.content.body}\n\n${m.content.url}\n\n${organizationName}\n${address}\nUnsubscribe: ${m.unsubscribe}`, headers: { "List-Unsubscribe": `<${m.unsubscribe}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }, tags: [{ name: "marketing_message", value: m.id }] }) });
     } catch { throw new DeliveryError("Email delivery outcome unknown; reconcile with provider before retrying.", true); }
     if (!response.ok) throw new DeliveryError(`Email provider returned ${response.status}`, response.status >= 500, response.status === 429);
     const data = await response.json();

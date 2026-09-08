@@ -28,9 +28,9 @@ Attribution is one message per order: last recorded click within five days, othe
 
 1. Profiles, identity conflict detection, consent ledger, sticky suppression, historical imports, dynamic audiences and static list memberships.
 2. Expandable Our Klaviyo navigation: Overview, Campaigns, Flows, Forms, Audiences, Templates, Analytics, Settings.
-3. Campaign drafts, template reuse, subject/preview/hero/body/button/product cards, desktop/mobile HTML preview, allowlisted internal test email, duplication, scheduling, cancellation and send-time eligibility.
+3. Campaign drafts, template reuse, subject/preview/hero/body/button/product cards, desktop/mobile HTML preview, allowlisted internal test email, duplication, scheduling, cancellation and send-time eligibility. Flow message editors support plain copy with the audited automatic homepage link or sanitized HTML for deliberate formatting control.
 4. Five configurable, initially paused flow definitions. Welcome/B2B enroll once; abandoned cart has a configurable email sequence and optional SMS at 30 minutes, with purchase cancellation; low stock alerts use configured internal profiles; delivery upsell requires a trusted expected-delivery event.
-5. Storefront script: 10-second popup, desktop/mobile, outside/Escape dismissal, seven-day dismissal interval, submission suppression and a separate optional SMS step. Email confirmation adds an ownership check before enrolling welcome emails. This intentionally adds double opt-in to the audited experience; the popup says the offer follows confirmation.
+5. Storefront script: 10-second popup, desktop/mobile, outside/Escape dismissal, seven-day dismissal interval, submission suppression and a separate optional SMS step. Email confirmation adds an ownership check before enrolling welcome emails. This intentionally adds double opt-in to the audited experience; the popup says the offer follows confirmation. Settings stores the organization name and business mailing address used in every footer, preview and future send.
 6. Signed Shopify, Resend and gateway event endpoints; open/click/delivery/bounce/complaint/unsubscribe events; anonymous storefront observations; aggregate analytics.
 
 ## Required configuration

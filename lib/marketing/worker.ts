@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { audienceWhere, atomic, json, record, shop } from "./store";
-import { Content, eligible, matches, Segment } from "./rules";
+import { Content, eligible, marketingSettings, matches, Segment } from "./rules";
 import { DeliveryError, resendProvider, setup, smsProvider } from "./delivery";
 import { lowStock } from "./flows";
 
@@ -24,6 +24,8 @@ export async function runMarketing() {
     await prisma.marketingCampaign.updateMany({ where: { id: campaign.id, status: "SCHEDULED" }, data: { status: "SENDING", expandedAt: now } });
   }
   const pending = await prisma.marketingMessage.findMany({ where: { shop: shop(), status: "PENDING", dueAt: { lte: now } }, orderBy: { dueAt: "asc" }, take: 50 });
+  const settingsRow = await prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } } });
+  const settings = marketingSettings(settingsRow?.data);
   let sent = 0;
   for (const candidate of pending) {
     const message = await atomic(async tx => {
@@ -58,7 +60,7 @@ export async function runMarketing() {
     if (!message) continue;
     try {
       const provider = message.channel === "EMAIL" ? resendProvider : smsProvider;
-      const providerId = await provider.send({ id: message.id, to: message.channel === "EMAIL" ? message.profile.email! : message.profile.phone!, channel: message.channel, subject: message.subject, content: message.content as Content, profileName: message.profile.name, unsubscribe: `${process.env.APP_BASE_URL}/api/marketing/unsubscribe?token=${message.token}` });
+      const providerId = await provider.send({ id: message.id, to: message.channel === "EMAIL" ? message.profile.email! : message.profile.phone!, channel: message.channel, subject: message.subject, content: message.content as Content, profileName: message.profile.name, address: settings.postalAddress, organizationName: settings.organizationName, unsubscribe: `${process.env.APP_BASE_URL}/api/marketing/unsubscribe?token=${message.token}` });
       await atomic(async tx => {
         await tx.marketingMessage.update({ where: { id: message.id }, data: { status: "SENT", sentAt: new Date(), providerId } });
         await record(tx, { key: `sent:${message.id}`, type: "SENT", profileId: message.profileId, messageId: message.id });

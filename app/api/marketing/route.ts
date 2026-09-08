@@ -1,12 +1,16 @@
 import { isDashboardRequestAuthorized } from "@/lib/dashboard-request-auth";
 import { prisma } from "@/lib/prisma";
 import { audienceWhere, atomic, backfillB2BWelcome, consent, ensureB2BTemplate, json, record, seed, shop } from "@/lib/marketing/store";
-import { content, date, defaultContent, email, render, segment } from "@/lib/marketing/rules";
+import { content, date, defaultContent, defaultMarketingSettings, email, marketingSettings, render, segment } from "@/lib/marketing/rules";
 import { resendProvider, setup } from "@/lib/marketing/delivery";
 import { importProfiles } from "@/lib/marketing/ingest";
 import { FlowConfig } from "@/lib/marketing/flows";
 
 export const dynamic = "force-dynamic";
+async function loadMarketingSettings() {
+  const row = await prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } } });
+  return marketingSettings(row?.data, process.env.MARKETING_POSTAL_ADDRESS || defaultMarketingSettings.postalAddress);
+}
 function authorize(request: Request) {
   if (!isDashboardRequestAuthorized(request)) return Response.json({ error: "Login required" }, { status: 401 });
   const origin = request.headers.get("origin");
@@ -31,7 +35,7 @@ export async function GET(request: Request) {
     await backfillB2BWelcome();
     await ensureB2BTemplate();
     const url = new URL(request.url), view = url.searchParams.get("view") || "overview";
-    if (view === "preview") return new Response(render(defaultContent, "#unsubscribe", process.env.MARKETING_POSTAL_ADDRESS || "Your business mailing address"), { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } });
+    if (view === "preview") { const s = await loadMarketingSettings(); return new Response(render(defaultContent, "#unsubscribe", s.postalAddress, undefined, s.organizationName), { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } }); }
     if (view === "profile") {
       const profile = await prisma.marketingProfile.findFirst({ where: { shop: shop(), id: url.searchParams.get("id") || "" }, include: { consents: true, events: { orderBy: { occurredAt: "desc" }, take: 100 }, messages: { orderBy: { createdAt: "desc" }, take: 100 } } });
       return Response.json({ profile });
@@ -47,7 +51,8 @@ export async function GET(request: Request) {
     ]);
     const revenue: Record<string, number> = {};
     for (const order of orders) { const p = order.payload as { currency: string; revenue: string }; revenue[p.currency] = (revenue[p.currency] || 0) + Number(p.revenue || 0); }
-    return Response.json({ profiles, nextCursor: profiles.length === 100 ? profiles[99].id : null, campaigns, resources, counts: { profiles: counts[0], mailable: counts[1], suppressions: counts[2] }, messageCounts, eventCounts, revenue, revenueCapped: orders.length === 10000, setup: setup() }, { headers: { "Cache-Control": "no-store" } });
+    const settings = await loadMarketingSettings();
+    return Response.json({ profiles, nextCursor: profiles.length === 100 ? profiles[99].id : null, campaigns, resources, settings, counts: { profiles: counts[0], mailable: counts[1], suppressions: counts[2] }, messageCounts, eventCounts, revenue, revenueCapped: orders.length === 10000, setup: setup() }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) { console.error("Marketing read failed", e); return Response.json({ error: "Marketing data is unavailable. Apply the marketing migration and configure DATABASE_URL and SHOPIFY_SHOP_DOMAIN." }, { status: 503 }); }
 }
 export async function POST(request: Request) {
@@ -56,18 +61,24 @@ export async function POST(request: Request) {
     const raw = await request.text(); if (raw.length > 1000000) throw new Error("Request too large.");
     const b = JSON.parse(raw);
     if (b.action === "initialize") { await seed(); return Response.json({ ok: true }); }
-    if (b.action === "preview") return Response.json({ html: render(content(b.content), "#unsubscribe", process.env.MARKETING_POSTAL_ADDRESS || "Your business mailing address") });
+    if (b.action === "preview") { const s = await loadMarketingSettings(); return Response.json({ html: render(content(b.content), "#unsubscribe", s.postalAddress, undefined, s.organizationName) }); }
     if (b.action === "test-email") {
       const to = email(b.to);
       const allowed = (process.env.MARKETING_TEST_EMAILS || "").split(",").map(v => v.trim().toLowerCase());
       if (!allowed.includes(to)) throw new Error("Test recipient must be listed in MARKETING_TEST_EMAILS.");
       if (!setup().emailReady) throw new Error("Complete email provider setup first.");
       const id = crypto.randomUUID();
-      await resendProvider.send({ id, to, channel: "EMAIL", subject: `[TEST] ${String(b.subject || "Campaign preview").slice(0, 190)}`, content: content(b.content), unsubscribe: `${process.env.APP_BASE_URL}/our-klaviyo/settings` });
+      const s = await loadMarketingSettings();
+      await resendProvider.send({ id, to, channel: "EMAIL", subject: `[TEST] ${String(b.subject || "Campaign preview").slice(0, 190)}`, content: content(b.content), address: s.postalAddress, organizationName: s.organizationName, unsubscribe: `${process.env.APP_BASE_URL}/our-klaviyo/settings` });
       await atomic(tx => record(tx, { key: `test:${id}`, type: "TEST_SENT", payload: { to } }));
       return Response.json({ ok: true });
     }
     if (b.action === "import") return Response.json({ results: await importProfiles(b.rows, b.dryRun !== false) });
+    if (b.action === "save-settings") {
+      const s = marketingSettings(b.settings);
+      const result = await prisma.marketingResource.upsert({ where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } }, create: { shop: shop(), kind: "SETTINGS", key: "global", name: "Marketing settings", data: json(s), enabled: true }, update: { data: json(s), enabled: true } });
+      return Response.json({ ...result, settings: s });
+    }
     if (b.action === "audience-count") return Response.json({ count: await prisma.marketingProfile.count({ where: audienceWhere(segment(b.audience)) }) });
     if (b.action === "suppress") {
       const p = await prisma.marketingProfile.findFirst({ where: { id: b.id, shop: shop() } }); if (!p) throw new Error("Profile not found.");
