@@ -79,6 +79,15 @@ export async function POST(request: Request) {
       },
     });
 
+    // Run before the existing inventory deduplication return so a retried order
+    // can recover marketing ingestion without duplicating inventory claims.
+    if (process.env.MARKETING_INGEST_ENABLED === "true") {
+      const { ingestShopify } = await import("@/lib/marketing/ingest");
+      if (shop === process.env.SHOPIFY_SHOP_DOMAIN && (payload.email || payload.customer?.email || payload.customer?.id)) {
+        await ingestShopify("orders/create", `shopify:orders/create:${orderId}`, payload);
+      }
+    }
+
     if (existingClaims > 0) {
       return NextResponse.json({
         ok: true,

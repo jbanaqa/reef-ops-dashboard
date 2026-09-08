@@ -13,7 +13,9 @@
     "species-library:verify-matcher": "tsx scripts/verify-species-matcher.ts",
     "species-library:verify-webhook": "tsx scripts/verify-species-webhook.ts",
     "species-library:verify-validation": "tsx scripts/verify-species-validation.ts",
-    "collection-rotation:scheduled": "tsx scripts/run-collection-rotations.ts"
+    "collection-rotation:scheduled": "tsx scripts/run-collection-rotations.ts",
+    "marketing:scheduled": "tsx scripts/run-marketing.ts",
+    "marketing:test": "tsx --test scripts/marketing.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

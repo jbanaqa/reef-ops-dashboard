@@ -36,7 +36,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
-  const title = pageTitles[pathname] || "Reef Ops";
+  const title = pathname.startsWith("/our-klaviyo") ? "Our Klaviyo" : pageTitles[pathname] || "Reef Ops";
 
   useEffect(() => {
     const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
@@ -61,6 +61,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button className="reef-sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Close navigation"><ReefIcon name="close" /></button>
         </div>
         <nav className="reef-navigation" aria-label="Primary navigation">
+          <details className="reef-nav-group" open={pathname.startsWith("/our-klaviyo") || undefined}>
+            <summary className="reef-nav-link" style={{ cursor: "pointer" }}>Our Klaviyo</summary>
+            {["overview", "campaigns", "flows", "forms", "audiences", "templates", "analytics", "settings"].map(section => {
+              const href = `/our-klaviyo/${section}`;
+              const active = pathname === href || (section === "overview" && pathname === "/our-klaviyo");
+              return <Link key={section} href={href} className={`reef-nav-link ${active ? "reef-nav-link-active" : ""}`} style={{ paddingLeft: 32 }} onClick={() => setMenuOpen(false)}>{section[0].toUpperCase() + section.slice(1)}</Link>;
+            })}
+          </details>
           {navigation.map((group) => (
             <div className="reef-nav-group" key={group.label}>
               <p className="reef-nav-label">{group.label}</p>

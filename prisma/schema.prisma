@@ -7,6 +7,116 @@ datasource db {
   provider = "postgresql"
 }
 
+model MarketingProfile {
+  id String @id @default(cuid())
+  shop String
+  email String?
+  phone String?
+  shopifyId String?
+  name String @default("")
+  tags String[] @default([])
+  lists String[] @default([])
+  properties Json @default("{}")
+  lastOpenedAt DateTime?
+  lastOrderAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  consents MarketingConsent[]
+  events MarketingEvent[]
+  messages MarketingMessage[]
+  @@unique([shop, email])
+  @@unique([shop, phone])
+  @@unique([shop, shopifyId])
+}
+
+model MarketingConsent {
+  id String @id @default(cuid())
+  profileId String
+  profile MarketingProfile @relation(fields: [profileId], references: [id])
+  channel String
+  status String @default("NEVER_SUBSCRIBED")
+  suppressed Boolean @default(false)
+  reason String?
+  source String
+  occurredAt DateTime
+  @@unique([profileId, channel])
+}
+
+model MarketingEvent {
+  id String @id @default(cuid())
+  shop String
+  key String
+  type String
+  profileId String?
+  profile MarketingProfile? @relation(fields: [profileId], references: [id])
+  anonymousId String?
+  messageId String?
+  payload Json @default("{}")
+  occurredAt DateTime
+  createdAt DateTime @default(now())
+  @@unique([shop, key])
+  @@index([shop, type, occurredAt])
+  @@index([profileId, type, occurredAt])
+  @@index([anonymousId])
+  @@index([messageId])
+}
+
+model MarketingCampaign {
+  id String @id @default(cuid())
+  shop String
+  name String
+  subject String
+  channel String @default("EMAIL")
+  content Json
+  audience Json
+  status String @default("DRAFT")
+  scheduledAt DateTime?
+  expandedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages MarketingMessage[]
+  @@index([shop, status, scheduledAt])
+}
+
+model MarketingMessage {
+  id String @id @default(cuid())
+  shop String
+  key String @unique
+  profileId String
+  profile MarketingProfile @relation(fields: [profileId], references: [id])
+  campaignId String?
+  campaign MarketingCampaign? @relation(fields: [campaignId], references: [id])
+  flowKey String?
+  channel String
+  subject String
+  content Json
+  status String @default("PENDING")
+  dueAt DateTime
+  triggerAt DateTime?
+  attemptedAt DateTime?
+  sentAt DateTime?
+  attempts Int @default(0)
+  providerId String? @unique
+  error String?
+  token String @unique @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([shop, status, dueAt])
+  @@index([profileId, flowKey])
+}
+
+model MarketingResource {
+  id String @id @default(cuid())
+  shop String
+  kind String
+  key String
+  name String
+  data Json
+  enabled Boolean @default(false)
+  updatedAt DateTime @updatedAt
+  @@unique([shop, kind, key])
+}
+
 model FeedbackItem {
   id String @id @default(cuid())
 

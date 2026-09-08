@@ -1,0 +1,94 @@
+import { prisma } from "@/lib/prisma";
+import { atomic, consent, identify, json, record, shop, Tx } from "./store";
+import { date, DAY } from "./rules";
+import { enroll } from "./flows";
+
+type Customer = { id?: string | number; email?: string; phone?: string; first_name?: string; last_name?: string; tags?: string; updated_at?: string; email_marketing_consent?: { state: string; consent_updated_at?: string }; sms_marketing_consent?: { state: string; consent_updated_at?: string } };
+type Payload = Customer & { customer?: Customer; created_at?: string; total_price?: string; currency?: string; test?: boolean; order_id?: string | number; expected_delivery_at?: string; abandoned_checkout_url?: string; financial_status?: string; checkout_token?: string; token?: string };
+async function attribute(tx: Tx, profileId: string, at: Date) {
+  for (const [type, window] of [["CLICKED", 5 * DAY], ["OPENED", DAY]] as const) {
+    const event = await tx.marketingEvent.findFirst({ where: { shop: shop(), profileId, type, messageId: { not: null }, occurredAt: { gte: new Date(+at - window), lte: at } }, orderBy: { occurredAt: "desc" } });
+    if (event) return event.messageId!;
+  }
+  return undefined;
+}
+export async function ingestShopify(topic: string, key: string, p: Payload, historical = false) {
+  return atomic(async tx => {
+    if (await tx.marketingEvent.findUnique({ where: { shop_key: { shop: shop(), key } } })) return { duplicate: true };
+    const c = topic.startsWith("customers/") ? p : p.customer || {};
+    const profile = await identify(tx, { email: c.email || p.email, phone: c.phone || p.phone, shopifyId: c.id ? String(c.id) : undefined, name: [c.first_name, c.last_name].filter(Boolean).join(" ") });
+    const at = date(p.updated_at || p.created_at || new Date().toISOString());
+    if (at > new Date(Date.now() + 300000)) throw new Error("Future event timestamp rejected.");
+    await record(tx, { key, type: topic, profileId: profile.id, occurredAt: at, payload: p });
+    if (topic.startsWith("customers/")) {
+      const tags = (p.tags || "").split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+      // A newer customer event wins; out-of-order webhooks cannot roll tags back.
+      const newer = await tx.marketingEvent.findFirst({ where: { profileId: profile.id, type: { startsWith: "customers/" }, occurredAt: { gt: at } } });
+      if (!newer) {
+        await tx.marketingProfile.update({ where: { id: profile.id }, data: { tags } });
+        if (!historical && tags.includes("b2b") && !profile.tags.includes("b2b")) await enroll(tx, "b2b-welcome", profile.id, key, at);
+      }
+    }
+    for (const [channel, value] of [["EMAIL", c.email_marketing_consent], ["SMS_MARKETING", c.sms_marketing_consent]] as const) {
+      if (value) await consent(tx, profile.id, channel, value.state === "subscribed" ? "SUBSCRIBED" : value.state === "unsubscribed" ? "UNSUBSCRIBED" : "NEVER_SUBSCRIBED", "shopify", date(value.consent_updated_at || at.toISOString()));
+    }
+    if (topic === "orders/create" && !p.test) {
+      const orderKey = `order:${p.id}`;
+      if (!await tx.marketingEvent.findUnique({ where: { shop_key: { shop: shop(), key: orderKey } } })) {
+        const orderAt = date(p.created_at || at.toISOString());
+        await record(tx, { key: orderKey, type: "ORDER", profileId: profile.id, messageId: historical ? undefined : await attribute(tx, profile.id, orderAt), occurredAt: orderAt, payload: { orderId: String(p.id), revenue: String(p.total_price || "0"), currency: p.currency || "UNKNOWN", model: "last-click-5d-else-open-1d", historical } });
+        if (!profile.lastOrderAt || profile.lastOrderAt < orderAt) await tx.marketingProfile.update({ where: { id: profile.id }, data: { lastOrderAt: orderAt } });
+        await tx.marketingMessage.updateMany({ where: { profileId: profile.id, flowKey: "abandoned-cart", status: "PENDING", triggerAt: { lte: orderAt } }, data: { status: "CANCELLED", error: "Order placed" } });
+      }
+    }
+    if (topic === "checkouts/create" && !historical && p.abandoned_checkout_url) await enroll(tx, "abandoned-cart", profile.id, String(p.token || p.id), at, { url: p.abandoned_checkout_url });
+    if (topic === "delivery/scheduled" && !historical && p.expected_delivery_at) await enroll(tx, "delivery-upsell", profile.id, String(p.order_id || p.id), at, { expectedDeliveryAt: date(p.expected_delivery_at) });
+    return { profileId: profile.id };
+  });
+}
+
+export async function deliveryEvent(key: string, providerId: string, type: string, at: Date, payload: unknown = {}) {
+  const allowed = ["DELIVERED", "OPENED", "CLICKED", "BOUNCED", "COMPLAINED", "UNSUBSCRIBED", "FAILED", "SMS_RECEIVED"];
+  if (!allowed.includes(type)) return;
+  return atomic(async tx => {
+    const m = await tx.marketingMessage.findFirst({ where: { providerId, shop: shop() } });
+    if (!m) throw new Error("Message not recorded yet; retry event.");
+    if (at > new Date(Date.now() + 300000)) throw new Error("Invalid event time.");
+    await record(tx, { key, type, profileId: m.profileId, messageId: m.id, occurredAt: at, payload });
+    if (type === "OPENED" && m.channel === "EMAIL") await tx.marketingProfile.updateMany({ where: { id: m.profileId, OR: [{ lastOpenedAt: null }, { lastOpenedAt: { lt: at } }] }, data: { lastOpenedAt: at } });
+    if (["BOUNCED", "COMPLAINED", "UNSUBSCRIBED"].includes(type)) await consent(tx, m.profileId, m.channel as "EMAIL" | "SMS_MARKETING" | "SMS_TRANSACTIONAL", "UNSUBSCRIBED", "provider", at, type);
+  });
+}
+
+export type ImportRow = { email?: string; phone?: string; shopifyId?: string; name?: string; emailStatus?: string; smsStatus?: string; smsTransactionalStatus?: string; emailSuppressed?: boolean; smsSuppressed?: boolean; consentAt?: string; consentSource?: string; emailConsentAt?: string; smsConsentAt?: string; smsTransactionalConsentAt?: string; emailConsentSource?: string; smsConsentSource?: string; lastOpenedAt?: string; lastOrderAt?: string; lists?: string[]; tags?: string[]; timezone?: string };
+export async function importProfiles(rows: ImportRow[], dryRun: boolean) {
+  if (!Array.isArray(rows) || !rows.length || rows.length > 500) throw new Error("Import 1–500 rows per batch.");
+  const results: { row: number; status: string; error?: string }[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    try {
+      await atomic(async tx => {
+        const row = rows[i];
+        const p = await identify(tx, row);
+        for (const [channel, status, suppressed, timestamp, source] of [["EMAIL", row.emailStatus, row.emailSuppressed, row.emailConsentAt || row.consentAt, row.emailConsentSource || row.consentSource], ["SMS_MARKETING", row.smsStatus, row.smsSuppressed, row.smsConsentAt || row.consentAt, row.smsConsentSource || row.consentSource], ["SMS_TRANSACTIONAL", row.smsTransactionalStatus, row.smsSuppressed, row.smsTransactionalConsentAt, row.smsConsentSource || row.consentSource]] as const) {
+          if (status || suppressed) {
+            if (status === "SUBSCRIBED" && (!timestamp || !source)) throw new Error("Subscribed imports require channel consent timestamp and source.");
+            if (timestamp && date(timestamp) > new Date()) throw new Error("Consent cannot be in the future.");
+            if (suppressed != null && typeof suppressed !== "boolean") throw new Error("Suppression fields must be true or false.");
+            await consent(tx, p.id, channel, suppressed ? "UNSUBSCRIBED" : status || "NEVER_SUBSCRIBED", source || "klaviyo-import", timestamp ? date(timestamp) : new Date(), suppressed ? "Imported suppression" : undefined);
+          }
+        }
+        const opened = row.lastOpenedAt ? date(row.lastOpenedAt) : null, ordered = row.lastOrderAt ? date(row.lastOrderAt) : null;
+        if ((opened && opened > new Date()) || (ordered && ordered > new Date())) throw new Error("Historical engagement cannot be in the future.");
+        if (row.timezone) new Intl.DateTimeFormat("en", { timeZone: row.timezone }).format();
+        await tx.marketingProfile.update({ where: { id: p.id }, data: { lists: [...new Set([...p.lists, ...(row.lists || [])])], tags: [...new Set([...p.tags, ...(row.tags || []).map(t => t.toLowerCase())])], properties: row.timezone ? json({ ...(p.properties as object), timezone: row.timezone }) : undefined, lastOpenedAt: opened && (!p.lastOpenedAt || opened > p.lastOpenedAt) ? opened : undefined, lastOrderAt: ordered && (!p.lastOrderAt || ordered > p.lastOrderAt) ? ordered : undefined } });
+        if (dryRun) throw new Error("DRY_RUN_OK");
+      });
+      results.push({ row: i + 1, status: "IMPORTED" });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Import failed";
+      results.push(message === "DRY_RUN_OK" ? { row: i + 1, status: "VALID" } : { row: i + 1, status: "ERROR", error: message });
+    }
+  }
+  if (!dryRun) await prisma.marketingResource.create({ data: { shop: shop(), kind: "IMPORT", key: crypto.randomUUID(), name: "Klaviyo migration", data: json({ at: new Date().toISOString(), results }) } });
+  return results;
+}
