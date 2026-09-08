@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import FlowEditor from "./FlowEditor";
-import { FlowMap } from "./FlowMap";
 import { Content, defaultContent } from "@/lib/marketing/rules";
 import "./marketing.css";
 
