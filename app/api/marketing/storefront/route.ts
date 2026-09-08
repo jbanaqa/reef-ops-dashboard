@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { atomic, consent, identify, json, record, shop } from "@/lib/marketing/store";
-import { defaultContent, email, phone } from "@/lib/marketing/rules";
+import { defaultContent, email, marketingSettings, phone } from "@/lib/marketing/rules";
 import { setup } from "@/lib/marketing/delivery";
 export const dynamic = "force-dynamic";
 const headers = () => ({ "Access-Control-Allow-Origin": process.env.MARKETING_STOREFRONT_ORIGIN || "https://coralsanonymous.com", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type", "Vary": "Origin", "Cache-Control": "no-store" });
@@ -9,7 +9,8 @@ export function OPTIONS() { return new Response(null, { status: 204, headers: he
 export async function POST(request: Request) {
   if (!process.env.MARKETING_STOREFRONT_ORIGIN || request.headers.get("origin") !== process.env.MARKETING_STOREFRONT_ORIGIN) return new Response("Origin denied", { status: 403 });
   const reply = (data: unknown, status=200) => Response.json(data,{status,headers:headers()});
-  const config = setup();
+  const settingsRow = await prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop:shop(), kind:"SETTINGS", key:"global" } } });
+  const config = setup(marketingSettings(settingsRow?.data).operations);
   if (!config.formEnabled || !config.sendingEnabled || !config.migrationConfirmed || !config.emailReady || !config.couponReady) return reply({ enabled:false, error:"Signup is not enabled yet." },503);
   try {
     const raw=await request.text(); if(raw.length>16000) return reply({error:"Payload too large"},413);

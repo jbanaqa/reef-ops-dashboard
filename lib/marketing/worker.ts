@@ -5,7 +5,9 @@ import { DeliveryError, resendProvider, setup, smsProvider } from "./delivery";
 import { lowStock } from "./flows";
 
 export async function runMarketing() {
-  const config = setup();
+  const settingsRow = await prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } } });
+  const settings = marketingSettings(settingsRow?.data);
+  const config = setup(settings.operations);
   if (!config.sendingEnabled || !config.migrationConfirmed || !config.emailReady) return { skipped: "Complete setup and migration, then enable sending." };
   const now = new Date();
   // Never silently retry a job whose process may have died after provider acceptance.
@@ -24,8 +26,6 @@ export async function runMarketing() {
     await prisma.marketingCampaign.updateMany({ where: { id: campaign.id, status: "SCHEDULED" }, data: { status: "SENDING", expandedAt: now } });
   }
   const pending = await prisma.marketingMessage.findMany({ where: { shop: shop(), status: "PENDING", dueAt: { lte: now } }, orderBy: { dueAt: "asc" }, take: 50 });
-  const settingsRow = await prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } } });
-  const settings = marketingSettings(settingsRow?.data);
   let sent = 0;
   for (const candidate of pending) {
     const message = await atomic(async tx => {

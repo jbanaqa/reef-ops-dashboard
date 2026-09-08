@@ -1,9 +1,20 @@
 export const channels = ["EMAIL", "SMS_MARKETING", "SMS_TRANSACTIONAL"] as const;
 export type Channel = typeof channels[number];
 export type Content = { heading: string; body: string; bodyHtml?: string; button: string; url: string; hero?: string; preview?: string; template?: "standard" | "b2b-wholesale"; logo?: string; logoScale?: number; footerImage?: string; footerScale?: number; /** @deprecated Older saved flows may still contain these pixel values. */ logoWidth?: number; logoHeight?: number; footerWidth?: number; footerHeight?: number; products?: { title: string; url: string; image?: string; price?: string }[] };
-export type MarketingSettings = { postalAddress: string; organizationName: string };
-export const defaultMarketingSettings: MarketingSettings = { postalAddress: "", organizationName: "Corals Anonymous" };
-export function marketingSettings(value: unknown, fallbackAddress = process.env.MARKETING_POSTAL_ADDRESS || defaultMarketingSettings.postalAddress): MarketingSettings { const v = (value || {}) as Partial<MarketingSettings>; return { postalAddress: String(v.postalAddress ?? fallbackAddress).slice(0, 500), organizationName: String(v.organizationName || defaultMarketingSettings.organizationName).slice(0, 120) }; }
+export type MarketingOperations = { sendingEnabled: boolean; migrationConfirmed: boolean; ingestEnabled: boolean; formEnabled: boolean };
+export type MarketingSettings = { postalAddress: string; organizationName: string; operations: MarketingOperations };
+export const defaultMarketingSettings: MarketingSettings = { postalAddress: "", organizationName: "Corals Anonymous", operations: { sendingEnabled: false, migrationConfirmed: false, ingestEnabled: false, formEnabled: false } };
+const envFlag = (name: string) => process.env[name] === "true";
+export function marketingSettings(value: unknown, fallbackAddress = process.env.MARKETING_POSTAL_ADDRESS || defaultMarketingSettings.postalAddress): MarketingSettings {
+  const v = (value || {}) as Partial<MarketingSettings> & Partial<MarketingOperations>;
+  const saved = (v.operations || {}) as Partial<MarketingOperations>;
+  return { postalAddress: String(v.postalAddress ?? fallbackAddress).slice(0, 500), organizationName: String(v.organizationName || defaultMarketingSettings.organizationName).slice(0, 120), operations: {
+    sendingEnabled: typeof saved.sendingEnabled === "boolean" ? saved.sendingEnabled : typeof v.sendingEnabled === "boolean" ? v.sendingEnabled : envFlag("MARKETING_SEND_ENABLED"),
+    migrationConfirmed: typeof saved.migrationConfirmed === "boolean" ? saved.migrationConfirmed : typeof v.migrationConfirmed === "boolean" ? v.migrationConfirmed : envFlag("MARKETING_MIGRATION_CONFIRMED"),
+    ingestEnabled: typeof saved.ingestEnabled === "boolean" ? saved.ingestEnabled : typeof v.ingestEnabled === "boolean" ? v.ingestEnabled : envFlag("MARKETING_INGEST_ENABLED"),
+    formEnabled: typeof saved.formEnabled === "boolean" ? saved.formEnabled : typeof v.formEnabled === "boolean" ? v.formEnabled : envFlag("MARKETING_FORM_ENABLED"),
+  } };
+}
 export type Segment = { openedDays?: number; tag?: string; list?: string; purchasedDays?: number; excludePurchasedDays?: number };
 export const DAY = 86400000;
 export function email(value: unknown) { const result = String(value || "").trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(result) || result.length > 254) throw new Error("Enter a valid email address."); return result; }

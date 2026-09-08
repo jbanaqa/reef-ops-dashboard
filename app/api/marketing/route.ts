@@ -1,7 +1,7 @@
 import { isDashboardRequestAuthorized } from "@/lib/dashboard-request-auth";
 import { prisma } from "@/lib/prisma";
 import { audienceWhere, atomic, backfillB2BWelcome, consent, ensureB2BTemplate, json, record, seed, shop } from "@/lib/marketing/store";
-import { content, date, defaultContent, defaultMarketingSettings, email, marketingSettings, render, segment } from "@/lib/marketing/rules";
+import { content, date, defaultContent, defaultMarketingSettings, email, marketingSettings, MarketingSettings, render, segment } from "@/lib/marketing/rules";
 import { resendProvider, setup } from "@/lib/marketing/delivery";
 import { importProfiles } from "@/lib/marketing/ingest";
 import { FlowConfig } from "@/lib/marketing/flows";
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
     const revenue: Record<string, number> = {};
     for (const order of orders) { const p = order.payload as { currency: string; revenue: string }; revenue[p.currency] = (revenue[p.currency] || 0) + Number(p.revenue || 0); }
     const settings = await loadMarketingSettings();
-    return Response.json({ profiles, nextCursor: profiles.length === 100 ? profiles[99].id : null, campaigns, resources, settings, counts: { profiles: counts[0], mailable: counts[1], suppressions: counts[2] }, messageCounts, eventCounts, revenue, revenueCapped: orders.length === 10000, setup: setup() }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ profiles, nextCursor: profiles.length === 100 ? profiles[99].id : null, campaigns, resources, settings, counts: { profiles: counts[0], mailable: counts[1], suppressions: counts[2] }, messageCounts, eventCounts, revenue, revenueCapped: orders.length === 10000, setup: setup(settings.operations) }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) { console.error("Marketing read failed", e); return Response.json({ error: "Marketing data is unavailable. Apply the marketing migration and configure DATABASE_URL and SHOPIFY_SHOP_DOMAIN." }, { status: 503 }); }
 }
 export async function POST(request: Request) {
@@ -75,8 +75,11 @@ export async function POST(request: Request) {
     }
     if (b.action === "import") return Response.json({ results: await importProfiles(b.rows, b.dryRun !== false) });
     if (b.action === "save-settings") {
-      const s = marketingSettings(b.settings);
+      const existing = await loadMarketingSettings();
+      const incoming = (b.settings || {}) as Partial<MarketingSettings>;
+      const s = marketingSettings({ ...existing, ...incoming, operations: { ...existing.operations, ...(incoming.operations || {}) } });
       const result = await prisma.marketingResource.upsert({ where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } }, create: { shop: shop(), kind: "SETTINGS", key: "global", name: "Marketing settings", data: json(s), enabled: true }, update: { data: json(s), enabled: true } });
+      await atomic(tx => record(tx, { key: `staff:settings:${crypto.randomUUID()}`, type: "CONFIG_CHANGED", payload: { kind: "SETTINGS", key: "global", operations: s.operations } }));
       return Response.json({ ...result, settings: s });
     }
     if (b.action === "audience-count") return Response.json({ count: await prisma.marketingProfile.count({ where: audienceWhere(segment(b.audience)) }) });
@@ -95,7 +98,7 @@ export async function POST(request: Request) {
     if (b.action === "schedule") {
       const scheduledAt = date(b.at); if (scheduledAt < new Date()) throw new Error("Choose a future send time.");
       const result = await prisma.marketingCampaign.updateMany({ where: { id: b.id, shop: shop(), status: "DRAFT" }, data: { status: "SCHEDULED", scheduledAt } });
-      if (!result.count) throw new Error("Only drafts can be scheduled."); return Response.json({ ok: true, sendingEnabled: setup().sendingEnabled });
+      if (!result.count) throw new Error("Only drafts can be scheduled."); const s = await loadMarketingSettings(); return Response.json({ ok: true, sendingEnabled: setup(s.operations).sendingEnabled });
     }
     if (b.action === "cancel") {
       await atomic(async tx => {

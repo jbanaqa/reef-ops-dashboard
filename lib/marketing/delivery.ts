@@ -1,4 +1,4 @@
-import { Content, render } from "./rules";
+import { Content, MarketingOperations, render } from "./rules";
 
 export type Delivery = { id: string; to: string; channel: string; subject: string; content: Content; unsubscribe: string; profileName?: string; address?: string; organizationName?: string };
 export interface DeliveryProvider { send(message: Delivery): Promise<string> }
@@ -33,6 +33,7 @@ export const smsProvider: DeliveryProvider = {
   },
 };
 
-export function setup() {
-  return { sendingEnabled: process.env.MARKETING_SEND_ENABLED === "true", emailReady: !!(process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL && process.env.MARKETING_POSTAL_ADDRESS && process.env.APP_BASE_URL && process.env.RESEND_WEBHOOK_SECRET), smsReady: !!(process.env.MARKETING_SMS_GATEWAY_URL && process.env.MARKETING_SMS_GATEWAY_KEY && process.env.MARKETING_SMS_WEBHOOK_SECRET), migrationConfirmed: process.env.MARKETING_MIGRATION_CONFIRMED === "true", formEnabled: process.env.MARKETING_FORM_ENABLED === "true", couponReady: !!process.env.MARKETING_WELCOME_COUPON, storefrontOrigin: process.env.MARKETING_STOREFRONT_ORIGIN || "", attribution: "Last recorded click within 5 days; otherwise open within 1 day. One message per order; currencies remain separate." };
+export function setup(operations?: MarketingOperations) {
+  const env = { sendingEnabled: process.env.MARKETING_SEND_ENABLED === "true", migrationConfirmed: process.env.MARKETING_MIGRATION_CONFIRMED === "true", ingestEnabled: process.env.MARKETING_INGEST_ENABLED === "true", formEnabled: process.env.MARKETING_FORM_ENABLED === "true" };
+  return { sendingEnabled: env.sendingEnabled && (operations?.sendingEnabled ?? env.sendingEnabled), emailReady: !!(process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL && process.env.MARKETING_POSTAL_ADDRESS && process.env.APP_BASE_URL && process.env.RESEND_WEBHOOK_SECRET), smsReady: !!(process.env.MARKETING_SMS_GATEWAY_URL && process.env.MARKETING_SMS_GATEWAY_KEY && process.env.MARKETING_SMS_WEBHOOK_SECRET), migrationConfirmed: env.migrationConfirmed && (operations?.migrationConfirmed ?? env.migrationConfirmed), ingestEnabled: env.ingestEnabled && (operations?.ingestEnabled ?? env.ingestEnabled), formEnabled: env.formEnabled && (operations?.formEnabled ?? env.formEnabled), couponReady: !!process.env.MARKETING_WELCOME_COUPON, storefrontOrigin: process.env.MARKETING_STOREFRONT_ORIGIN || "", attribution: "Last recorded click within 5 days; otherwise open within 1 day. One message per order; currencies remain separate." };
 }

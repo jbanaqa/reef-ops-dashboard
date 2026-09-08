@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { marketingSettings } from "@/lib/marketing/rules";
+import { setup } from "@/lib/marketing/delivery";
 
 function verifyShopifyWebhook(rawBody: string, hmacHeader: string | null) {
   const secret = process.env.SHOPIFY_CLIENT_SECRET;
@@ -81,7 +83,8 @@ export async function POST(request: Request) {
 
     // Run before the existing inventory deduplication return so a retried order
     // can recover marketing ingestion without duplicating inventory claims.
-    if (process.env.MARKETING_INGEST_ENABLED === "true") {
+    const marketingSettingsRow = await prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop, kind: "SETTINGS", key: "global" } } });
+    if (setup(marketingSettings(marketingSettingsRow?.data).operations).ingestEnabled) {
       const { ingestShopify } = await import("@/lib/marketing/ingest");
       if (shop === process.env.SHOPIFY_SHOP_DOMAIN && (payload.email || payload.customer?.email || payload.customer?.id)) {
         await ingestShopify("orders/create", `shopify:orders/create:${orderId}`, payload);

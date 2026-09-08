@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { content, defaultContent, eligible, email, matches, phone, render, safeUrl, segment } from "../lib/marketing/rules";
+import { content, defaultContent, eligible, email, marketingSettings, matches, phone, render, safeUrl, segment } from "../lib/marketing/rules";
 test("suppression always overrides subscribed status",()=>{
   assert.equal(eligible({status:"SUBSCRIBED",suppressed:true}),false);
   assert.equal(eligible({status:"SUBSCRIBED",suppressed:false}),true);
@@ -54,4 +54,8 @@ test("B2B styled h1 HTML survives sanitization and rendering",()=>{
   assert.ok(c.bodyHtml?.includes(`<h1 style="${headingStyle}">`));
   const html=render(c,"https://example.com/unsubscribe","");
   assert.ok(html.includes(`<h1 style="${headingStyle}">`));
+});
+test("marketing settings preserve database operational controls",()=>{
+  const settings=marketingSettings({postalAddress:"123 Main Street",organizationName:"Corals Anonymous",operations:{sendingEnabled:false,migrationConfirmed:true,ingestEnabled:false,formEnabled:true}});
+  assert.deepEqual(settings.operations,{sendingEnabled:false,migrationConfirmed:true,ingestEnabled:false,formEnabled:true});
 });

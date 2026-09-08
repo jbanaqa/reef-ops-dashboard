@@ -58,6 +58,8 @@ MARKETING_STOREFRONT_ORIGIN=https://coralsanonymous.com
 MARKETING_WELCOME_COUPON=YOUR_EXISTING_10_PERCENT_FIRST_ORDER_CODE
 ```
 
+After the deployment gates above are configured, use **Our Klaviyo → Settings → Operational controls** for routine operation. The send, migration, Shopify-ingestion and signup-form switches are stored in the database and take effect without a redeploy. The corresponding Railway variables remain hard safety gates: a disabled deployment variable always blocks the matching Reef Ops control. Save the mailing address in the UI as well as `MARKETING_POSTAL_ADDRESS`, which is required by the provider readiness check.
+
 The coupon must already exist in Shopify, with first-order eligibility and limits configured there. V1 references a configured code; it does not mint unique codes. Welcome must be reviewed/enabled before the signup offer can be fulfilled. Do not enable the form before this is ready. Confirmed signup emails and welcome jobs require the worker and email configuration.
 
 Apply the migration to a staging database first using `npm run migrate:deploy`. Start the dashboard, visit Our Klaviyo and choose Create defaults. The build was tested with a placeholder local database URL; that did not apply migrations or access a real database.
