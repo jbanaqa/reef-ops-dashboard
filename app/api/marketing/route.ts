@@ -1,6 +1,6 @@
 import { isDashboardRequestAuthorized } from "@/lib/dashboard-request-auth";
 import { prisma } from "@/lib/prisma";
-import { audienceWhere, atomic, backfillB2BWelcome, consent, json, record, seed, shop } from "@/lib/marketing/store";
+import { audienceWhere, atomic, backfillB2BWelcome, consent, ensureB2BTemplate, json, record, seed, shop } from "@/lib/marketing/store";
 import { content, date, defaultContent, email, render, segment } from "@/lib/marketing/rules";
 import { resendProvider, setup } from "@/lib/marketing/delivery";
 import { importProfiles } from "@/lib/marketing/ingest";
@@ -29,6 +29,7 @@ export async function GET(request: Request) {
   const denied = authorize(request); if (denied) return denied;
   try {
     await backfillB2BWelcome();
+    await ensureB2BTemplate();
     const url = new URL(request.url), view = url.searchParams.get("view") || "overview";
     if (view === "preview") return new Response(render(defaultContent, "#unsubscribe", process.env.MARKETING_POSTAL_ADDRESS || "Your business mailing address"), { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } });
     if (view === "profile") {
