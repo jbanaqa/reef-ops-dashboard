@@ -1,6 +1,6 @@
 import { Content, render } from "./rules";
 
-export type Delivery = { id: string; to: string; channel: string; subject: string; content: Content; unsubscribe: string };
+export type Delivery = { id: string; to: string; channel: string; subject: string; content: Content; unsubscribe: string; profileName?: string };
 export interface DeliveryProvider { send(message: Delivery): Promise<string> }
 export class DeliveryError extends Error { constructor(message: string, public uncertain = false, public retryable = false) { super(message); } }
 export const resendProvider: DeliveryProvider = {
@@ -9,7 +9,7 @@ export const resendProvider: DeliveryProvider = {
     if (!key || !from || !address) throw new DeliveryError("Email sender and postal address are not configured.");
     let response: Response;
     try {
-      response = await fetch("https://api.resend.com/emails", { method: "POST", signal: AbortSignal.timeout(20000), headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": `marketing-${m.id}` }, body: JSON.stringify({ from, to: [m.to], subject: m.subject, html: render(m.content, m.unsubscribe, address), text: `${m.content.heading}\n\n${m.content.body}\n\n${m.content.url}\n\nCorals Anonymous\n${address}\nUnsubscribe: ${m.unsubscribe}`, headers: { "List-Unsubscribe": `<${m.unsubscribe}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }, tags: [{ name: "marketing_message", value: m.id }] }) });
+      response = await fetch("https://api.resend.com/emails", { method: "POST", signal: AbortSignal.timeout(20000), headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": `marketing-${m.id}` }, body: JSON.stringify({ from, to: [m.to], subject: m.subject, html: render(m.content, m.unsubscribe, address, m.profileName), text: `${m.content.heading}\n\n${m.content.body}\n\n${m.content.url}\n\nCorals Anonymous\n${address}\nUnsubscribe: ${m.unsubscribe}`, headers: { "List-Unsubscribe": `<${m.unsubscribe}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }, tags: [{ name: "marketing_message", value: m.id }] }) });
     } catch { throw new DeliveryError("Email delivery outcome unknown; reconcile with provider before retrying.", true); }
     if (!response.ok) throw new DeliveryError(`Email provider returned ${response.status}`, response.status >= 500, response.status === 429);
     const data = await response.json();

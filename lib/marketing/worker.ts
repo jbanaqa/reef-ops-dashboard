@@ -58,7 +58,7 @@ export async function runMarketing() {
     if (!message) continue;
     try {
       const provider = message.channel === "EMAIL" ? resendProvider : smsProvider;
-      const providerId = await provider.send({ id: message.id, to: message.channel === "EMAIL" ? message.profile.email! : message.profile.phone!, channel: message.channel, subject: message.subject, content: message.content as Content, unsubscribe: `${process.env.APP_BASE_URL}/api/marketing/unsubscribe?token=${message.token}` });
+      const providerId = await provider.send({ id: message.id, to: message.channel === "EMAIL" ? message.profile.email! : message.profile.phone!, channel: message.channel, subject: message.subject, content: message.content as Content, profileName: message.profile.name, unsubscribe: `${process.env.APP_BASE_URL}/api/marketing/unsubscribe?token=${message.token}` });
       await atomic(async tx => {
         await tx.marketingMessage.update({ where: { id: message.id }, data: { status: "SENT", sentAt: new Date(), providerId } });
         await record(tx, { key: `sent:${message.id}`, type: "SENT", profileId: message.profileId, messageId: message.id });
