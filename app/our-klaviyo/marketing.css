@@ -9,4 +9,4 @@ button.mk-flow-node{font:inherit;text-align:left;cursor:pointer;color:inherit;wi
 
 .mk-email-preview iframe{height:760px;overflow:hidden;scrollbar-width:none}.mk-email-preview iframe::-webkit-scrollbar{display:none}
 
-.mk-email-preview{overflow:hidden}.mk-email-preview iframe{width:125%;height:760px;transform:scale(.8);transform-origin:top left;margin-bottom:-152px;overflow:hidden}.mk-email-preview iframe::-webkit-scrollbar{display:none}@media(max-width:600px){.mk-email-preview iframe{width:142%;transform:scale(.7);margin-bottom:-228px}}
+.mk-email-preview{overflow:hidden}.mk-email-preview iframe{width:147%;height:1050px;transform:scale(.68);transform-origin:top left;margin-bottom:-336px;overflow:hidden}.mk-email-preview iframe::-webkit-scrollbar{display:none}@media(max-width:600px){.mk-email-preview iframe{width:167%;transform:scale(.6);margin-bottom:-420px}}
