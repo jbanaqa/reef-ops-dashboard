@@ -42,3 +42,9 @@ test("B2B HTML copy is sanitized and preserves explicit HTTPS links",()=>{
   const html=render(c,"https://example.com/unsubscribe","123 Main Street","Jane Doe","Example Co");
   assert.ok(html.includes("width:390px")); assert.ok(html.includes("width:504px")); assert.ok(html.includes('href="https://coralsanonymous.com/sale"')); assert.ok(html.includes('href="https://example.com/unsubscribe"')); assert.ok(html.includes("Jane"));
 });
+test("B2B full-layout HTML does not duplicate the heading or greeting",()=>{
+  const c=content({...defaultContent,template:"b2b-wholesale",body:'Hi {{ first_name|default:"Friend!" }}!\n\nCopy',bodyHtml:'<h1>Welcome to Corals Anonymous<br>Wholesale!</h1><p>Hi {{ first_name|default:"Friend!" }}!</p><p>Copy</p>'});
+  const html=render(c,"https://example.com/unsubscribe","","Jane Doe");
+  assert.equal((html.match(/Welcome to Corals Anonymous/g) || []).length,1);
+  assert.equal((html.match(/Hi Jane/g) || []).length,1);
+});
