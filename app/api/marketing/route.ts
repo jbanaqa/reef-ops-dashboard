@@ -5,11 +5,67 @@ import { content, date, defaultContent, defaultMarketingSettings, email, marketi
 import { resendProvider, setup } from "@/lib/marketing/delivery";
 import { importProfiles } from "@/lib/marketing/ingest";
 import { FlowConfig } from "@/lib/marketing/flows";
+import { shopifyGraphql } from "@/lib/shopify";
 
 export const dynamic = "force-dynamic";
 async function loadMarketingSettings() {
   const row = await prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } } });
   return marketingSettings(row?.data, process.env.MARKETING_POSTAL_ADDRESS || defaultMarketingSettings.postalAddress);
+}
+
+const SHOPIFY_MARKETING_WEBHOOK_TOPICS = [
+  "CUSTOMERS_CREATE",
+  "CUSTOMERS_UPDATE",
+  "CUSTOMER_TAGS_ADDED",
+  "CUSTOMER_TAGS_REMOVED",
+  "CHECKOUTS_CREATE",
+] as const;
+
+type ShopifyWebhookList = { data?: { webhookSubscriptions?: { nodes?: { id: string; topic: string; uri: string }[] } } };
+type ShopifyWebhookCreate = { data?: { webhookSubscriptionCreate?: { webhookSubscription?: { id: string; topic: string; uri: string } | null; userErrors?: { field?: string[]; message: string }[] } } };
+
+const SHOPIFY_WEBHOOKS_QUERY = `
+  query MarketingWebhookSubscriptions {
+    webhookSubscriptions(first: 250) {
+      nodes { id topic uri }
+    }
+  }
+`;
+
+const SHOPIFY_WEBHOOK_CREATE = `
+  mutation MarketingWebhookCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
+    webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+      webhookSubscription { id topic uri }
+      userErrors { field message }
+    }
+  }
+`;
+
+async function registerShopifyMarketingWebhooks() {
+  const publicBase = process.env.APP_BASE_URL || process.env.REEF_OPS_PUBLIC_URL;
+  if (!publicBase) throw new Error("APP_BASE_URL or REEF_OPS_PUBLIC_URL is required to register Shopify webhooks.");
+  const callback = new URL("/api/marketing/webhooks", publicBase);
+  callback.searchParams.set("source", "shopify");
+  const callbackUrl = callback.toString();
+  const existing = await shopifyGraphql<ShopifyWebhookList>(SHOPIFY_WEBHOOKS_QUERY);
+  const current = existing.data?.webhookSubscriptions?.nodes || [];
+  const results: { topic: string; status: "EXISTING" | "CREATED" | "SKIPPED"; id?: string; message?: string }[] = [];
+  for (const topic of SHOPIFY_MARKETING_WEBHOOK_TOPICS) {
+    const found = current.find(w => w.topic === topic && w.uri === callbackUrl);
+    if (found) { results.push({ topic, status: "EXISTING", id: found.id }); continue; }
+    const response = await shopifyGraphql<ShopifyWebhookCreate>(SHOPIFY_WEBHOOK_CREATE, { topic, webhookSubscription: { uri: callbackUrl } });
+    const created = response.data?.webhookSubscriptionCreate;
+    const errors = created?.userErrors || [];
+    if (errors.length) {
+      const message = errors.map(e => e.message).join("; ");
+      // Shopify can report a duplicate when an equivalent subscription exists
+      // but is not returned by the current page; it is safe to continue.
+      if (/already exists|duplicate|taken/i.test(message)) { results.push({ topic, status: "SKIPPED", message }); continue; }
+      throw new Error(`Could not register ${topic}: ${message}`);
+    }
+    results.push({ topic, status: "CREATED", id: created?.webhookSubscription?.id });
+  }
+  return { callbackUrl, results };
 }
 function authorize(request: Request) {
   if (!isDashboardRequestAuthorized(request)) return Response.json({ error: "Login required" }, { status: 401 });
@@ -61,6 +117,7 @@ export async function POST(request: Request) {
     const raw = await request.text(); if (raw.length > 1000000) throw new Error("Request too large.");
     const b = JSON.parse(raw);
     if (b.action === "initialize") { await seed(); return Response.json({ ok: true }); }
+    if (b.action === "register-shopify-webhooks") return Response.json(await registerShopifyMarketingWebhooks());
     if (b.action === "preview") { const s = await loadMarketingSettings(); return Response.json({ html: render(content(b.content), "#unsubscribe", s.postalAddress, undefined, s.organizationName) }); }
     if (b.action === "test-email") {
       const to = email(b.to);

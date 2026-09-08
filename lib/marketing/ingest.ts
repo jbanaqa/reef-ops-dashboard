@@ -1,10 +1,92 @@
 import { prisma } from "@/lib/prisma";
+import { shopifyGraphql } from "@/lib/shopify";
 import { atomic, consent, identify, json, record, shop, Tx } from "./store";
 import { date, DAY } from "./rules";
 import { enroll } from "./flows";
 
-type Customer = { id?: string | number; email?: string; phone?: string; first_name?: string; last_name?: string; tags?: string; updated_at?: string; email_marketing_consent?: { state: string; consent_updated_at?: string }; sms_marketing_consent?: { state: string; consent_updated_at?: string } };
-type Payload = Customer & { customer?: Customer; created_at?: string; total_price?: string; currency?: string; test?: boolean; order_id?: string | number; expected_delivery_at?: string; abandoned_checkout_url?: string; financial_status?: string; checkout_token?: string; token?: string };
+type Customer = { id?: string | number; email?: string; phone?: string; first_name?: string; last_name?: string; tags?: string | string[]; updated_at?: string; email_marketing_consent?: { state: string; consent_updated_at?: string }; sms_marketing_consent?: { state: string; consent_updated_at?: string } };
+type Payload = Customer & { customer?: Customer; customerId?: string | number; customer_id?: string | number; occurredAt?: string; created_at?: string; total_price?: string; currency?: string; test?: boolean; order_id?: string | number; expected_delivery_at?: string; abandoned_checkout_url?: string; financial_status?: string; checkout_token?: string; token?: string };
+
+function isCustomerTagTopic(topic: string) {
+  return ["customer.tags_added", "customer.tags_removed", "customers/tags_added", "customers/tags_removed"].includes(topic);
+}
+
+function customerIdFromTagPayload(p: Payload) {
+  const id = String(p.customerId || p.customer_id || p.id || "");
+  return id.replace(/^gid:\/\/shopify\/Customer\//, "");
+}
+
+function webhookTags(value: Customer["tags"]) {
+  return (Array.isArray(value) ? value : String(value || "").split(","))
+    .map(t => t.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+type ShopifyCustomerLookup = {
+  data?: { customer?: {
+    id: string;
+    legacyResourceId?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    tags?: string[];
+    emailMarketingConsent?: { marketingState?: string | null; consentUpdatedAt?: string | null } | null;
+    smsMarketingConsent?: { marketingState?: string | null; consentUpdatedAt?: string | null } | null;
+  } | null };
+};
+
+const SHOPIFY_CUSTOMER_LOOKUP = `
+  query MarketingCustomer($id: ID!) {
+    customer(id: $id) {
+      id
+      legacyResourceId
+      email
+      phone
+      firstName
+      lastName
+      tags
+      emailMarketingConsent { marketingState consentUpdatedAt }
+      smsMarketingConsent { marketingState consentUpdatedAt }
+    }
+  }
+`;
+
+/**
+ * Shopify's dedicated customer tag webhook intentionally contains only the
+ * customer ID and the tag delta. Hydrate a profile that was created before
+ * webhooks were connected so a tag event can still enroll the correct person.
+ */
+async function hydrateCustomerTagPayload(topic: string, p: Payload): Promise<Payload> {
+  if (!isCustomerTagTopic(topic)) return p;
+  const id = customerIdFromTagPayload(p);
+  if (!id) throw new Error("Shopify customer tag event is missing customerId.");
+
+  const existing = await prisma.marketingProfile.findFirst({ where: { shop: shop(), shopifyId: id }, select: { id: true } });
+  if (existing) return { ...p, id };
+
+  try {
+    const result = await shopifyGraphql<ShopifyCustomerLookup>(SHOPIFY_CUSTOMER_LOOKUP, { id: `gid://shopify/Customer/${id}` });
+    const c = result.data?.customer;
+    if (!c) return { ...p, id };
+    const normalizeConsent = (value: { marketingState?: string | null; consentUpdatedAt?: string | null } | null | undefined) => value?.marketingState ? { state: value.marketingState.toLowerCase(), consent_updated_at: value.consentUpdatedAt || undefined } : undefined;
+    return {
+      ...p,
+      id: c.legacyResourceId || id,
+      email: c.email || undefined,
+      phone: c.phone || undefined,
+      first_name: c.firstName || undefined,
+      last_name: c.lastName || undefined,
+      email_marketing_consent: normalizeConsent(c.emailMarketingConsent),
+      sms_marketing_consent: normalizeConsent(c.smsMarketingConsent),
+    };
+  } catch (error) {
+    // The tag event is still recorded against the Shopify ID when a lookup is
+    // temporarily unavailable; the next customer event can fill in identity.
+    console.warn("Could not hydrate Shopify customer tag event", error);
+    return { ...p, id };
+  }
+}
 async function attribute(tx: Tx, profileId: string, at: Date) {
   for (const [type, window] of [["CLICKED", 5 * DAY], ["OPENED", DAY]] as const) {
     const event = await tx.marketingEvent.findFirst({ where: { shop: shop(), profileId, type, messageId: { not: null }, occurredAt: { gte: new Date(+at - window), lte: at } }, orderBy: { occurredAt: "desc" } });
@@ -13,20 +95,28 @@ async function attribute(tx: Tx, profileId: string, at: Date) {
   return undefined;
 }
 export async function ingestShopify(topic: string, key: string, p: Payload, historical = false) {
+  p = await hydrateCustomerTagPayload(topic, p);
   return atomic(async tx => {
     if (await tx.marketingEvent.findUnique({ where: { shop_key: { shop: shop(), key } } })) return { duplicate: true };
-    const c = topic.startsWith("customers/") ? p : p.customer || {};
+    const tagTopic = isCustomerTagTopic(topic);
+    const c = tagTopic ? p : topic.startsWith("customers/") ? p : p.customer || {};
     const profile = await identify(tx, { email: c.email || p.email, phone: c.phone || p.phone, shopifyId: c.id ? String(c.id) : undefined, name: [c.first_name, c.last_name].filter(Boolean).join(" ") });
-    const at = date(p.updated_at || p.created_at || new Date().toISOString());
+    const at = date(p.updated_at || p.created_at || p.occurredAt || new Date().toISOString());
     if (at > new Date(Date.now() + 300000)) throw new Error("Future event timestamp rejected.");
     await record(tx, { key, type: topic, profileId: profile.id, occurredAt: at, payload: p });
-    if (topic.startsWith("customers/")) {
-      const tags = (p.tags || "").split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+    if (topic.startsWith("customers/") || tagTopic) {
+      const incomingTags = webhookTags(p.tags);
+      const removedTags = tagTopic && topic.endsWith("tags_removed") ? new Set(incomingTags) : new Set<string>();
+      // Full customer payloads are authoritative. Dedicated tag events are
+      // deltas, so merge or remove only the tags named in the event.
+      const tags = tagTopic
+        ? [...new Set(topic.endsWith("tags_removed") ? profile.tags.filter(t => !removedTags.has(t)) : [...profile.tags, ...incomingTags])]
+        : incomingTags;
       // A newer customer event wins; out-of-order webhooks cannot roll tags back.
-      const newer = await tx.marketingEvent.findFirst({ where: { profileId: profile.id, type: { startsWith: "customers/" }, occurredAt: { gt: at } } });
+      const newer = await tx.marketingEvent.findFirst({ where: { profileId: profile.id, type: { in: ["customers/create", "customers/update", "customer.tags_added", "customer.tags_removed", "customers/tags_added", "customers/tags_removed"] }, occurredAt: { gt: at } } });
       if (!newer) {
         await tx.marketingProfile.update({ where: { id: profile.id }, data: { tags } });
-        if (!historical && tags.includes("b2b") && !profile.tags.includes("b2b")) await enroll(tx, "b2b-welcome", profile.id, key, at);
+        if (!historical && tags.includes("b2b") && !profile.tags.includes("b2b") && !topic.endsWith("tags_removed")) await enroll(tx, "b2b-welcome", profile.id, key, at);
       }
     }
     for (const [channel, value] of [["EMAIL", c.email_marketing_consent], ["SMS_MARKETING", c.sms_marketing_consent]] as const) {

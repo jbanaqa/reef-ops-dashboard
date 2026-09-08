@@ -10,7 +10,21 @@ export async function POST(request: Request) {
     if (source === "shopify") {
       if (request.headers.get("x-shopify-shop-domain") !== shop() || !signature(raw, request.headers.get("x-shopify-hmac-sha256"), process.env.SHOPIFY_CLIENT_SECRET)) return new Response("Invalid signature", { status: 401 });
       const topic = request.headers.get("x-shopify-topic") || "", id = request.headers.get("x-shopify-event-id") || request.headers.get("x-shopify-webhook-id");
-      if (!id || !["customers/create", "customers/update", "orders/create", "checkouts/create"].includes(topic)) return new Response("Unsupported event", { status: 400 });
+      // Shopify API versions that moved customer tags out of the customer
+      // payload deliver these dedicated topics instead of a `tags` field on
+      // customers/update. Keep both spellings so existing subscriptions and
+      // GraphQL-created subscriptions are accepted.
+      const supportedTopics = [
+        "customers/create",
+        "customers/update",
+        "customer.tags_added",
+        "customer.tags_removed",
+        "customers/tags_added",
+        "customers/tags_removed",
+        "orders/create",
+        "checkouts/create",
+      ];
+      if (!id || !supportedTopics.includes(topic)) return new Response("Unsupported event", { status: 400 });
       await ingestShopify(topic, `shopify:${topic}:${id}`, JSON.parse(raw));
     } else if (source === "resend") {
       if (!process.env.RESEND_WEBHOOK_SECRET) return new Response("Not configured", { status: 503 });
