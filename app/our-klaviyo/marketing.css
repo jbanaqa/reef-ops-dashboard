@@ -8,3 +8,5 @@ button.mk-flow-node{font:inherit;text-align:left;cursor:pointer;color:inherit;wi
 .mk-email-preview{margin-top:18px;padding-top:16px;border-top:1px solid #dceae7}.mk-modal-label{margin:0 0 8px;color:#42636a;font-size:12px;font-weight:700}.mk-email-preview iframe{display:block;width:100%;height:500px;border:1px solid #c9ddda;border-radius:8px;background:#07143a}.mk-image-fields{margin-top:18px;padding-top:14px;border-top:1px solid #dceae7}.mk-image-fields input[type=file]{padding:8px;background:#f3f8f7}
 
 .mk-email-preview iframe{height:760px;overflow:hidden;scrollbar-width:none}.mk-email-preview iframe::-webkit-scrollbar{display:none}
+
+.mk-email-preview{overflow:hidden}.mk-email-preview iframe{width:125%;height:760px;transform:scale(.8);transform-origin:top left;margin-bottom:-152px;overflow:hidden}.mk-email-preview iframe::-webkit-scrollbar{display:none}@media(max-width:600px){.mk-email-preview iframe{width:142%;transform:scale(.7);margin-bottom:-228px}}
