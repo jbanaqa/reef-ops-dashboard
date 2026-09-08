@@ -42,6 +42,10 @@ export function audienceWhere(audience: Segment, channel = "EMAIL", now = new Da
 }
 export async function seed() {
   for (const f of flowDefaults) await prisma.marketingResource.upsert({ where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: f.key } }, create: { shop: shop(), kind: "FLOW", key: f.key, name: f.name, data: json({ description: f.description, reviewed: false, steps: f.delays.map(delay => ({ minutes: delay, subject: f.name, channel: f.key === "low-stock" ? "SMS_TRANSACTIONAL" : "EMAIL", content: defaultContent })), ...(f.key === "abandoned-cart" ? { smsContent: { ...defaultContent, heading: "Still thinking it over?", body: "Your cart is waiting for you at Corals Anonymous.", button: "Complete your order" } } : {}) }) }, update: {} });
+  const abandoned = await prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" } } });
+  if (abandoned && !(abandoned.data as { smsContent?: unknown }).smsContent) {
+    await prisma.marketingResource.update({ where: { id: abandoned.id }, data: { data: { ...(abandoned.data as object), smsContent: { ...defaultContent, heading: "Still thinking it over?", body: "Your cart is waiting for you at Corals Anonymous.", button: "Complete your order" } } } });
+  }
   for (const [key, name, data] of [["mailable", "Mailable Subscribers · opened in 365 days", { openedDays: 365 }], ["b2b", "B2B Customers", { tag: "b2b" }]] as const) await prisma.marketingResource.upsert({ where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key } }, create: { shop: shop(), kind: "SEGMENT", key, name, data: json(data) }, update: {} });
   await prisma.marketingResource.upsert({ where: { shop_kind_key: { shop: shop(), kind: "TEMPLATE", key: "corals-standard" } }, create: { shop: shop(), kind: "TEMPLATE", key: "corals-standard", name: "Corals Anonymous standard", data: json(defaultContent) }, update: {} });
 }
