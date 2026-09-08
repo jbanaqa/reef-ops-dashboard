@@ -10,7 +10,20 @@ export const dynamic = "force-dynamic";
 function authorize(request: Request) {
   if (!isDashboardRequestAuthorized(request)) return Response.json({ error: "Login required" }, { status: 401 });
   const origin = request.headers.get("origin");
-  if (request.method !== "GET" && origin && origin !== new URL(request.url).origin) return Response.json({ error: "Invalid origin" }, { status: 403 });
+  if (request.method !== "GET" && origin) {
+    const allowed = new Set<string>();
+    // The request URL may be the private origin used by a reverse proxy.
+    allowed.add(new URL(request.url).origin);
+    // Trust the public origin configured for links and storefront callbacks.
+    if (process.env.APP_BASE_URL) {
+      try { allowed.add(new URL(process.env.APP_BASE_URL).origin); } catch { /* invalid config is reported by setup */ }
+    }
+    // Next/Vercel and common ingress proxies expose the browser-facing host.
+    const forwardedHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
+    const forwardedProto = (request.headers.get("x-forwarded-proto") || new URL(request.url).protocol.replace(":", "")).split(",")[0].trim();
+    if (forwardedHost) allowed.add(`${forwardedProto}://${forwardedHost.split(",")[0].trim()}`);
+    if (!allowed.has(origin)) return Response.json({ error: "Invalid origin" }, { status: 403 });
+  }
 }
 export async function GET(request: Request) {
   const denied = authorize(request); if (denied) return denied;
