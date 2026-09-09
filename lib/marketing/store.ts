@@ -1,3 +1,5 @@
+import { defaultStockConfig } from "./stock-config";
+import { validateFlow } from "./flow-config";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { getShopifyShopDomain } from "@/lib/shopify";
@@ -229,18 +231,24 @@ export async function seed() {
         key: f.key,
         name: f.name,
         data: json({
+          ...(f.key === "low-stock" ? { stock: defaultStockConfig } : {}),
           trigger: f.trigger,
           description: f.description,
           reviewed: false,
-          steps: f.delays.map((delay, index) => ({
-            minutes: delay,
-            subject:
-              index === 0 && f.key === "abandoned-cart"
-                ? "Soft cart reminder"
-                : f.name,
-            channel: f.key === "low-stock" ? "SMS_TRANSACTIONAL" : "EMAIL",
-            content: f.key === "b2b-welcome" ? b2bContent : defaultContent,
-          })),
+          steps:
+            f.key === "low-stock"
+              ? validateFlow("low-stock", { stock: defaultStockConfig }).steps
+              : f.delays.map((delay, index) => ({
+                  minutes: delay,
+                  subject:
+                    index === 0 && f.key === "abandoned-cart"
+                      ? "Soft cart reminder"
+                      : f.name,
+                  channel:
+                    "EMAIL",
+                  content:
+                    f.key === "b2b-welcome" ? b2bContent : defaultContent,
+                })),
           ...(f.key === "abandoned-cart"
             ? {
                 smsContent: {

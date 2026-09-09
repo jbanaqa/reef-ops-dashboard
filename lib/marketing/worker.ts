@@ -10,7 +10,12 @@ import {
   Segment,
 } from "./rules";
 import { DeliveryError, resendProvider, setup, smsProvider } from "./delivery";
-import { lowStock } from "./flows";
+import { lowStock, stockStateKey } from "./stock";
+import {
+  validateStock,
+  stockQuietHours,
+  type StockConfig,
+} from "./stock-config";
 import { validateFlow } from "./flow-config";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
 
@@ -46,6 +51,32 @@ export async function runMarketing() {
       error: "Worker stopped during delivery. Reconcile with provider.",
     },
   });
+  let stockCheck: Awaited<ReturnType<typeof lowStock>> | null = null;
+  try {
+    stockCheck = await lowStock();
+  } catch (error) {
+    await prisma.marketingResource.upsert({
+      where: {
+        shop_kind_key: { shop: shop(), kind: "SYSTEM", key: "stock-check" },
+      },
+      create: {
+        shop: shop(),
+        kind: "SYSTEM",
+        key: "stock-check",
+        name: "Last stock check",
+        data: {
+          at: new Date().toISOString(),
+          error: error instanceof Error ? error.message : "Stock check failed",
+        },
+      },
+      update: {
+        data: {
+          at: new Date().toISOString(),
+          error: error instanceof Error ? error.message : "Stock check failed",
+        },
+      },
+    });
+  }
   if (
     !config.sendingEnabled ||
     !config.migrationConfirmed ||
@@ -60,7 +91,7 @@ export async function runMarketing() {
     await heartbeat({ skipped, sent: 0 });
     return { skipped };
   }
-  await lowStock();
+  now.setTime(Date.now());
   const deadline = Date.now() + 180000;
   const campaigns = await prisma.marketingCampaign.findMany({
     where: { shop: shop(), status: "SCHEDULED", scheduledAt: { lte: now } },
@@ -177,10 +208,12 @@ export async function runMarketing() {
         include: { profile: { include: { consents: true } }, campaign: true },
       });
       if (!m || m.status !== "PENDING") return null;
+      let stockSettings: StockConfig | null = null;
+      const isStock = m.flowKey === "low-stock";
       const verification = m.flowKey === "email-confirmation",
         consent = m.profile.consents.find((c) => c.channel === m.channel);
       let reason =
-        !verification && !eligible(consent)
+        !verification && !isStock && !eligible(consent)
           ? "Not eligible for this channel"
           : null;
       let deferred: string | null = null;
@@ -228,6 +261,63 @@ export async function runMarketing() {
           !config.ingestEnabled
         )
           deferred = "Shopify ingestion paused";
+        if (isStock) {
+          try {
+            stockSettings = validateStock(
+              (f?.data as { stock?: unknown })?.stock,
+              true,
+            );
+            const s = stockSettings;
+            const enabledChannel =
+              m.channel === "EMAIL"
+                ? s.emailEnabled
+                : m.channel === "SMS_TRANSACTIONAL" && s.smsEnabled;
+            if (
+              !enabledChannel ||
+              m.profile.email !== s.recipientEmail ||
+              (m.channel !== "EMAIL" && m.profile.phone !== s.recipientPhone)
+            )
+              reason = "Staff recipient or alert channel changed";
+            if (consent?.suppressed || consent?.status === "UNSUBSCRIBED")
+              reason = "Staff alert channel suppressed";
+            const match = m.flowCondition?.match(
+              /^stock:(v2:[a-f0-9]+:[0-9]+):([0-9]+)$/,
+            );
+            if (!match) reason = "Legacy stock alert needs review";
+            else {
+              const state = await tx.marketingResource.findUnique({
+                where: {
+                  shop_kind_key: { shop: shop(), kind: "STOCK", key: match[1] },
+                },
+              });
+              const d = state?.data as
+                | {
+                    low?: boolean;
+                    cycle?: number;
+                    variantId?: string;
+                    observedAt?: string;
+                  }
+                | undefined;
+              if (
+                !d?.low ||
+                d.cycle !== Number(match[2]) ||
+                !d.variantId ||
+                stockStateKey(s, d.variantId) !== match[1]
+              )
+                reason = "Stock recovered or monitoring rules changed";
+              if (!stockCheck || !("observedAt" in stockCheck))
+                deferred = "Waiting for a successful stock check";
+              else if (
+                !d?.observedAt ||
+                new Date(d.observedAt) < new Date(stockCheck.observedAt)
+              )
+                reason = "Variant no longer monitored";
+            }
+            if (!config.ingestEnabled) deferred = "Shopify ingestion paused";
+          } catch {
+            deferred = "Review stock alert settings";
+          }
+        }
         if (m.flowKey === "b2b-welcome" && !m.profile.tags.includes("b2b"))
           reason = "B2B tag removed";
         if (m.flowKey === "abandoned-cart") {
@@ -267,7 +357,9 @@ export async function runMarketing() {
         return null;
       }
       if (m.channel !== "EMAIL") {
-        const zone = (m.profile.properties as { timezone?: string }).timezone;
+        const zone =
+          stockSettings?.timezone ||
+          (m.profile.properties as { timezone?: string }).timezone;
         if (!config.smsReady) deferred = "SMS gateway not configured";
         else if (!zone) deferred = "Recipient timezone required for SMS";
         else {
@@ -279,7 +371,8 @@ export async function runMarketing() {
                 hourCycle: "h23",
               }).format(new Date()),
             );
-            if (hour < 10 || hour >= 20) deferred = "Recipient quiet hours";
+            if (stockSettings ? stockQuietHours(zone) : hour < 10 || hour >= 20)
+              deferred = "Recipient quiet hours";
           } catch {
             deferred = "Invalid recipient timezone";
           }

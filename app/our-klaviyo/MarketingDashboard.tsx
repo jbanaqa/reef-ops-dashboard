@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import FlowsWorkspace from "./FlowsWorkspace";
 import "./flows.css";
+import "./stock.css";
 import AudienceWorkspace from "./AudienceWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
 import "./settings.css";

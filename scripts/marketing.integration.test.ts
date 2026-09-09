@@ -1112,3 +1112,292 @@ test("manual delivery respects sending gates, sends due messages once, and prese
   assert.equal(waiting.dueAt.toISOString(), futureAt.toISOString());
   assert.equal(waiting.attempts, 0);
 });
+
+test("stock alerts baseline per variant, use strict threshold, deduplicate and reset after recovery", async () => {
+  const { observeStock, readStock, lowStock } = await import(
+    "../lib/marketing/stock"
+  );
+  const { defaultStockConfig } = await import("../lib/marketing/stock-config");
+  const { validateFlow } = await import("../lib/marketing/flow-config");
+  const stock = {
+    ...defaultStockConfig,
+    recipientEmail: "stock-staff@example.com",
+    recipientPhone: "+16575550123",
+    smsConsentConfirmed: true,
+  };
+  const data = validateFlow("low-stock", { reviewed: true, stock });
+  const flow = await prisma.marketingResource.update({
+    where: { shop_kind_key: { shop, kind: "FLOW", key: "low-stock" } },
+    data: { enabled: true, data: store.json(data) },
+  });
+  const variant = {
+    id: "gid://shopify/ProductVariant/700",
+    title: "Small",
+    inventoryQuantity: 5,
+    inventoryItem: { tracked: true },
+    product: {
+      id: "gid://shopify/Product/70",
+      title: "T5 coral",
+      handle: "t5-coral",
+    },
+  };
+  let clock = Date.now() - 60000;
+  const observe = (quantity: number, id = variant.id) =>
+    observeStock(
+      stock,
+      { ...variant, id, inventoryQuantity: quantity },
+      new Date((clock += 1000)),
+      JSON.stringify(flow.data),
+    );
+  assert.equal(await observe(5), 0);
+  assert.equal(await observe(4), 2);
+  assert.equal(await observe(3), 0);
+  assert.equal(await observe(2), 0);
+  assert.equal(
+    await observe(3),
+    0,
+    "an increase that remains low does not re-alert",
+  );
+  assert.equal(
+    await observe(0, "gid://shopify/ProductVariant/701"),
+    0,
+    "initial low stock is a baseline",
+  );
+  assert.equal(
+    await observeStock(
+      stock,
+      { ...variant, inventoryQuantity: 4 },
+      new Date(clock - 10000),
+      JSON.stringify(flow.data),
+    ),
+    0,
+    "old snapshots are ignored",
+  );
+  const messages = await prisma.marketingMessage.findMany({
+    where: { flowKey: "low-stock" },
+  });
+  assert.equal(messages.length, 2);
+  assert.deepEqual(messages.map((m) => m.channel).sort(), [
+    "EMAIL",
+    "SMS_TRANSACTIONAL",
+  ]);
+  assert.match((messages[0].content as { body: string }).body, /4/);
+  assert.equal(
+    (messages[0].content as { url: string }).url,
+    "https://audit.myshopify.com/products/t5-coral",
+  );
+  assert.equal(await observe(5), 0);
+  assert.equal(
+    await prisma.marketingMessage.count({
+      where: { flowKey: "low-stock", status: "CANCELLED" },
+    }),
+    2,
+  );
+  assert.equal(await observe(4), 2);
+  assert.equal(await observe(4), 0);
+  assert.equal(
+    await prisma.marketingMessage.count({ where: { flowKey: "low-stock" } }),
+    4,
+  );
+  assert.equal(
+    await observeStock(
+      stock,
+      {
+        ...variant,
+        id: "gid://shopify/ProductVariant/702",
+        inventoryItem: { tracked: false },
+      },
+      new Date((clock += 1000)),
+      JSON.stringify(flow.data),
+    ),
+    0,
+  );
+
+  const previousFetch = globalThis.fetch;
+  let pages = 0;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("/graphql.json")) {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.variables.query, "collection:488202338530");
+      pages++;
+      return Response.json({
+        data: {
+          collection: {
+            id: "gid://shopify/Collection/488202338530",
+            title: "T5 Tank",
+          },
+          productVariants: {
+            nodes: body.variables.after
+              ? []
+              : [{ ...variant, inventoryQuantity: 4 }],
+            pageInfo: {
+              hasNextPage: !body.variables.after,
+              endCursor: body.variables.after ? null : "page2",
+            },
+          },
+        },
+      });
+    }
+    return previousFetch(input, init);
+  };
+  try {
+    assert.equal((await readStock(stock)).variants.length, 1);
+    assert.equal(pages, 2, "collection variants are paginated");
+    // The normal worker sends the staff email without subscribing staff to marketing.
+    await prisma.marketingMessage.updateMany({
+      where: { flowKey: { not: "low-stock" }, status: "PENDING" },
+      data: { status: "CANCELLED" },
+    });
+    const before = sent.length;
+    await worker.runMarketing();
+    assert.equal(sent.length, before + 1);
+    assert.deepEqual(sent.at(-1)?.to, ["stock-staff@example.com"]);
+    const staff = await prisma.marketingProfile.findFirstOrThrow({
+      where: { email: stock.recipientEmail },
+    });
+    assert.equal(
+      await prisma.marketingConsent.count({
+        where: { profileId: staff.id, channel: "EMAIL" },
+      }),
+      0,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    clock = Date.now() - 1000;
+    assert.equal(await observe(5), 0);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    clock = Date.now() - 1000;
+    assert.equal(await observe(4), 2);
+    await store.atomic((tx) =>
+      store.consent(
+        tx,
+        staff.id,
+        "EMAIL",
+        "UNSUBSCRIBED",
+        "staff",
+        new Date(),
+        "Staff suppression",
+      ),
+    );
+    await worker.runMarketing();
+    assert.equal(
+      sent.length,
+      before + 1,
+      "suppressed staff email must not send",
+    );
+    await prisma.marketingResource.update({
+      where: { id: flow.id },
+      data: { enabled: false },
+    });
+    const pageCount = pages;
+    assert.ok("skipped" in (await lowStock()));
+    assert.equal(pages, pageCount, "paused flow makes no Shopify requests");
+  } finally {
+    globalThis.fetch = previousFetch;
+    await prisma.marketingResource.update({
+      where: { id: flow.id },
+      data: { enabled: false },
+    });
+    await prisma.marketingMessage.updateMany({
+      where: { flowKey: "low-stock", status: "PENDING" },
+      data: { status: "CANCELLED" },
+    });
+  }
+});
+
+test("stock checks require login, previews never enroll, and Shopify failures do not block other email", async () => {
+  const api = await import("../app/api/marketing/route");
+  const { defaultStockConfig } = await import("../lib/marketing/stock-config");
+  const { validateFlow } = await import("../lib/marketing/flow-config");
+  const stock = { ...defaultStockConfig, smsEnabled: false };
+  const request = (action: string, authorized = true) =>
+    new Request("https://app.example/api/marketing", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://app.example",
+        ...(authorized
+          ? {
+              authorization:
+                "Basic " +
+                Buffer.from("staff:test-password").toString("base64"),
+            }
+          : {}),
+      },
+      body: JSON.stringify({ action, stock }),
+    });
+  assert.equal((await api.POST(request("preview-stock", false))).status, 401);
+  assert.equal((await api.POST(request("check-stock", false))).status, 401);
+  const beforeMessages = await prisma.marketingMessage.count();
+  const beforeState = await prisma.marketingResource.count({
+    where: { kind: "STOCK" },
+  });
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) =>
+    String(input).includes("/graphql.json")
+      ? Response.json({
+          data: {
+            collection: {
+              id: "gid://shopify/Collection/488202338530",
+              title: "T5 Tank",
+            },
+            productVariants: {
+              nodes: [],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        })
+      : previousFetch(input, init);
+  try {
+    const preview = await api.POST(request("preview-stock"));
+    assert.equal(preview.status, 200);
+    assert.equal((await preview.json()).checked, 0);
+    assert.equal(await prisma.marketingMessage.count(), beforeMessages);
+    assert.equal(
+      await prisma.marketingResource.count({ where: { kind: "STOCK" } }),
+      beforeState,
+    );
+    await prisma.marketingResource.update({
+      where: { shop_kind_key: { shop, kind: "FLOW", key: "low-stock" } },
+      data: {
+        enabled: true,
+        data: store.json(validateFlow("low-stock", { reviewed: true, stock })),
+      },
+    });
+    globalThis.fetch = async (input, init) => {
+      if (String(input).includes("/graphql.json"))
+        throw new Error("Shopify test outage");
+      return previousFetch(input, init);
+    };
+    const p = await store.atomic(async (tx) => {
+      const p = await store.identify(tx, {
+        email: "stock-outage-independent@example.com",
+      });
+      await store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "test", new Date());
+      return p;
+    });
+    await prisma.marketingMessage.create({
+      data: {
+        shop,
+        key: "stock-outage-independent",
+        profileId: p.id,
+        channel: "EMAIL",
+        subject: "Independent message",
+        content: store.json(defaultContent),
+        dueAt: new Date(),
+      },
+    });
+    const beforeSent = sent.length;
+    await worker.runMarketing();
+    assert.equal(sent.length, beforeSent + 1);
+    const status = await prisma.marketingResource.findUniqueOrThrow({
+      where: { shop_kind_key: { shop, kind: "SYSTEM", key: "stock-check" } },
+    });
+    assert.match(String((status.data as { error: string }).error), /outage/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    await prisma.marketingResource.update({
+      where: { shop_kind_key: { shop, kind: "FLOW", key: "low-stock" } },
+      data: { enabled: false },
+    });
+  }
+});

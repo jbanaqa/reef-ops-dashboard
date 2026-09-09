@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import FlowEditor from "./FlowEditor";
+import LowStockEditor from "./LowStockEditor";
 import { flowSequence, type FlowConfig } from "@/lib/marketing/flow-config";
 import type { Content, MarketingSettings } from "@/lib/marketing/rules";
 export type FlowResource = {
@@ -185,22 +186,36 @@ export default function FlowsWorkspace({
               {statusLabels[status!]}
             </span>
           </div>
-          <FlowEditor
-            key={selected.id}
-            resource={selected}
-            busy={busy}
-            settings={settings}
-            testEmail={testEmail}
-            save={async (data, enabled) => {
-              const result = await save(
-                selected,
-                data as unknown as Record<string, unknown>,
-                enabled,
-              );
-              if (result) setSelected(result);
-              return result;
-            }}
-          />
+          {selected.key === "low-stock" ? (
+            <LowStockEditor
+              key={selected.id}
+              resource={selected}
+              busy={busy}
+              setup={setup}
+              save={async (data, enabled) => {
+                const result = await save(selected, data, enabled);
+                if (result) setSelected(result);
+                return result;
+              }}
+            />
+          ) : (
+            <FlowEditor
+              key={selected.id}
+              resource={selected}
+              busy={busy}
+              settings={settings}
+              testEmail={testEmail}
+              save={async (data, enabled) => {
+                const result = await save(
+                  selected,
+                  data as unknown as Record<string, unknown>,
+                  enabled,
+                );
+                if (result) setSelected(result);
+                return result;
+              }}
+            />
+          )}
         </>
       ) : (
         <>
@@ -281,7 +296,11 @@ export default function FlowsWorkspace({
               </label>
               <label>
                 Sort by
-                <select aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value)}>
+                <select
+                  aria-label="Sort by"
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value)}
+                >
                   <option value="enabled">Enabled first</option>
                   <option value="name">Name A–Z</option>
                 </select>

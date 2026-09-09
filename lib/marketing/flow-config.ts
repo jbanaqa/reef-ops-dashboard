@@ -1,3 +1,5 @@
+import { StockConfig, validateStock } from "./stock-config";
+import { defaultContent } from "./rules";
 import { channels, content, Content, flowDefaults } from "./rules";
 
 export type FlowStep = {
@@ -18,6 +20,7 @@ export type FlowConfig = {
   orderBranch?: { yes: Branch; no: Branch };
   internalProfileIds?: string[];
   threshold?: number;
+  stock?: StockConfig;
 };
 export type FlowTarget = {
   kind: "step" | "sms" | "branch" | "wait" | "info";
@@ -42,7 +45,36 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     throw new Error("Unknown flow.");
   if (!value || typeof value !== "object")
     throw new Error("Flow configuration required.");
-  const f = value as FlowConfig;
+  const f = { ...(value as FlowConfig) };
+  const stock =
+    key === "low-stock" && f.stock ? validateStock(f.stock) : undefined;
+  if (stock)
+    f.steps = [
+      ...(stock.emailEnabled
+        ? [
+            {
+              minutes: 0,
+              subject: stock.emailSubject,
+              channel: "EMAIL",
+              content: {
+                ...defaultContent,
+                heading: "Low stock alert",
+                body: stock.emailBody,
+              },
+            },
+          ]
+        : []),
+      ...(stock.smsEnabled
+        ? [
+            {
+              minutes: 0,
+              subject: "Stock alert",
+              channel: "SMS_TRANSACTIONAL",
+              content: { ...defaultContent, body: stock.smsBody },
+            },
+          ]
+        : []),
+    ];
   if (!Array.isArray(f.steps) || !f.steps.length || f.steps.length > 10)
     throw new Error("Use 1–10 flow steps.");
   const steps = f.steps.map((s) => {
@@ -50,7 +82,11 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
       throw new Error("Invalid channel.");
     if (key === "b2b-welcome" && s.channel !== "EMAIL")
       throw new Error("B2B welcome uses email.");
-    if (key === "low-stock" && s.channel !== "SMS_TRANSACTIONAL")
+    if (
+      key === "low-stock" &&
+      s.channel !== "SMS_TRANSACTIONAL" &&
+      !(stock && s.channel === "EMAIL")
+    )
       throw new Error("Internal stock alerts use transactional SMS.");
     if (key !== "low-stock" && s.channel === "SMS_TRANSACTIONAL")
       throw new Error("Marketing flows cannot use transactional SMS.");
@@ -80,6 +116,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
   )
     throw new Error("Invalid inventory threshold.");
   return {
+    ...(stock ? { stock } : {}),
     reviewed: f.reviewed === true,
     description: String(f.description || "").slice(0, 1000),
     trigger: flowDefaults.find((f) => f.key === key)!.trigger,

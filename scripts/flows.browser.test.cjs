@@ -21,6 +21,7 @@ const { chromium } = require("playwright");
   const css =
     (await fs.readFile("app/our-klaviyo/marketing.css", "utf8")) +
     (await fs.readFile("app/our-klaviyo/flows.css", "utf8")) +
+    (await fs.readFile("app/our-klaviyo/stock.css", "utf8")) +
     ":root{--surface:#fff;--surface-muted:#f5f8f7;--border:#dce5e3;--text-main:#203e38;--text-muted:#627872}*{box-sizing:border-box}body{font-family:Arial,sans-serif}";
   const server = http.createServer((req, res) => {
     if (req.url === "/app.js") {
@@ -79,14 +80,12 @@ const { chromium } = require("playwright");
     await page
       .getByText("Customer sending is paused", { exact: true })
       .waitFor();
-    const b2b = page
-      .locator(".fw-row")
-      .filter({
-        has: page.getByRole("heading", {
-          name: "B2B Welcoming Email",
-          exact: true,
-        }),
-      });
+    const b2b = page.locator(".fw-row").filter({
+      has: page.getByRole("heading", {
+        name: "B2B Welcoming Email",
+        exact: true,
+      }),
+    });
     assert.deepEqual(await b2b.locator("dd").allTextContents(), ["1", "2"]);
     await page.getByLabel("Status", { exact: true }).selectOption("review");
     await page.getByText("4 of 5 workflows", { exact: true }).waitFor();
@@ -149,11 +148,9 @@ const { chromium } = require("playwright");
     await page
       .getByRole("button", { name: "Clear filters", exact: true })
       .click();
-    const cart = page
-      .locator(".fw-row")
-      .filter({
-        has: page.getByRole("heading", { name: "Abandoned Cart", exact: true }),
-      });
+    const cart = page.locator(".fw-row").filter({
+      has: page.getByRole("heading", { name: "Abandoned Cart", exact: true }),
+    });
     await cart.getByText("3 message steps", { exact: true }).waitFor();
     await cart.getByText("Email + Text", { exact: true }).waitFor();
     await page.getByLabel("Sort by", { exact: true }).selectOption("name");
@@ -174,6 +171,128 @@ const { chromium } = require("playwright");
         fullPage: true,
       });
     }
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.route("**/api/marketing*", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET")
+        return route.fulfill({ json: { status: null } });
+      const body = request.postDataJSON();
+      if (body.action === "preview-stock")
+        return route.fulfill({
+          json: {
+            collection: "T5 Tank",
+            checked: 12,
+            low: 1,
+            at: new Date().toISOString(),
+            variants: [
+              {
+                id: "1",
+                product: "Example coral",
+                variant: "Small",
+                quantity: 4,
+              },
+            ],
+          },
+        });
+      if (body.action === "check-stock")
+        return route.fulfill({
+          json: {
+            collection: "T5 Tank",
+            checked: 12,
+            low: 1,
+            queued: 0,
+            at: new Date().toISOString(),
+          },
+        });
+      throw new Error("Unexpected stock request");
+    });
+    await page
+      .getByRole("button", { name: "Open Low Stock Alert: T5", exact: true })
+      .click();
+    await page
+      .getByRole("heading", { name: "1. What to watch", exact: true })
+      .waitFor();
+    assert.equal(
+      await page.getByLabel("Mobile number", { exact: true }).inputValue(),
+      "+16573450924",
+    );
+    assert.equal(
+      await page.getByLabel("Recipient timezone", { exact: true }).inputValue(),
+      "America/Los_Angeles",
+    );
+    await page
+      .getByRole("button", { name: "Preview current stock", exact: true })
+      .click();
+    await page
+      .getByText("12 tracked variants · 1 below threshold", { exact: true })
+      .waitFor();
+    await page
+      .getByLabel("Email message", { exact: true })
+      .fill(
+        "Please restock {{ ProductTitle }}. Remaining: {{ InventoryQuantity }}.",
+      );
+    await page
+      .getByRole("button", { name: "← All flows", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Open Low Stock Alert: T5", exact: true })
+      .click();
+    await page
+      .getByText("Unfinished changes restored.", { exact: true })
+      .waitFor();
+    assert.match(
+      await page.getByLabel("Email message", { exact: true }).inputValue(),
+      /Please restock/,
+    );
+    await page.getByLabel("Enable this stock flow", { exact: true }).check();
+    await page
+      .getByRole("button", { name: "Save stock flow", exact: true })
+      .click();
+    await page.getByRole("alert").filter({ hasText: "permission" }).waitFor();
+    await page
+      .getByLabel("This staff member has agreed", { exact: false })
+      .check();
+    await page
+      .getByLabel("I reviewed the collection", { exact: false })
+      .check();
+    await page
+      .getByRole("button", { name: "Save stock flow", exact: true })
+      .click();
+    await page
+      .getByText("Stock alert settings saved.", { exact: true })
+      .waitFor();
+    const savedStock = await page.evaluate(
+      () => JSON.parse(localStorage.getItem("savedFlow")).data.stock,
+    );
+    assert.match(savedStock.emailBody, /Please restock/);
+    await page
+      .getByRole("button", { name: "Check saved flow now", exact: true })
+      .click();
+    await page
+      .getByText(
+        "T5 Tank: 12 variants checked · 1 below threshold · 0 messages queued",
+        { exact: true },
+      )
+      .waitFor();
+    await page.screenshot({
+      path: path.join(output, "stock-desktop.png"),
+      fullPage: true,
+    });
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        "Stock editor fits at " + width,
+      );
+      await page.screenshot({
+        path: path.join(output, "stock-mobile-" + width + ".png"),
+        fullPage: true,
+      });
+    }
+
     assert.deepEqual(errors, []);
     console.log(
       "PASS: flow search/status/sort, real message counts, branch-aware step counts, focused navigation, keyboard focus restoration, preserved email drafts and saves, mobile 320/390",

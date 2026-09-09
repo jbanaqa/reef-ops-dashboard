@@ -351,3 +351,63 @@ test("cleared footer copy keeps the unsubscribe link and mailing address", () =>
   assert.match(html, /Unsubscribe<\/a>/);
   assert.match(html, /123 Valid Street/);
 });
+
+import {
+  defaultStockConfig,
+  stockCopy,
+  stockQuietHours,
+  validateStock,
+} from "../lib/marketing/stock-config";
+
+test("stock config validates recipient, threshold, channels, templates and quiet hours", () => {
+  const s = { ...defaultStockConfig, smsConsentConfirmed: true };
+  assert.equal(validateStock(s, true).recipientPhone, "+16573450924");
+  assert.throws(() => validateStock({ ...s, threshold: 0 }));
+  assert.throws(() => validateStock({ ...s, threshold: 4.5 }));
+  assert.throws(
+    () => validateStock({ ...s, smsConsentConfirmed: false }, true),
+    /permission/,
+  );
+  assert.throws(
+    () => validateStock({ ...s, timezone: "unknown" }, true),
+    /timezone/,
+  );
+  assert.throws(
+    () => validateStock({ ...s, collectionId: "5 OR product:*" }),
+    /collection/,
+  );
+  assert.throws(
+    () => validateStock({ ...s, smsBody: "{{ unknown }}" }),
+    /Unknown/,
+  );
+  const flow = validateFlow("low-stock", { reviewed: true, stock: s });
+  assert.deepEqual(
+    flow.steps.map((x) => x.channel),
+    ["EMAIL", "SMS_TRANSACTIONAL"],
+  );
+  assert.equal(
+    stockCopy("{{ ProductTitle }} has {{ InventoryQuantity }}", {
+      ProductTitle: "A & B",
+      VariantTitle: "Small",
+      InventoryQuantity: "4",
+      ProductURL: "https://example.com",
+    }),
+    "A & B has 4",
+  );
+  assert.equal(
+    stockQuietHours("America/Los_Angeles", new Date("2026-09-09T17:59:00Z")),
+    true,
+  );
+  assert.equal(
+    stockQuietHours("America/Los_Angeles", new Date("2026-09-09T18:00:00Z")),
+    false,
+  );
+  assert.equal(
+    stockQuietHours("America/Los_Angeles", new Date("2026-09-10T03:00:00Z")),
+    true,
+  );
+  assert.equal(
+    stockQuietHours("America/Los_Angeles", new Date("2026-12-09T19:00:00Z")),
+    false,
+  );
+});

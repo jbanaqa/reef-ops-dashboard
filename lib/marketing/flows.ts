@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/prisma";
 import { content, DAY, withCoupon } from "./rules";
 import { flowSequence, validateFlow } from "./flow-config";
 export type { FlowConfig } from "./flow-config";
@@ -94,56 +93,5 @@ export async function enroll(
         update: {},
       });
     }
-  }
-}
-
-export async function lowStock() {
-  const resource = await prisma.marketingResource.findUnique({
-    where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "low-stock" } },
-  });
-  if (!resource?.enabled) return;
-  const config = validateFlow("low-stock", resource.data);
-  if (!config.reviewed || !config.internalProfileIds?.length) return;
-  const states = await prisma.productInventoryState.findMany({
-    where: { shop: shop() },
-  });
-  for (const state of states) {
-    const key = `stock:${state.productId}`;
-    await prisma.$transaction(async (tx) => {
-      const previous = await tx.marketingResource.findUnique({
-        where: { shop_kind_key: { shop: shop(), kind: "STOCK", key } },
-      });
-      const low = state.totalAvailable <= (config.threshold ?? 5);
-      if (low && previous && !(previous.data as { low: boolean }).low) {
-        for (const profileId of config.internalProfileIds!) {
-          const profile = await tx.marketingProfile.findFirst({
-            where: { id: profileId, shop: shop() },
-          });
-          if (profile)
-            await enroll(
-              tx,
-              "low-stock",
-              profileId,
-              `${state.productId}:${state.checkedAt.toISOString()}`,
-              new Date(),
-              {
-                stockText: `Low stock: ${state.productTitle || state.productId} has ${state.totalAvailable} units available.`,
-                url: "https://coralsanonymous.com",
-              },
-            );
-        }
-      }
-      await tx.marketingResource.upsert({
-        where: { shop_kind_key: { shop: shop(), kind: "STOCK", key } },
-        create: {
-          shop: shop(),
-          kind: "STOCK",
-          key,
-          name: state.productTitle || key,
-          data: { low },
-        },
-        update: { data: { low } },
-      });
-    });
   }
 }

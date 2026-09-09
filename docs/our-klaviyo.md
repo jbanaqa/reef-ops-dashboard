@@ -10,7 +10,7 @@ This is a local V1 implementation, not a completed Klaviyo cutover. No productio
 - Existing Shopify domain/helper configuration and order webhook. Order ingestion is gated by `MARKETING_INGEST_ENABLED`. The order route durably enqueues marketing work before inventory deduplication; identity conflicts are handled by the worker and do not block inventory claims.
 - Existing Resend account variables and dependency. Marketing sends use a separate adapter with unsubscribe headers, postal address and stable idempotency keys.
 - Existing standalone `tsx` scheduled-job pattern. Run `npm run scheduled:all` every five minutes on the deployment scheduler. The worker processes a durable Shopify inbox, uses database claims and bounded batches, and paces email requests.
-- Existing ProductInventoryState for internal low-stock crossing detection. No separate stock sync.
+- Low-stock alerts query tracked Shopify variants in the configured collection. ProductInventoryState remains separate from marketing stock alerts.
 
 ## Preserved value and deliberate safeguards
 
@@ -29,7 +29,7 @@ Attribution is one message per order: last recorded click within five days, othe
 1. Profiles, identity conflict detection, consent ledger, sticky suppression, historical imports, dynamic audiences and static list memberships.
 2. Expandable Our Klaviyo navigation: Overview, Campaigns, Flows, Forms, Audiences, Templates, Analytics, Settings.
 3. Campaign drafts, template reuse, subject/preview/hero/body/button/product cards, desktop/mobile HTML preview, allowlisted internal test email, duplication, scheduling, cancellation and send-time eligibility. Flow email editors support sanitized HTML, desktop/mobile email previews and allowlisted test sends from the current editor. SMS uses a separate plain-text field. Product cards are rendered, and uploaded email artwork is sent using inline CID attachments.
-4. Five configurable, initially paused flow definitions. B2B is the first flow being developed and tested; the remaining flows are infrastructure scaffolds, not verified replicas of the original Klaviyo journeys. Welcome/B2B enroll once; abandoned cart has a configurable email sequence and optional SMS (30-minute default), with purchase cancellation for every message and a three-day checkout expiry; low stock alerts use configured internal profiles; delivery upsell requires a trusted expected-delivery event.
+4. Five configurable, initially paused flow definitions. B2B is the first flow being developed and tested; the remaining flows are infrastructure scaffolds, not verified replicas of the original Klaviyo journeys. Welcome/B2B enroll once; abandoned cart has a configurable email sequence and optional SMS (30-minute default), with purchase cancellation for every message and a three-day checkout expiry; low stock alerts use the reviewed staff recipient and collection-specific variant checks; delivery upsell requires a trusted expected-delivery event.
 5. Storefront script: 10-second popup, desktop/mobile, outside/Escape dismissal, seven-day dismissal interval, submission suppression and a separate optional SMS step. Email confirmation with a private, single-use token adds an ownership check before enrolling welcome emails. This intentionally adds double opt-in to the audited experience; the popup says the offer follows confirmation. Settings stores the organization name and business mailing address used in every footer, preview and future send.
 6. Signed Shopify, Resend and gateway event endpoints; open/click/delivery/bounce/complaint/unsubscribe events; anonymous storefront observations; aggregate analytics.
 
@@ -94,7 +94,7 @@ For delivery-upsell integration, the trusted delivery source sends to `/api/mark
 
 V1 defines a gateway interface, not a configured Twilio/carrier integration. Set MARKETING_SMS_GATEWAY_URL, MARKETING_SMS_GATEWAY_KEY and MARKETING_SMS_WEBHOOK_SECRET only after implementing a provider-backed gateway. The worker POSTs `{id,to,channel,text}` with bearer authentication and Idempotency-Key. The gateway must persist idempotency, return `{id}`, handle carrier registration, STOP/HELP, country restrictions and current opt-outs. Its callbacks to `?source=sms` use the HMAC headers above and `{id,messageId,type,occurredAt}`. Supported types include DELIVERED, CLICKED, FAILED, UNSUBSCRIBED and SMS_RECEIVED. Map STOP to UNSUBSCRIBED. The gateway must suppress immediately, independently of Reef Ops callback timing.
 
-Recipient timezone is required for SMS; worker sends only 10:00–20:00 in that timezone. Confirm deployment-specific messaging rules with the provider. Internal low-stock recipients must have SMS_TRANSACTIONAL consent provisioned through a reviewed operational process; no public form grants that channel. Low-stock baselines avoid sending on the first observation. The default threshold is 5; verify what T5 meant in the audit.
+Recipient timezone is required for SMS. Customer marketing texts use 10:00–20:00; reviewed internal stock texts use 11:00–20:00 in the configured recipient timezone. Stock text setup requires staff confirmation of the recipient’s permission. Channel suppressions and unsubscribes always block delivery. Staff stock email does not subscribe the recipient to customer email marketing.
 
 ## Storefront installation
 
@@ -122,7 +122,6 @@ Deferred or limited: A/B testing (explicitly excluded), full drag/drop editor, e
 
 Primary technical references: https://shopify.dev/docs/apps/build/webhooks/verify-deliveries and https://resend.com/docs/dashboard/emails/idempotency-keys .
 
-
 ## Email editing workspace
 
 Opening an email step opens a full-screen workspace with Content, Artwork, and Send test panels. Content supports visual text formatting and an explicit HTML mode; opening or switching panels does not rewrite saved HTML. Save email writes through the existing flow save action. Unfinished copy and uploaded artwork remain in the resource-scoped browser draft. Tests use the current draft without enabling the flow. Older queued deliveries keep their enrollment snapshot.
@@ -132,7 +131,6 @@ The preview renders the same responsive markup used for delivery, with desktop a
 Run `npm run marketing:browser:test` with Chrome installed (or set `MARKETING_TEST_BROWSER` to a browser executable) for isolated real-browser tests of overflow, oversized artwork, visual formatting, draft restoration, save failure feedback, and narrow-screen controls. The fixture blocks external requests and uses no deployment data. Screenshots go to a temporary directory reported by the test.
 
 Design references: [Klaviyo template editor](https://help.klaviyo.com/hc/en-us/articles/4407911841435), [Klaviyo mobile optimization](https://help.klaviyo.com/hc/en-us/articles/115005254428), and [Mailchimp new builder](https://mailchimp.com/help/design-an-email-new-builder/). The workspace follows their sidebar/canvas, formatting, and device-preview patterns; it is not a full drag-and-drop template builder.
-
 
 Footer editing is available in the email workspace Footer panel: heading, message, and unsubscribe introduction. Footer artwork remains in Artwork. Sender name/address come from Settings, and the unsubscribe link remains automatic. Internal test sends show an informational unsubscribe page and omit one-click headers; actual workflow messages keep their real token and headers. See [B2B acceptance checklist](b2b-workflow-acceptance.md) for the live test sequence and outstanding US compliance checks.
 
@@ -171,3 +169,26 @@ The Flows landing page supports search by name/trigger, status filters, and enab
 Flow enabled state is separate from global sending controls, which are summarized above the directory. Opening a workflow replaces the directory with the existing workflow editor. All flows returns to the prior search/filter state and restores focus. The existing email editor, saved copy/artwork, draft storage, and workflow execution logic are unchanged.
 
 Design references: [Klaviyo Flows tab](https://help.klaviyo.com/hc/en-us/articles/12930413372187) and [Mailchimp automation flows](https://mailchimp.com/help/create-customer-journey/). Run `node scripts/flows.browser.test.cjs` for isolated browser verification, including draft preservation while navigating between the directory and editor.
+
+## T5 staff stock alerts
+
+The reviewed Shopify workflow watches collection `488202338530` (T5 Tank), tests **variant inventory < 5**, emails Russell, and emits a Klaviyo event for his text. Reef Ops uses the agreed improvement: one alert per observed crossing, then re-arms only after observed recovery to 5 or more. The prefilled staff email is russellvinson7@gmail.com and mobile is +16573450924, with America/Los_Angeles quiet hours.
+
+- The dedicated stock editor stores a validated `stock` configuration in the existing FLOW resource. Collection, threshold, recipient, channels, subject and message copy are editable. Browser drafts survive navigation; deployments do not rewrite saved resources.
+- Shopify's [productVariants collection filter](https://shopify.dev/docs/api/admin-graphql/latest/queries/productVariants) supplies paginated variants, with inventory tracked per variant across locations. Untracked or missing quantities are excluded. All pages must load before applying observations; failures never replace inventory with zero.
+- Checks run during the marketing worker, even while sending is paused, when the stock flow is reviewed/enabled and ingestion is enabled. This is polling, not a replay of every inventory webhook: a drop and recovery entirely between checks may be missed.
+- The first observation establishes a baseline without queuing pre-existing low stock. The state key includes collection and threshold, so changing either establishes a new baseline. Durable serializable transactions and cycle-specific message keys prevent duplicate alerts. Stale snapshots are ignored.
+- A recovery cancels unsent messages. Delivery rechecks the current recipient, channel, monitoring scope, variant presence, cycle, suppression and successful scan. A stock API failure defers stock delivery but does not stop unrelated customer email.
+- Staff email uses the configured internal recipient without enrolling that person in email marketing. Existing EMAIL suppression/unsubscribe still blocks it. Staff texts require explicit permission confirmation in the editor; SMS_TRANSACTIONAL suppressions/unsubscribes still block them. Text delivery also requires the existing SMS gateway contract and waits outside **11 a.m.–8 p.m. Pacific**, including daylight-saving changes.
+- **Preview current stock** is read-only and uses the unsaved form values. **Check saved flow now** applies the saved rules and can queue messages; it does not call a delivery provider. The regular worker can subsequently send eligible queued messages when sending is enabled.
+- Existing legacy stock resources require review in the new editor before they can send. No migration rewrites saved copy or enables a flow.
+
+### Live acceptance test
+
+1. Open Flows → Low Stock Alert: T5. Preview current stock and confirm the returned collection is T5 Tank. Review recipient, copy and channels. If the SMS gateway is not ready, use email only for the first test.
+2. Arrange the cutover from the old Shopify/Klaviyo flow to avoid duplicate staff alerts. Save the reviewed stock flow enabled, then choose **Check saved flow now** to establish its baseline.
+3. On a designated test variant in the collection, set stock to 5 and check; set to 4 and check. Expect one queued message per enabled channel. With sending on, the worker or **Run delivery now** delivers the due email; texts also respect quiet hours.
+4. Check again at 4, then lower to 3 and check: no additional messages. Restore to 5 and check, then lower to 4 and check: one new cycle.
+5. Confirm recovery before delivery cancels a queued alert. Verify recipient suppression and actual SMS gateway delivery before relying on texts.
+
+Automated coverage: isolated PostgreSQL integration tests mock Shopify/provider calls for baseline/crossing/recovery, strict boundary, variants, duplicates, pagination, staff email, suppression, authenticated preview and failure isolation. Browser coverage exercises setup, validation, draft restoration/save, read-only preview, manual check and 320/390px layouts. These tests do not send real messages.

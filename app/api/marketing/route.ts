@@ -1,3 +1,5 @@
+import { readStock, lowStock } from "@/lib/marketing/stock";
+import { validateStock } from "@/lib/marketing/stock-config";
 import { isDashboardRequestAuthorized } from "@/lib/dashboard-request-auth";
 import { prisma } from "@/lib/prisma";
 import {
@@ -174,6 +176,17 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url),
       view = url.searchParams.get("view") || "overview";
+    if (view === "stock-status") {
+      const status = await prisma.marketingResource.findUnique({
+        where: {
+          shop_kind_key: { shop: shop(), kind: "SYSTEM", key: "stock-check" },
+        },
+      });
+      return Response.json(
+        { status: status?.data || null },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
     if (view === "contact")
       return Response.json(
         { profile: await contactDetails(url.searchParams.get("id") || "") },
@@ -354,6 +367,29 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 12000000) throw new Error("Request too large.");
     const b = JSON.parse(raw);
+    if (b.action === "check-stock") return Response.json(await lowStock());
+    if (b.action === "preview-stock") {
+      const s = validateStock(b.stock);
+      const snapshot = await readStock(s);
+      const tracked = snapshot.variants.filter(
+        (v) => v.inventoryItem.tracked && v.inventoryQuantity !== null,
+      );
+      return Response.json({
+        collection: snapshot.collectionName,
+        checked: tracked.length,
+        low: tracked.filter((v) => v.inventoryQuantity! < s.threshold).length,
+        variants: tracked
+          .filter((v) => v.inventoryQuantity! < s.threshold)
+          .slice(0, 50)
+          .map((v) => ({
+            id: v.id,
+            product: v.product.title,
+            variant: v.title,
+            quantity: v.inventoryQuantity,
+          })),
+        at: snapshot.observedAt.toISOString(),
+      });
+    }
     if (b.action === "run-delivery") {
       return Response.json(await runMarketing());
     }
@@ -567,6 +603,7 @@ export async function POST(request: Request) {
         const f = validateFlow(String(b.key || ""), b.data);
         if (b.enabled && !f.reviewed)
           throw new Error("Review the flow configuration before enabling.");
+        if (b.enabled && b.key === "low-stock") validateStock(f.stock, true);
         data = json(f);
       } else
         data = json(b.kind === "SEGMENT" ? segment(b.data) : content(b.data));

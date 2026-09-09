@@ -527,7 +527,7 @@ export const flowDefaults = [
     name: "Low Stock Alert: T5",
     trigger: "LOW_STOCK",
     description:
-      "Internal SMS for configured recipients when existing inventory state crosses threshold. Confirm threshold and recipients.",
+      "Staff email and text when a tracked variant in the selected collection drops below the threshold; re-arms after observed recovery.",
     delays: [0],
   },
   {
