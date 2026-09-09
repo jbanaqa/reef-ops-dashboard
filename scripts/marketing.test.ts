@@ -283,9 +283,71 @@ test("uploaded artwork becomes inline email attachments", () => {
 
 test("clearing HTML copy does not resurrect the previous plain-text message", () => {
   for (const template of ["standard", "b2b-wholesale"] as const) {
-    const cleared = content({ ...defaultContent, template, body: "Greeting\n\nOLD_COPY_MUST_NOT_RETURN", bodyHtml: "" });
+    const cleared = content({
+      ...defaultContent,
+      template,
+      body: "Greeting\n\nOLD_COPY_MUST_NOT_RETURN",
+      bodyHtml: "",
+    });
     assert.equal(cleared.bodyHtml, "");
     assert.equal(textBody(cleared), "");
-    assert.doesNotMatch(render(cleared, "https://example.com/unsubscribe", "Address"), /OLD_COPY_MUST_NOT_RETURN/);
+    assert.doesNotMatch(
+      render(cleared, "https://example.com/unsubscribe", "Address"),
+      /OLD_COPY_MUST_NOT_RETURN/,
+    );
   }
+});
+
+test("custom footer survives normalization and renders safely in both email formats", () => {
+  for (const template of ["b2b-wholesale", "standard"] as const) {
+    const c = content({
+      ...defaultContent,
+      template,
+      footerTitle: "Thanks <team>",
+      footerText: "Contact our wholesale team.\nWe are here to help.",
+      footerUnsubscribeText: "Change your email preferences:",
+      footerImage: "data:image/png;base64,YWJj",
+    });
+    const result = emailBody(
+      {
+        id: "footer-test",
+        to: "test@example.com",
+        channel: "EMAIL",
+        subject: "Test",
+        content: c,
+        unsubscribe: "https://example.com/unsubscribe?token=test",
+      },
+      "123 Valid Street",
+      "Company Name",
+    );
+    assert.match(result.html, /Thanks &lt;team&gt;/);
+    assert.match(
+      result.html,
+      /Contact our wholesale team\.<br>We are here to help\./,
+    );
+    assert.match(result.text, /Thanks <team>/);
+    assert.match(result.text, /We are here to help/);
+    assert.match(result.html, /Change your email preferences:/);
+    assert.match(result.html, /123 Valid Street/);
+    assert.match(
+      result.html,
+      /href="https:\/\/example.com\/unsubscribe\?token=test"/,
+    );
+  }
+});
+test("cleared footer copy keeps the unsubscribe link and mailing address", () => {
+  const html = render(
+    content({
+      ...defaultContent,
+      template: "b2b-wholesale",
+      footerTitle: "",
+      footerText: "",
+      footerUnsubscribeText: "",
+    }),
+    "https://example.com/unsubscribe",
+    "123 Valid Street",
+  );
+  assert.doesNotMatch(html, /Thank you for your business/);
+  assert.match(html, /Unsubscribe<\/a>/);
+  assert.match(html, /123 Valid Street/);
 });

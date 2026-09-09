@@ -19,6 +19,9 @@ export type Content = {
   logoScale?: number;
   footerImage?: string;
   footerScale?: number;
+  footerTitle?: string;
+  footerText?: string;
+  footerUnsubscribeText?: string;
   /** @deprecated Older saved flows may still contain these pixel values. */ logoWidth?: number;
   logoHeight?: number;
   footerWidth?: number;
@@ -253,6 +256,18 @@ export function content(value: unknown): Content {
     logo: c.logo ? imageSource(c.logo) : undefined,
     logoScale: c.logo ? scale(c.logoScale, c.logoWidth, 260) : undefined,
     footerImage: c.footerImage ? imageSource(c.footerImage) : undefined,
+    footerTitle:
+      c.footerTitle === undefined
+        ? undefined
+        : String(c.footerTitle).slice(0, 200),
+    footerText:
+      c.footerText === undefined
+        ? undefined
+        : String(c.footerText).slice(0, 2000),
+    footerUnsubscribeText:
+      c.footerUnsubscribeText === undefined
+        ? undefined
+        : String(c.footerUnsubscribeText).slice(0, 300),
     footerScale: c.footerImage
       ? scale(c.footerScale, c.footerWidth, 560)
       : undefined,
@@ -317,6 +332,14 @@ export function escapeHtml(value: string) {
       ]!,
   );
 }
+export function footerTitle(c: Content) {
+  return (
+    c.footerTitle ??
+    (c.template === "b2b-wholesale" && !c.footerImage
+      ? "Thank you for your business"
+      : "")
+  );
+}
 const emailHead =
   '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:16px 20px!important}}</style></head>';
 
@@ -377,7 +400,18 @@ export function render(
         '" alt="Thank you for your business" style="display:block;margin:0 auto;max-width:100%;width:' +
         String(Math.round(560 * footerScale)) +
         'px;height:auto;object-fit:contain">'
-      : '<div style="font-size:29px;font-style:italic;font-weight:bold;color:white">Thank you for your business</div>';
+      : "";
+    const footerCopy =
+      (footerTitle(c)
+        ? '<div style="margin-top:12px;font-size:29px;font-style:italic;font-weight:bold;color:white">' +
+          e(footerTitle(c)) +
+          "</div>"
+        : "") +
+      (c.footerText
+        ? '<p style="margin:16px 0;color:white;font-size:14px;line-height:1.6">' +
+          e(c.footerText).replace(/\n/g, "<br>") +
+          "</p>"
+        : "");
     return (
       "<!doctype html><html>" +
       emailHead +
@@ -403,11 +437,14 @@ export function render(
       e(c.button) +
       '</a></td></tr><tr><td style="padding:12px 18px 30px;background:#244b7b;text-align:center">' +
       footer +
+      footerCopy +
       '<p style="margin:18px 0 0;color:#9fb5d2;font-size:11px">' +
       e(organizationName) +
-      '</p><p style="margin:5px 0 0;color:#9fb5d2;font-size:11px">No longer want to receive these emails? <a style="color:#f0a064" href="' +
+      '</p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
+      e(c.footerUnsubscribeText ?? "No longer want to receive these emails?") +
+      ' <a style="color:#ffd0a3" href="' +
       e(unsubscribe) +
-      '">Unsubscribe</a></p><p style="margin:5px 0 0;color:#819bbd;font-size:10px">' +
+      '">Unsubscribe</a></p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
       (address ? e(address) : "") +
       "</p></td></tr></table></td></tr></table></body></html>"
     );
@@ -439,10 +476,16 @@ export function render(
     '">' +
     e(c.button) +
     '</a></p></td></tr><tr><td style="padding:24px;font-size:12px;text-align:center">' +
+    (footerTitle(c) ? "<strong>" + e(footerTitle(c)) + "</strong><br>" : "") +
+    (c.footerText
+      ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
+      : "") +
     e(organizationName) +
     "<br>" +
     e(address) +
-    '<br><a href="' +
+    "<br>" +
+    e(c.footerUnsubscribeText ?? "") +
+    ' <a href="' +
     e(unsubscribe) +
     '">Unsubscribe from email marketing</a></td></tr></table></td></tr></table></body></html>'
   );

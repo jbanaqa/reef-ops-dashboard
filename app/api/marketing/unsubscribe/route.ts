@@ -2,7 +2,19 @@ import { prisma } from "@/lib/prisma";
 import { atomic, consent, shop } from "@/lib/marketing/store";
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
-  const token = new URL(request.url).searchParams.get("token");
+  const params = new URL(request.url).searchParams;
+  if (params.get("preview") === "1" && !params.has("token"))
+    return new Response(
+      "This is an internal preview email. No subscription was changed. Use an actual workflow email to test unsubscribe.",
+      {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+        },
+      },
+    );
+  const token = params.get("token");
   if (!token || !/^[a-f0-9-]{36}$/i.test(token))
     return new Response("Invalid link", { status: 400 });
   return new Response(

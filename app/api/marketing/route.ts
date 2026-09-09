@@ -398,7 +398,8 @@ export async function POST(request: Request) {
         content: content(b.content),
         address: s.postalAddress,
         organizationName: s.organizationName,
-        unsubscribe: `${process.env.APP_BASE_URL}/our-klaviyo/settings`,
+        internalPreview: true,
+        unsubscribe: `${process.env.APP_BASE_URL}/api/marketing/unsubscribe?preview=1`,
       });
       // Test sends do not have a profile/message row, so persist the provider
       // ID under a deterministic key for delivery webhooks to resolve.

@@ -1,7 +1,12 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 import { useEffect, useRef, useState } from "react";
-import { Content, escapeHtml, imageSource } from "@/lib/marketing/rules";
+import {
+  Content,
+  escapeHtml,
+  imageSource,
+  footerTitle,
+} from "@/lib/marketing/rules";
 import EmailPreview from "./EmailPreview";
 import RichEmailCopy from "./RichEmailCopy";
 
@@ -122,7 +127,11 @@ export default function EmailDesigner({
   onSave,
   onClose,
   onTest,
+  organizationName,
+  postalAddress,
 }: {
+  organizationName: string;
+  postalAddress: string;
   title: string;
   subject: string;
   content: Content;
@@ -141,7 +150,9 @@ export default function EmailDesigner({
   ) => void | Promise<unknown>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [panel, setPanel] = useState<"content" | "artwork" | "test">("content");
+  const [panel, setPanel] = useState<"content" | "artwork" | "footer" | "test">(
+    "content",
+  );
   const [mobile, setMobile] = useState(false);
   const [mobileWidth, setMobileWidth] = useState(375);
   const [recipient, setRecipient] = useState("");
@@ -233,7 +244,7 @@ export default function EmailDesigner({
       <div className="mk-designer-body">
         <aside className="mk-designer-sidebar">
           <nav className="mk-designer-tabs" aria-label="Email editing sections">
-            {(["content", "artwork", "test"] as const)
+            {(["content", "artwork", "footer", "test"] as const)
               .filter(
                 (tab) =>
                   tab !== "artwork" || content.template === "b2b-wholesale",
@@ -249,7 +260,9 @@ export default function EmailDesigner({
                     ? "Content"
                     : tab === "artwork"
                       ? "Artwork"
-                      : "Send test"}
+                      : tab === "footer"
+                        ? "Footer"
+                        : "Send test"}
                 </button>
               ))}
           </nav>
@@ -351,6 +364,72 @@ export default function EmailDesigner({
                 />
               </>
             )}
+            {panel === "footer" && (
+              <section className="mk-editor-section">
+                <h3>Footer content</h3>
+                <p>
+                  Add a closing message, contact details, or a note for your
+                  customers.
+                </p>
+                <label>
+                  Footer heading
+                  <input
+                    maxLength={200}
+                    value={footerTitle(content)}
+                    onChange={(e) =>
+                      changeContent("footerTitle", e.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  Footer message
+                  <textarea
+                    aria-label="Footer message"
+                    rows={5}
+                    maxLength={2000}
+                    value={content.footerText ?? ""}
+                    onChange={(e) =>
+                      changeContent("footerText", e.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  Unsubscribe introduction
+                  <textarea
+                    aria-label="Unsubscribe introduction"
+                    rows={3}
+                    maxLength={300}
+                    value={
+                      content.footerUnsubscribeText ??
+                      (content.template === "b2b-wholesale"
+                        ? "No longer want to receive these emails?"
+                        : "")
+                    }
+                    onChange={(e) =>
+                      changeContent("footerUnsubscribeText", e.target.value)
+                    }
+                  />
+                </label>
+                <small>
+                  The Unsubscribe link stays in every email. Footer images can
+                  be changed in Artwork.
+                </small>
+                <h3 style={{ marginTop: 24 }}>Sender details</h3>
+                <p>
+                  {organizationName}
+                  <br />
+                  {postalAddress ||
+                    "Add your mailing address in Settings before sending."}
+                </p>
+                <a
+                  href="/our-klaviyo/settings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Edit sender details in Settings ↗
+                </a>
+              </section>
+            )}
             {panel === "test" && (
               <section className="mk-editor-section">
                 <h3>Check your inbox</h3>
@@ -402,7 +481,8 @@ export default function EmailDesigner({
                 </form>
                 <small>
                   Use an address in your test recipient allowlist. Sending a
-                  test does not enable the flow.
+                  test does not enable the flow. Preview sends do not test the
+                  Shopify trigger or unsubscribe; those need a workflow email.
                 </small>
               </section>
             )}

@@ -435,6 +435,8 @@ function FlowEditorState({
             onSave={saveFlow}
             onClose={() => setSelected(null)}
             onTest={testEmail}
+            organizationName={settings.organizationName}
+            postalAddress={settings.postalAddress}
           />
         ) : (
           <div className="mk-modal-backdrop" onClick={() => setSelected(null)}>

@@ -1,7 +1,14 @@
-import { Content, MarketingOperations, render, textBody } from "./rules";
+import {
+  Content,
+  MarketingOperations,
+  render,
+  textBody,
+  footerTitle,
+} from "./rules";
 
 export type Delivery = {
   id: string;
+  internalPreview?: boolean;
   to: string;
   channel: string;
   subject: string;
@@ -53,8 +60,11 @@ export function emailBody(
         .map((p) => [p.title, p.price, p.url].filter(Boolean).join(" · "))
         .join("\n"),
       m.content.url,
+      footerTitle(m.content),
+      m.content.footerText,
       organizationName,
       address,
+      m.content.footerUnsubscribeText,
       "Unsubscribe: " + m.unsubscribe,
     ]
       .filter(Boolean)
@@ -99,10 +109,12 @@ export const resendProvider: DeliveryProvider = {
           to: [m.to],
           subject: m.subject,
           ...emailBody(m, address, organizationName),
-          headers: {
-            "List-Unsubscribe": `<${m.unsubscribe}>`,
-            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-          },
+          headers: m.internalPreview
+            ? undefined
+            : {
+                "List-Unsubscribe": `<${m.unsubscribe}>`,
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+              },
           tags: [{ name: "marketing_message", value: m.id }],
         }),
       });

@@ -187,3 +187,46 @@ test("preview expands to the document height and retains scrolling fallback", as
   view.rerender(<EmailPreview html="<p>Long email</p>" mobile={true} />);
   assert.equal(frame.style.width, "375px");
 });
+
+test("footer fields save with the email while sender details remain visible", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  const r = resource("b2b-welcome", "Footer test");
+  Object.assign(r.data.steps[0].content, { template: "b2b-wholesale" });
+  let saved: unknown;
+  const view = testing.render(
+    <FlowEditor
+      resource={r}
+      busy={false}
+      settings={{
+        ...defaultMarketingSettings,
+        postalAddress: "123 Valid Street",
+      }}
+      save={async (data, enabled) => {
+        saved = data;
+        return { ...r, data, enabled };
+      }}
+    />,
+  );
+  testing.fireEvent.click(await view.findByText("Footer test"));
+  testing.fireEvent.click(view.getByRole("button", { name: "Footer" }));
+  testing.fireEvent.change(view.getByLabelText("Footer heading"), {
+    target: { value: "Thank you, partners" },
+  });
+  testing.fireEvent.change(view.getByLabelText("Footer message"), {
+    target: { value: "Contact our wholesale team." },
+  });
+  assert.ok(view.getByText(/123 Valid Street/));
+  testing.fireEvent.click(view.getByRole("button", { name: "Save email" }));
+  await testing.waitFor(() =>
+    assert.ok(view.getByText("Saved to flow", { exact: true })),
+  );
+  const result = saved as {
+    steps: { content: { footerTitle: string; footerText: string } }[];
+  };
+  assert.equal(result.steps[0].content.footerTitle, "Thank you, partners");
+  assert.equal(
+    result.steps[0].content.footerText,
+    "Contact our wholesale team.",
+  );
+});

@@ -685,6 +685,9 @@ test("repeated setup preserves saved B2B copy and uploaded artwork", async () =>
   const data = JSON.parse(JSON.stringify(original.data));
   data.steps[0].subject = "Custom wholesale welcome";
   data.steps[0].content.bodyHtml = "<p>Saved custom copy</p>";
+  data.steps[0].content.footerTitle = "Thank you, wholesale partners";
+  data.steps[0].content.footerText = "Reach our team for help.";
+  data.steps[0].content.footerUnsubscribeText = "Prefer fewer emails?";
   data.steps[0].content.logo = "data:image/png;base64,aGVsbG8=";
   data.steps[0].content.footerImage = "data:image/png;base64,d29ybGQ=";
   await prisma.marketingResource.update({ where, data: { data } });
@@ -693,4 +696,91 @@ test("repeated setup preserves saved B2B copy and uploaded artwork", async () =>
   const saved = await prisma.marketingResource.findUniqueOrThrow({ where });
   assert.deepEqual(saved.data, data);
   assert.equal(saved.enabled, original.enabled);
+});
+
+test("one-click unsubscribe suppresses email, cancels pending sends, and is repeatable", async () => {
+  const p = await store.atomic(async (tx) => {
+    const p = await store.identify(tx, { email: "oneclick@example.com" });
+    await store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "test", new Date());
+    return p;
+  });
+  const message = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "oneclick-source",
+      profileId: p.id,
+      channel: "EMAIL",
+      subject: "Test",
+      content: defaultContent,
+      dueAt: new Date(),
+    },
+  });
+  const api = await import("../app/api/marketing/unsubscribe/route");
+  const url =
+    "https://app.example/api/marketing/unsubscribe?token=" + message.token;
+  const request = () =>
+    new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "List-Unsubscribe=One-Click",
+    });
+  assert.equal((await api.POST(request())).status, 200);
+  assert.equal((await api.POST(request())).status, 200);
+  const resultConsent = await prisma.marketingConsent.findUniqueOrThrow({
+    where: { profileId_channel: { profileId: p.id, channel: "EMAIL" } },
+  });
+  assert.equal(resultConsent.status, "UNSUBSCRIBED");
+  assert.equal(resultConsent.suppressed, true);
+  assert.equal(
+    (
+      await prisma.marketingMessage.findUniqueOrThrow({
+        where: { id: message.id },
+      })
+    ).status,
+    "CANCELLED",
+  );
+  assert.equal(
+    (
+      await api.POST(
+        new Request(
+          "https://app.example/api/marketing/unsubscribe?token=invalid",
+          { method: "POST" },
+        ),
+      )
+    ).status,
+    404,
+  );
+  const headers = sent[0].headers as Record<string, string>;
+  assert.equal(headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+  assert.match(headers["List-Unsubscribe"], /^<https:\/\//);
+});
+
+test("internal preview sends do not advertise a real unsubscribe subscription", async () => {
+  process.env.MARKETING_TEST_EMAILS = "preview@example.com";
+  const api = await import("../app/api/marketing/route");
+  const result = await api.POST(
+    new Request("https://app.example/api/marketing", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization:
+          "Basic " + Buffer.from("staff:test-password").toString("base64"),
+      },
+      body: JSON.stringify({
+        action: "test-email",
+        to: "preview@example.com",
+        subject: "Preview",
+        content: defaultContent,
+      }),
+    }),
+  );
+  assert.equal(result.status, 200);
+  assert.equal(sent.at(-1)?.headers, undefined);
+  assert.match(String(sent.at(-1)?.html), /unsubscribe\?preview=1/);
+  const unsubscribe = await import("../app/api/marketing/unsubscribe/route");
+  const info = await unsubscribe.GET(
+    new Request("https://app.example/api/marketing/unsubscribe?preview=1"),
+  );
+  assert.equal(info.status, 200);
+  assert.match(await info.text(), /No subscription was changed/);
 });
