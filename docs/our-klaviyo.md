@@ -9,7 +9,7 @@ This is a local V1 implementation, not a completed Klaviyo cutover. No productio
 - Existing dashboard Basic authentication via `isDashboardRequestAuthorized`; explicit authorization on marketing APIs because the proxy excludes `/api`.
 - Existing Shopify domain/helper configuration and order webhook. Order ingestion is gated by `MARKETING_INGEST_ENABLED` and runs before inventory deduplication so retries can recover missing marketing work.
 - Existing Resend account variables and dependency. Marketing sends use a separate adapter with unsubscribe headers, postal address and stable idempotency keys.
-- Existing standalone `tsx` scheduled-job pattern. Run `npm run marketing:scheduled` every minute on the deployment scheduler. The new worker uses database claims and bounded batches; no in-process timers.
+- Existing standalone `tsx` scheduled-job pattern. Run `npm run scheduled:all` every five minutes on the deployment scheduler. The worker uses database claims and bounded batches; no in-process timers.
 - Existing ProductInventoryState for internal low-stock crossing detection. No separate stock sync.
 
 ## Preserved value and deliberate safeguards
