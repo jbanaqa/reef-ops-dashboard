@@ -112,8 +112,10 @@ export async function ingestShopify(topic: string, key: string, p: Payload, hist
       const tags = tagTopic
         ? [...new Set(topic.endsWith("tags_removed") ? profile.tags.filter(t => !removedTags.has(t)) : [...profile.tags, ...incomingTags])]
         : incomingTags;
-      // A newer customer event wins; out-of-order webhooks cannot roll tags back.
-      const newer = await tx.marketingEvent.findFirst({ where: { profileId: profile.id, type: { in: ["customers/create", "customers/update", "customer.tags_added", "customer.tags_removed", "customers/tags_added", "customers/tags_removed"] }, occurredAt: { gt: at } } });
+      // Full customer payloads are authoritative and use the timestamp guard.
+      // Tag webhooks are deltas; a neighboring customers/update event must not
+      // erase them because newer Shopify payloads intentionally omit tags.
+      const newer = tagTopic ? null : await tx.marketingEvent.findFirst({ where: { profileId: profile.id, type: { in: ["customers/create", "customers/update", "customer.tags_added", "customer.tags_removed", "customers/tags_added", "customers/tags_removed"] }, occurredAt: { gt: at } } });
       if (!newer) {
         await tx.marketingProfile.update({ where: { id: profile.id }, data: { tags } });
         if (!historical && tags.includes("b2b") && !profile.tags.includes("b2b") && !topic.endsWith("tags_removed")) await enroll(tx, "b2b-welcome", profile.id, key, at);
