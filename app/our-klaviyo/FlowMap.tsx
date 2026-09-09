@@ -93,11 +93,13 @@ const icon = {
 export function FlowMap({
   resource,
   onNodeClick,
+  nodes: suppliedNodes,
 }: {
   resource: Resource;
+  nodes?: Node[];
   onNodeClick?: (node: Node) => void;
 }) {
-  const nodes = flowNodes(resource);
+  const nodes = suppliedNodes || flowNodes(resource);
   return (
     <div className="mk-flow-map" aria-label={resource.name + " automation map"}>
       {nodes.map((n, i) => {

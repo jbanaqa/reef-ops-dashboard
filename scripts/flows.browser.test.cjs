@@ -210,9 +210,22 @@ const { chromium } = require("playwright");
     await page
       .getByRole("button", { name: "Open Low Stock Alert: T5", exact: true })
       .click();
+
     await page
-      .getByRole("heading", { name: "1. What to watch", exact: true })
+      .getByRole("heading", { name: "Edit Low Stock Alert: T5", exact: true })
       .waitFor();
+    assert.equal(
+      await page.getByLabel("Mobile number", { exact: true }).count(),
+      0,
+      "Settings are hidden until a node is opened",
+    );
+    const openNode = async (name) =>
+      page.locator(".mk-flow-map").getByRole("button", { name }).click();
+    const closePanel = async () =>
+      page
+        .getByRole("button", { name: "Back to stock flow", exact: true })
+        .click();
+    await openNode(/Notify the staff recipient/);
     assert.equal(
       await page.getByLabel("Mobile number", { exact: true }).inputValue(),
       "+16573450924",
@@ -221,17 +234,26 @@ const { chromium } = require("playwright");
       await page.getByLabel("Recipient timezone", { exact: true }).inputValue(),
       "America/Los_Angeles",
     );
+    await page.keyboard.press("Escape");
+    assert.match(
+      await page.evaluate(() => document.activeElement.textContent),
+      /Notify the staff recipient/,
+    );
+    await openNode(/Variant stock drops below/);
     await page
       .getByRole("button", { name: "Preview current stock", exact: true })
       .click();
     await page
       .getByText("12 tracked variants · 1 below threshold", { exact: true })
       .waitFor();
+    await closePanel();
+    await openNode(/Low stock email/);
     await page
       .getByLabel("Email message", { exact: true })
       .fill(
         "Please restock {{ ProductTitle }}. Remaining: {{ InventoryQuantity }}.",
       );
+    await closePanel();
     await page
       .getByRole("button", { name: "← All flows", exact: true })
       .click();
@@ -241,18 +263,22 @@ const { chromium } = require("playwright");
     await page
       .getByText("Unfinished changes restored.", { exact: true })
       .waitFor();
+    await openNode(/Low stock email/);
     assert.match(
       await page.getByLabel("Email message", { exact: true }).inputValue(),
       /Please restock/,
     );
+    await closePanel();
     await page.getByLabel("Enable this stock flow", { exact: true }).check();
     await page
       .getByRole("button", { name: "Save stock flow", exact: true })
       .click();
     await page.getByRole("alert").filter({ hasText: "permission" }).waitFor();
+    await openNode(/Notify the staff recipient/);
     await page
       .getByLabel("This staff member has agreed", { exact: false })
       .check();
+    await closePanel();
     await page
       .getByLabel("I reviewed the collection", { exact: false })
       .check();
@@ -267,6 +293,9 @@ const { chromium } = require("playwright");
     );
     assert.match(savedStock.emailBody, /Please restock/);
     await page
+      .getByRole("button", { name: "Test and check stock", exact: true })
+      .click();
+    await page
       .getByRole("button", { name: "Check saved flow now", exact: true })
       .click();
     await page
@@ -275,6 +304,7 @@ const { chromium } = require("playwright");
         { exact: true },
       )
       .waitFor();
+    await closePanel();
     await page.screenshot({
       path: path.join(output, "stock-desktop.png"),
       fullPage: true,
@@ -285,14 +315,24 @@ const { chromium } = require("playwright");
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
-        "Stock editor fits at " + width,
+        "Stock diagram fits at " + width,
       );
       await page.screenshot({
         path: path.join(output, "stock-mobile-" + width + ".png"),
         fullPage: true,
       });
+      await openNode(/Low stock email/);
+      assert.ok(
+        await page
+          .getByRole("dialog")
+          .evaluate((el) => el.scrollWidth <= el.clientWidth),
+        "Stock dialog fits at " + width,
+      );
+      await page.screenshot({
+        path: path.join(output, "stock-dialog-" + width + ".png"),
+      });
+      await closePanel();
     }
-
     assert.deepEqual(errors, []);
     console.log(
       "PASS: flow search/status/sort, real message counts, branch-aware step counts, focused navigation, keyboard focus restoration, preserved email drafts and saves, mobile 320/390",

@@ -174,7 +174,7 @@ Design references: [Klaviyo Flows tab](https://help.klaviyo.com/hc/en-us/article
 
 The reviewed Shopify workflow watches collection `488202338530` (T5 Tank), tests **variant inventory < 5**, emails Russell, and emits a Klaviyo event for his text. Reef Ops uses the agreed improvement: one alert per observed crossing, then re-arms only after observed recovery to 5 or more. The prefilled staff email is russellvinson7@gmail.com and mobile is +16573450924, with America/Los_Angeles quiet hours.
 
-- The dedicated stock editor stores a validated `stock` configuration in the existing FLOW resource. Collection, threshold, recipient, channels, subject and message copy are editable. Browser drafts survive navigation; deployments do not rewrite saved resources.
+- The stock editor uses the same clickable FlowMap schematic as the other flows. Trigger, recipient, email, text and recovery blocks open focused keyboard-accessible dialogs; review/enable/save controls remain below the diagram. The stock editor stores a validated `stock` configuration in the existing FLOW resource. Collection, threshold, recipient, channels, subject and message copy are editable. Browser drafts survive navigation; deployments do not rewrite saved resources.
 - Shopify's [productVariants collection filter](https://shopify.dev/docs/api/admin-graphql/latest/queries/productVariants) supplies paginated variants, with inventory tracked per variant across locations. Untracked or missing quantities are excluded. All pages must load before applying observations; failures never replace inventory with zero.
 - Checks run during the marketing worker, even while sending is paused, when the stock flow is reviewed/enabled and ingestion is enabled. This is polling, not a replay of every inventory webhook: a drop and recovery entirely between checks may be missed.
 - The first observation establishes a baseline without queuing pre-existing low stock. The state key includes collection and threshold, so changing either establishes a new baseline. Durable serializable transactions and cycle-specific message keys prevent duplicate alerts. Stale snapshots are ignored.
@@ -185,8 +185,8 @@ The reviewed Shopify workflow watches collection `488202338530` (T5 Tank), tests
 
 ### Live acceptance test
 
-1. Open Flows → Low Stock Alert: T5. Preview current stock and confirm the returned collection is T5 Tank. Review recipient, copy and channels. If the SMS gateway is not ready, use email only for the first test.
-2. Arrange the cutover from the old Shopify/Klaviyo flow to avoid duplicate staff alerts. Save the reviewed stock flow enabled, then choose **Check saved flow now** to establish its baseline.
+1. Open Flows → Low Stock Alert: T5 → the stock trigger block. Preview current stock and confirm the returned collection is T5 Tank. Review recipient, copy and channels. If the SMS gateway is not ready, use email only for the first test.
+2. Arrange the cutover from the old Shopify/Klaviyo flow to avoid duplicate staff alerts. Save the reviewed stock flow enabled, then open **Test and check stock** and choose **Check saved flow now** to establish its baseline.
 3. On a designated test variant in the collection, set stock to 5 and check; set to 4 and check. Expect one queued message per enabled channel. With sending on, the worker or **Run delivery now** delivers the due email; texts also respect quiet hours.
 4. Check again at 4, then lower to 3 and check: no additional messages. Restore to 5 and check, then lower to 4 and check: one new cycle.
 5. Confirm recovery before delivery cancels a queued alert. Verify recipient suppression and actual SMS gateway delivery before relying on texts.

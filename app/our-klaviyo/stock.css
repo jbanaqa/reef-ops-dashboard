@@ -164,3 +164,99 @@
   margin-top: 16px;
   font-weight: 600;
 }
+
+.stock-schematic {
+  display: block;
+}
+.stock-schematic .mk-flow-end {
+  width: min(100%, 330px);
+}
+.stock-schematic .mk-flow-map {
+  margin: 28px 0;
+}
+.stock-diagram-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 20px 0;
+}
+.marketing .stock-flow-controls .stock-check {
+  margin: 0;
+  align-items: center;
+}
+.stock-dialog {
+  box-sizing: border-box;
+  width: min(680px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface, #fff);
+  color: var(--text-main);
+  box-shadow: 0 24px 70px #102a3940;
+}
+.stock-dialog::backdrop {
+  background: #071d2b80;
+}
+.stock-dialog-header,
+.stock-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px;
+  background: var(--surface, #fff);
+}
+.stock-dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+}
+.stock-dialog-header h3 {
+  margin: 0;
+}
+.stock-dialog-body {
+  padding: 4px 24px 20px;
+}
+.stock-dialog-footer {
+  position: sticky;
+  bottom: 0;
+  border-top: 1px solid var(--border);
+}
+.stock-dialog .stock-grid {
+  display: block;
+}
+.stock-dialog .stock-preview {
+  margin-bottom: 12px;
+}
+.stock-schematic .mk-flow-controls {
+  margin-top: 24px;
+}
+@media (max-width: 700px) {
+  .stock-diagram-tools,
+  .stock-schematic .mk-flow-editor-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .stock-dialog-header,
+  .stock-dialog-body,
+  .stock-dialog-footer {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .stock-dialog-footer {
+    align-items: flex-start;
+  }
+  .stock-flow-controls {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .stock-flow-controls button {
+    margin-left: 0;
+  }
+}
+
+.stock-schematic .mk-flow-line{background:var(--border-strong,#c9dfe1)}.stock-schematic .mk-flow-line:after{border-top-color:var(--border-strong,#c9dfe1)}.marketing .stock-schematic .mk-flow-trigger{border-color:#46a79e}
+
+.stock-schematic .mk-flow-line{height:18px}
