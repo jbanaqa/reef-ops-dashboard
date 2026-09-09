@@ -19,6 +19,12 @@ Object.assign(globalThis, {
   HTMLElement: dom.window.HTMLElement,
   FileReader: dom.window.FileReader,
 });
+dom.window.HTMLDialogElement.prototype.showModal = function () {
+  this.setAttribute("open", "");
+};
+dom.window.HTMLDialogElement.prototype.close = function () {
+  this.removeAttribute("open");
+};
 let cleanup: () => void;
 afterEach(() => cleanup?.());
 test.beforeEach(() => {
@@ -93,8 +99,8 @@ test("message and delay nodes edit their explicit target and invalid links do no
   testing.fireEvent.change(view.getByLabelText(/Button destination/), {
     target: { value: "https://" },
   });
-  assert.ok(view.getByRole("status"));
-  testing.fireEvent.click(view.getByText("Close editor"));
+  assert.ok(view.getByRole("alert"));
+  testing.fireEvent.click(view.getByLabelText("Back to flow"));
   testing.fireEvent.click(view.getByText("180 minutes after trigger"));
   const input = view.getByLabelText("Wait (minutes)") as HTMLInputElement;
   assert.equal(input.value, "180");
@@ -120,11 +126,13 @@ test("unfinished copy and artwork survive editor remounts and successful saves",
   testing.fireEvent.change(view.getByLabelText("Subject"), {
     target: { value: "My custom subject" },
   });
+  testing.fireEvent.click(view.getByText("Edit HTML"));
   testing.fireEvent.change(view.getByLabelText(/Message HTML/), {
     target: {
       value: '<p>My custom copy</p><img src="https://example.com/art.png">',
     },
   });
+  testing.fireEvent.click(view.getByText("Artwork"));
   testing.fireEvent.change(view.getByLabelText("Logo image"), {
     target: {
       files: [
@@ -146,13 +154,16 @@ test("unfinished copy and artwork survive editor remounts and successful saves",
   view.unmount();
   view = testing.render(<FlowEditor resource={r} {...props} />);
   testing.fireEvent.click(await view.findByText("My custom subject"));
+  testing.fireEvent.click(view.getByText("Artwork"));
   assert.ok(view.getByText("Remove logo"));
+  testing.fireEvent.click(view.getByText("Content"));
+  testing.fireEvent.click(view.getByText("Edit HTML"));
   assert.match(
     (view.getByLabelText(/Message HTML/) as HTMLTextAreaElement).value,
     /My custom copy/,
   );
   testing.fireEvent.click(
-    testing.within(view.getByRole("dialog")).getByText("Save flow"),
+    testing.within(view.getByRole("dialog")).getByText("Save email"),
   );
   await testing.waitFor(() =>
     assert.ok(
@@ -174,5 +185,5 @@ test("preview expands to the document height and retains scrolling fallback", as
   assert.equal(frame.getAttribute("scrolling"), null);
   assert.equal(frame.getAttribute("sandbox"), "allow-same-origin");
   view.rerender(<EmailPreview html="<p>Long email</p>" mobile={true} />);
-  assert.equal(frame.style.width, "320px");
+  assert.equal(frame.style.width, "375px");
 });

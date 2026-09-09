@@ -10,7 +10,7 @@ import {
   render,
 } from "@/lib/marketing/rules";
 import { FlowMap, Node } from "./FlowMap";
-import EmailPreview from "./EmailPreview";
+import EmailDesigner from "./EmailDesigner";
 import { readDraft, writeDraft } from "./flow-drafts";
 
 import { FlowTarget } from "@/lib/marketing/flow-config";
@@ -62,17 +62,21 @@ function FlowEditorState({
   busy: boolean;
   save: (data: Data, enabled: boolean) => void | Promise<unknown>;
   settings: MarketingSettings;
-  testEmail?: (to: string, subject: string, content: Content) => void;
+  testEmail?: (
+    to: string,
+    subject: string,
+    content: Content,
+  ) => void | Promise<unknown>;
 }) {
   const initial = resource.data as unknown as Data;
   const [flow, setFlow] = useState<Data>(() =>
     JSON.parse(JSON.stringify(initial)),
   );
-  const [mobile, setMobile] = useState(false);
-  const [recipient, setRecipient] = useState("");
   const [enabled, setEnabled] = useState(resource.enabled);
   const latest = useRef({ flow, enabled });
-  useEffect(() => { latest.current = { flow, enabled }; }, [flow, enabled]);
+  useEffect(() => {
+    latest.current = { flow, enabled };
+  }, [flow, enabled]);
   async function saveFlow() {
     const submitted = JSON.stringify({ flow, enabled });
     const result = (await save(flow, enabled)) as Resource | undefined;
@@ -81,6 +85,7 @@ function FlowEditorState({
       setEnabled(result.enabled);
       setDraftStatus("Flow saved, including copy and artwork.");
     }
+    return !!result?.data;
   }
   const draftKey = resource.id || resource.key;
   const [draftReady, setDraftReady] = useState(false);
@@ -319,93 +324,6 @@ function FlowEditorState({
       </div>
     </>
   );
-  const imageFields = (c: Content, target: Target) =>
-    c.template !== "b2b-wholesale" ? null : (
-      <div className="mk-image-fields">
-        <p className="mk-modal-label">Brand artwork</p>
-        <p className="mk-modal-help">
-          The logo fills the white header. The footer image is the Klaviyo
-          artwork shown in the blue footer (“Thank you for your business” and
-          the heart). Uploading it replaces the placeholder text.
-        </p>
-        <label>
-          Logo image
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) {
-                const reader = new FileReader();
-                reader.onload = () =>
-                  updateContent(target, "logo", String(reader.result));
-                reader.readAsDataURL(file);
-              }
-            }}
-          />
-        </label>
-        {c.logo && (
-          <button
-            type="button"
-            className="mk-remove-image"
-            onClick={() => updateContent(target, "logo", undefined)}
-          >
-            Remove logo
-          </button>
-        )}
-        <label className="mk-scale-control">
-          Logo scale <span>{(c.logoScale || 1).toFixed(1)}×</span>
-          <input
-            type="range"
-            min="0.25"
-            max="2.5"
-            step="0.1"
-            value={c.logoScale || 1}
-            onChange={(e) =>
-              updateContent(target, "logoScale", Number(e.target.value))
-            }
-          />
-        </label>
-        <label>
-          Footer image
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) {
-                const reader = new FileReader();
-                reader.onload = () =>
-                  updateContent(target, "footerImage", String(reader.result));
-                reader.readAsDataURL(file);
-              }
-            }}
-          />
-        </label>
-        {c.footerImage && (
-          <button
-            type="button"
-            className="mk-remove-image"
-            onClick={() => updateContent(target, "footerImage", undefined)}
-          >
-            Remove footer artwork
-          </button>
-        )}
-        <label className="mk-scale-control">
-          Footer artwork scale <span>{(c.footerScale || 1).toFixed(1)}×</span>
-          <input
-            type="range"
-            min="0.25"
-            max="2.5"
-            step="0.1"
-            value={c.footerScale || 1}
-            onChange={(e) =>
-              updateContent(target, "footerScale", Number(e.target.value))
-            }
-          />
-        </label>
-      </div>
-    );
   if (!draftReady) return <p>Loading saved draft…</p>;
   return (
     <article className="mk-panel">
@@ -499,100 +417,80 @@ function FlowEditorState({
           Save flow
         </button>
       </div>
-      {selected && (
-        <div className="mk-modal-backdrop" onClick={() => setSelected(null)}>
-          <div
-            className="mk-modal"
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mk-modal-header">
-              <h3>{selected.node.label}</h3>
-              <button type="button" onClick={() => setSelected(null)}>
-                Close
-              </button>
-            </div>
-            {selected.target.kind === "info" && (
-              <p className="mk-modal-explanation">
-                {selected.node.detail ||
-                  "Reef Ops evaluates this decision automatically before continuing."}
-              </p>
-            )}
-            {selected.target.kind === "wait" && (
-              <>
+      {selected &&
+        (content && selected.node.kind !== "sms" ? (
+          <EmailDesigner
+            key={JSON.stringify(selected.target)}
+            title={resource.name}
+            subject={step?.subject || branch?.subject || ""}
+            content={content}
+            html={preview}
+            previewError={previewError}
+            busy={busy}
+            status={draftStatus}
+            onSubject={setSubject}
+            onContent={(key, value) =>
+              updateContent(selected.target, key, value)
+            }
+            onSave={saveFlow}
+            onClose={() => setSelected(null)}
+            onTest={testEmail}
+          />
+        ) : (
+          <div className="mk-modal-backdrop" onClick={() => setSelected(null)}>
+            <div
+              className="mk-modal"
+              role="dialog"
+              aria-modal="true"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mk-modal-header">
+                <h3>{selected.node.label}</h3>
+                <button type="button" onClick={() => setSelected(null)}>
+                  Close
+                </button>
+              </div>
+              {selected.target.kind === "info" && (
                 <p className="mk-modal-explanation">
-                  Minutes after the triggering event. This is not an additional
-                  delay after the previous step.
+                  {selected.node.detail ||
+                    "Reef Ops evaluates this decision automatically before continuing."}
                 </p>
-                <label>
-                  Wait (minutes)
-                  <input
-                    type="number"
-                    min="0"
-                    value={waitValue}
-                    onChange={(e) => setWait(Number(e.target.value))}
-                  />
-                </label>
-              </>
-            )}
-            {content && fields(content, selected.target)}
-            {content && imageFields(content, selected.target)}
-            {previewError && <p role="status">{previewError}</p>}
-            {content && preview && testEmail && (
-              <div>
-                <label>
-                  Internal test recipient
-                  <input
-                    type="email"
-                    value={recipient}
-                    onChange={(e) => setRecipient(e.target.value)}
-                  />
-                </label>
-                <button
-                  disabled={busy || !recipient}
-                  onClick={() =>
-                    testEmail(
-                      recipient,
-                      step?.subject || branch?.subject || resource.name,
-                      content,
-                    )
-                  }
-                >
-                  Send test email
+              )}
+              {selected.target.kind === "wait" && (
+                <>
+                  <p className="mk-modal-explanation">
+                    Minutes after the triggering event. This is not an
+                    additional delay after the previous step.
+                  </p>
+                  <label>
+                    Wait (minutes)
+                    <input
+                      type="number"
+                      min="0"
+                      value={waitValue}
+                      onChange={(e) => setWait(Number(e.target.value))}
+                    />
+                  </label>
+                </>
+              )}
+              {content && fields(content, selected.target)}
+              {selected.target.kind === "sms" && (
+                <p className="mk-modal-explanation">
+                  SMS requires marketing consent and an unsuppressed profile.
+                </p>
+              )}
+              <p>{draftStatus}</p>
+              <div className="mk-modal-actions">
+                <button type="button" disabled={busy} onClick={saveFlow}>
+                  Save flow
                 </button>
-                <small>
-                  Uses the current editor content. Recipient must be allowlisted
-                  in Settings configuration.
-                </small>
-              </div>
-            )}
-            {preview && (
-              <div className="mk-email-preview">
-                <p className="mk-modal-label">Live email preview</p>
-                <button type="button" onClick={() => setMobile(!mobile)}>
-                  {mobile ? "Desktop preview" : "Mobile preview"}
+                <button type="button" onClick={() => setSelected(null)}>
+                  Close editor
                 </button>
-                <EmailPreview html={preview} mobile={mobile} />
               </div>
-            )}
-            {selected.target.kind === "sms" && (
-              <p className="mk-modal-explanation">
-                SMS requires marketing consent and an unsuppressed profile.
-              </p>
-            )}
-            <p>{draftStatus}</p>
-            <div className="mk-modal-actions">
-              <button type="button" disabled={busy} onClick={saveFlow}>
-                Save flow
-              </button>
-              <button type="button" onClick={() => setSelected(null)}>
-                Close editor
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        ))}
     </article>
   );
 }

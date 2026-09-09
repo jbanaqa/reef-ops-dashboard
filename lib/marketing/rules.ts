@@ -189,7 +189,10 @@ export function personalize(value: string, name = "", html = false) {
   );
 }
 export function textBody(c: Content, name = "") {
-  return personalize(c.bodyHtml?.trim() ? htmlText(c.bodyHtml) : c.body, name);
+  return personalize(
+    c.bodyHtml !== undefined ? htmlText(c.bodyHtml) : c.body,
+    name,
+  );
 }
 export function withCoupon(c: Content, code: string): Content {
   const line = "Your first-order 10% discount code: " + code;
@@ -238,7 +241,10 @@ export function content(value: unknown): Content {
   return {
     heading: c.heading.slice(0, 200),
     body: c.body,
-    bodyHtml: c.bodyHtml ? sanitizeEmailHtml(c.bodyHtml) : undefined,
+    bodyHtml:
+      c.bodyHtml !== undefined && c.bodyHtml !== null
+        ? sanitizeEmailHtml(c.bodyHtml)
+        : undefined,
     button: String(c.button || "Shop now").slice(0, 80),
     url: safeUrl(c.url),
     hero: c.hero ? safeUrl(c.hero) : undefined,
@@ -250,14 +256,12 @@ export function content(value: unknown): Content {
     footerScale: c.footerImage
       ? scale(c.footerScale, c.footerWidth, 560)
       : undefined,
-    products: (c.products || [])
-      .slice(0, 12)
-      .map((p) => ({
-        title: String(p.title).slice(0, 200),
-        url: safeUrl(p.url),
-        image: p.image ? safeUrl(p.image) : undefined,
-        price: String(p.price || "").slice(0, 80),
-      })),
+    products: (c.products || []).slice(0, 12).map((p) => ({
+      title: String(p.title).slice(0, 200),
+      url: safeUrl(p.url),
+      image: p.image ? safeUrl(p.image) : undefined,
+      price: String(p.price || "").slice(0, 80),
+    })),
   };
 }
 export function segment(value: unknown): Segment {
@@ -313,6 +317,9 @@ export function escapeHtml(value: string) {
       ]!,
   );
 }
+const emailHead =
+  '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:16px 20px!important}}</style></head>';
+
 export function render(
   c: Content,
   unsubscribe: string,
@@ -335,9 +342,10 @@ export function render(
         /\bhomepage\b/gi,
         '<a style="color:#1f5f9e" href="' + e(c.url) + '">homepage</a>',
       );
-    const bodyHtml = c.bodyHtml?.trim()
-      ? personalize(c.bodyHtml, profileName, true)
-      : plainBody;
+    const bodyHtml =
+      c.bodyHtml !== undefined
+        ? personalize(c.bodyHtml, profileName, true)
+        : plainBody;
     const customBody =
       !!c.bodyHtml?.trim() &&
       (/<h1\b/i.test(c.bodyHtml) ||
@@ -371,9 +379,14 @@ export function render(
         'px;height:auto;object-fit:contain">'
       : '<div style="font-size:29px;font-style:italic;font-weight:bold;color:white">Thank you for your business</div>';
     return (
-      '<!doctype html><html><body style="margin:0;background:#07143a;font-family:Arial,sans-serif;color:#101820"><table role="presentation" width="100%"><tr><td align="center" style="padding:14px"><table role="presentation" width="600" style="max-width:100%;background:white"><tr><td style="padding:12px 28px 18px;text-align:center">' +
+      "<!doctype html><html>" +
+      emailHead +
+      '<body style="margin:0;background:#07143a;font-family:Arial,sans-serif;color:#101820"><table role="presentation" width="100%"><tr><td align="center" class="reef-outer" style="padding:14px"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:white"><tr><td class="reef-logo" style="padding:12px 28px 18px;text-align:center">' +
+      '<span style="display:none;max-height:0;overflow:hidden;mso-hide:all">' +
+      e(c.preview || "") +
+      "</span>" +
       logo +
-      '<hr style="border:0;border-top:1px solid #c9c9c9;margin:14px 0 0"></td></tr><tr><td style="padding:36px 52px 24px;font-size:13px;line-height:1.55">' +
+      '<hr style="border:0;border-top:1px solid #c9c9c9;margin:14px 0 0"></td></tr><tr><td class="reef-copy" style="padding:36px 52px 24px;font-size:13px;line-height:1.55">' +
       (customBody
         ? bodyHtml
         : '<h1 style="text-align:center;font-size:27px;line-height:1.15;margin:0 0 45px">' +
@@ -400,7 +413,9 @@ export function render(
     );
   }
   return (
-    '<!doctype html><html><body style="margin:0;background:#eef5f4;font-family:Arial,sans-serif;color:#123334"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="600" style="max-width:100%;background:white"><tr><td style="padding:28px;text-align:center;background:#083b3b;color:white;font-size:25px;font-weight:bold">CORALS ANONYMOUS</td></tr><tr><td style="display:none">' +
+    "<!doctype html><html>" +
+    emailHead +
+    '<body style="margin:0;background:#eef5f4;font-family:Arial,sans-serif;color:#123334"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:white"><tr><td style="padding:28px;text-align:center;background:#083b3b;color:white;font-size:25px;font-weight:bold">CORALS ANONYMOUS</td></tr><tr><td style="display:none">' +
     e(c.preview || "") +
     "</td></tr>" +
     (c.hero
@@ -412,10 +427,10 @@ export function render(
         e(c.heading) +
         '" width="600" style="max-width:100%"></a></td></tr>'
       : "") +
-    '<tr><td style="padding:28px"><h1>' +
+    '<tr><td class="reef-copy" style="padding:28px"><h1>' +
     e(c.heading) +
     '</h1><div style="line-height:1.7">' +
-    (c.bodyHtml?.trim()
+    (c.bodyHtml !== undefined
       ? personalize(c.bodyHtml, profileName, true)
       : e(personalize(c.body, profileName)).replace(/\n/g, "<br>")) +
     productHtml(c) +

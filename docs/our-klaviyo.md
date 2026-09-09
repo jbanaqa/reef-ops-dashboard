@@ -121,3 +121,14 @@ Compare profile, mailable and suppression totals with Klaviyo; inspect samples a
 Deferred or limited: A/B testing (explicitly excluded), full drag/drop editor, exact audited visual template reconstruction (original assets absent), Shopify product picker/collection population, unique coupon generation, direct Klaviyo API backfill, consent reconciliation UI, visual flow designer, SMS carrier adapter, automatic UNKNOWN-send reconciliation, detailed per-campaign unique-event funnels, refund-adjusted attribution, identity cross-device stitching, privacy erasure/export workflows, advanced deliverability dashboards, predictive CLV, recommendations, benchmarking and enterprise reports. These limits mean this implementation is not yet a turnkey Klaviyo replacement.
 
 Primary technical references: https://shopify.dev/docs/apps/build/webhooks/verify-deliveries and https://resend.com/docs/dashboard/emails/idempotency-keys .
+
+
+## Email editing workspace
+
+Opening an email step opens a full-screen workspace with Content, Artwork, and Send test panels. Content supports visual text formatting and an explicit HTML mode; opening or switching panels does not rewrite saved HTML. Save email writes through the existing flow save action. Unfinished copy and uploaded artwork remain in the resource-scoped browser draft. Tests use the current draft without enabling the flow. Older queued deliveries keep their enrollment snapshot.
+
+The preview renders the same responsive markup used for delivery, with desktop and 320/375/414 px phone widths. The email uses a fluid table capped at 600 px, constrained images, wrapping text, and narrower padding on phones. Preview links are inert. Individual inbox clients still need an internal test send.
+
+Run `npm run marketing:browser:test` with Chrome installed (or set `MARKETING_TEST_BROWSER` to a browser executable) for isolated real-browser tests of overflow, oversized artwork, visual formatting, draft restoration, save failure feedback, and narrow-screen controls. The fixture blocks external requests and uses no deployment data. Screenshots go to a temporary directory reported by the test.
+
+Design references: [Klaviyo template editor](https://help.klaviyo.com/hc/en-us/articles/4407911841435), [Klaviyo mobile optimization](https://help.klaviyo.com/hc/en-us/articles/115005254428), and [Mailchimp new builder](https://mailchimp.com/help/design-an-email-new-builder/). The workspace follows their sidebar/canvas, formatting, and device-preview patterns; it is not a full drag-and-drop template builder.

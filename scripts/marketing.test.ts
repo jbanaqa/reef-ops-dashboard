@@ -280,3 +280,12 @@ test("uploaded artwork becomes inline email attachments", () => {
   assert.ok(!payload.html.includes("data:image"));
   assert.equal(payload.attachments?.[0].content, "YWJj");
 });
+
+test("clearing HTML copy does not resurrect the previous plain-text message", () => {
+  for (const template of ["standard", "b2b-wholesale"] as const) {
+    const cleared = content({ ...defaultContent, template, body: "Greeting\n\nOLD_COPY_MUST_NOT_RETURN", bodyHtml: "" });
+    assert.equal(cleared.bodyHtml, "");
+    assert.equal(textBody(cleared), "");
+    assert.doesNotMatch(render(cleared, "https://example.com/unsubscribe", "Address"), /OLD_COPY_MUST_NOT_RETURN/);
+  }
+});

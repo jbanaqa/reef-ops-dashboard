@@ -17,7 +17,8 @@
     "marketing:scheduled": "tsx scripts/run-marketing.ts",
     "scheduled:all": "tsx scripts/run-scheduled-jobs.ts",
     "marketing:test": "node scripts/verify-marketing.cjs test",
-    "build:check": "node scripts/verify-marketing.cjs build"
+    "build:check": "node scripts/verify-marketing.cjs build",
+    "marketing:browser:test": "node scripts/marketing.browser.test.cjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -48,6 +49,7 @@
     "eslint-config-next": "16.3.4",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.0.1",
+    "playwright": "^1.63.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
     "typescript": "^5"
