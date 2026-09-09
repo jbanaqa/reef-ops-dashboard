@@ -163,3 +163,11 @@ Run `node scripts/settings.browser.test.cjs` for the isolated browser checks, in
 ### Manual delivery
 
 Settings → Overview → Delivery health includes **Run delivery now**. It invokes the same worker as the scheduled job, processing due messages across eligible campaigns and workflows. It does not move future due dates, enable sending, bypass consent, or retry uncertain deliveries automatically. The result reports sends/checks or why the run was skipped. This is separate from **Process Shopify events now**, which never invokes delivery. The action requires dashboard authentication and the normal origin checks.
+
+## Flow directory
+
+The Flows landing page supports search by name/trigger, status filters, and enabled-first or alphabetical sorting. It presents plain-language trigger descriptions, channels and step counts from the shared executable flow sequence, and all-time message counts grouped by flow. Queued/sending includes pending and in-flight messages; Sent is provider acceptance, not proof of inbox delivery. Failed and uncertain messages are called out without automatically retrying them.
+
+Flow enabled state is separate from global sending controls, which are summarized above the directory. Opening a workflow replaces the directory with the existing workflow editor. All flows returns to the prior search/filter state and restores focus. The existing email editor, saved copy/artwork, draft storage, and workflow execution logic are unchanged.
+
+Design references: [Klaviyo Flows tab](https://help.klaviyo.com/hc/en-us/articles/12930413372187) and [Mailchimp automation flows](https://mailchimp.com/help/create-customer-journey/). Run `node scripts/flows.browser.test.cjs` for isolated browser verification, including draft preservation while navigating between the directory and editor.

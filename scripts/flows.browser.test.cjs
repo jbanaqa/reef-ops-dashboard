@@ -1,0 +1,189 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Standalone CommonJS test runner. */
+// Run with Chrome installed, or set MARKETING_TEST_BROWSER to an executable.
+const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const http = require("node:http");
+const { build } = require("esbuild");
+const { chromium } = require("playwright");
+(async () => {
+  const output = await fs.mkdtemp(path.join(os.tmpdir(), "reef-flows-"));
+  const bundle = await build({
+    entryPoints: ["scripts/flows.browser.fixture.tsx"],
+    bundle: true,
+    write: false,
+    platform: "browser",
+    jsx: "automatic",
+    tsconfig: "scripts/tsconfig.marketing-tests.json",
+    define: { "process.env.NODE_ENV": '"development"', "process.env": "{}" },
+  });
+  const css =
+    (await fs.readFile("app/our-klaviyo/marketing.css", "utf8")) +
+    (await fs.readFile("app/our-klaviyo/flows.css", "utf8")) +
+    ":root{--surface:#fff;--surface-muted:#f5f8f7;--border:#dce5e3;--text-main:#203e38;--text-muted:#627872}*{box-sizing:border-box}body{font-family:Arial,sans-serif}";
+  const server = http.createServer((req, res) => {
+    if (req.url === "/app.js") {
+      res.setHeader("Content-Type", "text/javascript");
+      res.end(bundle.outputFiles[0].contents);
+    } else if (req.url === "/style.css") {
+      res.setHeader("Content-Type", "text/css");
+      res.end(css);
+    } else
+      res.end(
+        '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body style="margin:0;background:#e8efef"><div id="root"></div><script src="/app.js"></script></body></html>',
+      );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      ...(process.env.MARKETING_TEST_BROWSER
+        ? { executablePath: process.env.MARKETING_TEST_BROWSER }
+        : process.platform === "win32"
+          ? {
+              executablePath: path.join(
+                process.env.ProgramFiles || "C:/Program Files",
+                "Google/Chrome/Application/chrome.exe",
+              ),
+            }
+          : { channel: "chrome" }),
+    });
+    const page = await browser.newPage({
+      viewport: { width: 1440, height: 1000 },
+    });
+    page.setDefaultTimeout(10000);
+    page.on("dialog", (dialog) => dialog.accept());
+    const errors = [];
+    page.on("pageerror", (error) => {
+      errors.push(error.message);
+      console.log("PAGE ERROR", error.message);
+    });
+    // Only local fixture requests are allowed. Tests never contact production.
+    await page.route("**/*", (route) =>
+      route.request().url().startsWith("http://127.0.0.1:") ||
+      route.request().url().startsWith("data:")
+        ? route.continue()
+        : route.abort(),
+    );
+
+    await page.goto("http://127.0.0.1:" + server.address().port);
+    await page.getByText("5 of 5 workflows", { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, "flows-desktop.png") });
+    assert.equal(await page.locator(".fw-row").count(), 5);
+    assert.equal(
+      await page.locator(".fw-row").first().getByRole("heading").innerText(),
+      "B2B Welcoming Email",
+    );
+    await page
+      .getByText("Customer sending is paused", { exact: true })
+      .waitFor();
+    const b2b = page
+      .locator(".fw-row")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "B2B Welcoming Email",
+          exact: true,
+        }),
+      });
+    assert.deepEqual(await b2b.locator("dd").allTextContents(), ["1", "2"]);
+    await page.getByLabel("Status", { exact: true }).selectOption("review");
+    await page.getByText("4 of 5 workflows", { exact: true }).waitFor();
+    await page.getByLabel("Status", { exact: true }).selectOption("all");
+    await page.getByLabel("Find a workflow", { exact: true }).fill("b2b");
+    await page.getByText("1 of 5 workflows", { exact: true }).waitFor();
+    await page
+      .getByRole("button", { name: "Open B2B Welcoming Email", exact: true })
+      .click();
+    await page
+      .getByRole("heading", { name: "Edit B2B Welcoming Email", exact: true })
+      .waitFor();
+    assert.equal(
+      await page.locator(".fw-directory").count(),
+      0,
+      "The directory does not sit above the open workflow",
+    );
+    await page.getByText("Welcome to wholesale", { exact: true }).click();
+    await page.getByRole("dialog").waitFor();
+    await page
+      .getByLabel("Subject", { exact: true })
+      .fill("Preserved B2B subject");
+    await page.getByLabel("Back to flow", { exact: true }).click();
+    await page
+      .getByRole("button", { name: "← All flows", exact: true })
+      .click();
+    assert.equal(
+      await page.getByLabel("Find a workflow", { exact: true }).inputValue(),
+      "b2b",
+    );
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "flow-open-b2b-welcome",
+    );
+    await page
+      .getByRole("button", { name: "Open B2B Welcoming Email", exact: true })
+      .click();
+    await page.getByText("Preserved B2B subject", { exact: true }).click();
+    assert.equal(
+      await page.getByLabel("Subject", { exact: true }).inputValue(),
+      "Preserved B2B subject",
+    );
+    await page.getByRole("button", { name: "Save email", exact: true }).click();
+    await page.getByText("Saved to flow", { exact: true }).waitFor();
+    assert.equal(
+      await page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem("savedFlow")).data.steps[0].subject,
+      ),
+      "Preserved B2B subject",
+    );
+    await page.getByLabel("Back to flow", { exact: true }).click();
+    await page
+      .getByRole("button", { name: "← All flows", exact: true })
+      .click();
+    await page
+      .getByLabel("Find a workflow", { exact: true })
+      .fill("no such workflow");
+    await page.getByText("No workflows match", { exact: true }).waitFor();
+    await page
+      .getByRole("button", { name: "Clear filters", exact: true })
+      .click();
+    const cart = page
+      .locator(".fw-row")
+      .filter({
+        has: page.getByRole("heading", { name: "Abandoned Cart", exact: true }),
+      });
+    await cart.getByText("3 message steps", { exact: true }).waitFor();
+    await cart.getByText("Email + Text", { exact: true }).waitFor();
+    await page.getByLabel("Sort by", { exact: true }).selectOption("name");
+    assert.equal(
+      await page.locator(".fw-row").first().getByRole("heading").innerText(),
+      "24 Hour Notice | Upsell",
+    );
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        "No horizontal overflow at " + width,
+      );
+      await page.screenshot({
+        path: path.join(output, "flows-mobile-" + width + ".png"),
+        fullPage: true,
+      });
+    }
+    assert.deepEqual(errors, []);
+    console.log(
+      "PASS: flow search/status/sort, real message counts, branch-aware step counts, focused navigation, keyboard focus restoration, preserved email drafts and saves, mobile 320/390",
+    );
+    console.log("Screenshots: " + output);
+  } finally {
+    await browser?.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

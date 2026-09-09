@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import FlowEditor from "./FlowEditor";
+import FlowsWorkspace from "./FlowsWorkspace";
+import "./flows.css";
 import AudienceWorkspace from "./AudienceWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
 import "./settings.css";
@@ -642,91 +643,35 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
             <AudienceWorkspace sendingEnabled={!!data.setup.sendingEnabled} />
           )}
           {tab === "flows" && (
-            <>
-              <div className="mk-grid">
-                {data.resources
-                  .filter((r) => r.kind === "FLOW")
-                  .map((r) => (
-                    <article className="mk-panel mk-flow-card" key={r.id}>
-                      <div className="mk-flow-card-header">
-                        <span className="mk-status">
-                          {r.enabled ? "Enabled" : "Paused"}
-                        </span>
-                        <span className="mk-flow-trigger-label">
-                          {String(
-                            (r.data as { trigger?: string }).trigger ||
-                              "Automation",
-                          )}
-                        </span>
-                      </div>
-                      <h2>{r.name}</h2>
-                      <p>
-                        {String(
-                          r.data.description ||
-                            "Review this automation before enabling it.",
-                        )}
-                      </p>
-                      <button
-                        onClick={() => {
-                          setResource(r);
-                          setResourceText(JSON.stringify(r.data, null, 2));
-                        }}
-                      >
-                        View workflow
-                      </button>
-                    </article>
-                  ))}
-              </div>
-              {resource && (
-                <>
-                  <div className="mk-flow-selected">
-                    <div>
-                      <p className="mk-eyebrow">SELECTED WORKFLOW</p>
-                      <h2>{resource.name}</h2>
-                      <p>
-                        Select a node below to understand the path, then use the
-                        editor to change its settings.
-                      </p>
-                    </div>
-                    <button onClick={() => setResource(null)}>
-                      Close workflow
-                    </button>
-                  </div>
-                  <FlowEditor
-                    key={resource.id}
-                    resource={resource}
-                    busy={busy}
-                    testEmail={(to, subject, content) =>
-                      run(
-                        () =>
-                          action({
-                            action: "test-email",
-                            to,
-                            subject,
-                            content,
-                          }),
-                        "Flow test email sent",
-                      )
-                    }
-                    settings={data.settings || defaultMarketingSettings}
-                    save={(data, enabled) =>
-                      run(async () => {
-                        const saved = await action({
-                          action: "save-resource",
-                          kind: "FLOW",
-                          key: resource.key,
-                          name: resource.name,
-                          data,
-                          enabled,
-                        });
-                        setResource(saved);
-                        return saved;
-                      }, "Flow saved; already queued messages keep their reviewed content.")
-                    }
-                  />
-                </>
-              )}
-            </>
+            <FlowsWorkspace
+              resources={data.resources.filter((r) => r.kind === "FLOW")}
+              messageCounts={data.messageCounts}
+              setup={data.setup}
+              unresolved={data.health?.unresolved}
+              settings={data.settings || defaultMarketingSettings}
+              busy={busy}
+              refresh={() => run(load, "Flow status refreshed")}
+              testEmail={(to, subject, content) =>
+                run(
+                  () => action({ action: "test-email", to, subject, content }),
+                  "Flow test email sent",
+                )
+              }
+              save={(resource, flow, enabled) =>
+                run(
+                  async () =>
+                    action({
+                      action: "save-resource",
+                      kind: "FLOW",
+                      key: resource.key,
+                      name: resource.name,
+                      data: flow,
+                      enabled,
+                    }),
+                  "Flow saved; already queued messages keep their reviewed content.",
+                )
+              }
+            />
           )}
           {tab === "templates" && (
             <>
