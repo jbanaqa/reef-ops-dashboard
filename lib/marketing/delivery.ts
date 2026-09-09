@@ -208,6 +208,8 @@ export function setup(
     formEnabled: process.env.MARKETING_FORM_ENABLED === "true",
   };
   return {
+    deployment: env,
+    senderEmail: process.env.RESEND_FROM_EMAIL || "",
     sendingEnabled:
       env.sendingEnabled && (operations?.sendingEnabled ?? env.sendingEnabled),
     emailReady: !!(

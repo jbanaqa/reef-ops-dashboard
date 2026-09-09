@@ -957,3 +957,41 @@ test("contact panel exposes readable history without delivery tokens or email ar
   );
   assert.equal(await contactDetails("nonexistent-contact"), null);
 });
+
+test("saving business settings preserves independently saved operational controls", async () => {
+  const api = await import("../app/api/marketing/route");
+  const send = (settings: unknown) =>
+    api.POST(
+      new Request("https://app.example/api/marketing", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization:
+            "Basic " + Buffer.from("staff:test-password").toString("base64"),
+          origin: "https://app.example",
+        },
+        body: JSON.stringify({ action: "save-settings", settings }),
+      }),
+    );
+  const baseline = {
+    sendingEnabled: false,
+    ingestEnabled: true,
+    migrationConfirmed: false,
+    formEnabled: false,
+  };
+  assert.equal((await send({ operations: baseline })).status, 200);
+  const business = await send({
+    organizationName: "Settings Test",
+    postalAddress: "100 Test Avenue",
+  });
+  assert.equal(business.status, 200);
+  assert.deepEqual((await business.json()).settings.operations, baseline);
+  const sync = await send({ operations: { ingestEnabled: false } });
+  const result = await sync.json();
+  assert.equal(result.settings.organizationName, "Settings Test");
+  assert.equal(result.settings.postalAddress, "100 Test Avenue");
+  assert.deepEqual(result.settings.operations, {
+    ...baseline,
+    ingestEnabled: false,
+  });
+});

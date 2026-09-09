@@ -147,3 +147,15 @@ Saved audiences display their rules in plain language. View contacts applies the
 Design references: [Klaviyo profiles](https://help.klaviyo.com/hc/en-us/articles/115005247088), [Mailchimp contact profiles](https://mailchimp.com/help/about-contact-profile-pages/), and [Mailchimp saved segments](https://mailchimp.com/help/save-and-manage-segments/).
 
 Validation: `node scripts/audiences.browser.test.cjs` exercises the actual component in an isolated local browser fixture; no production data or email provider is contacted. Directory integration tests use the disposable marketing test database.
+
+## Settings workspace
+
+Settings is organized into Overview, Sending & signup, Business details, and Advanced. Overview retains manual Shopify processing and readable health information. Configuration status is explicitly described as configuration, not verified domain authentication or inbox delivery. The sender address is read-only and comes from deployment configuration; the editable business name is used in the footer.
+
+Each settings section submits only its own fields. Draft changes survive section navigation and status refreshes, and failed saves retain inputs. Enabling customer sending requires an explicit review of its scope and pending-message count. No delivery is triggered by saving business details or manually processing Shopify events. Existing worker and deployment gates remain enforced.
+
+Advanced retains Shopify webhook registration, migration review, prepared JSON import, and diagnostics. Imports require successful validation of the current batch before the import button is enabled; editing or choosing another file clears validation. Results are shown per row instead of raw JSON. The import UI accepts prepared JSON, not raw Klaviyo CSV.
+
+Design references: [Mailchimp settings and defaults](https://mailchimp.com/help/audience-settings-and-defaults/) and [Klaviyo sender settings](https://help.klaviyo.com/hc/en-us/articles/360024994912).
+
+Run `node scripts/settings.browser.test.cjs` for the isolated browser checks, including independent section saves, sending confirmation, import validation, save-error recovery, and mobile layout. These checks never access production services.
