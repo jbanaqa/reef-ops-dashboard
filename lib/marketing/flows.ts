@@ -29,7 +29,13 @@ export async function enroll(tx: Tx, key: string, profileId: string, eventKey: s
     }
     const dueAt = key === "delivery-upsell" ? new Date(+context.expectedDeliveryAt! - 86400000) : new Date(+at + step.minutes * 60000);
     if (key === "delivery-upsell" && dueAt < new Date()) continue;
-    await tx.marketingMessage.upsert({ where: { key: `${base}:${i}` }, create: { shop: shop(), key: `${base}:${i}`, profileId, flowKey: key, flowStep: i, channel: step.channel, subject: step.subject, content: json(c), dueAt, triggerAt: at }, update: {} });
+    const messageKey = `${base}:${i}`;
+    const existing = await tx.marketingMessage.findUnique({ where: { key: messageKey }, select: { id: true, status: true, error: true } });
+    if (existing?.status === "CANCELLED" && existing.error === "Not eligible for this channel") {
+      await tx.marketingMessage.update({ where: { id: existing.id }, data: { status: "PENDING", channel: step.channel, subject: step.subject, content: json(c), dueAt, triggerAt: at, attemptedAt: null, sentAt: null, attempts: 0, providerId: null, error: null } });
+    } else {
+      await tx.marketingMessage.upsert({ where: { key: messageKey }, create: { shop: shop(), key: messageKey, profileId, flowKey: key, flowStep: i, channel: step.channel, subject: step.subject, content: json(c), dueAt, triggerAt: at }, update: {} });
+    }
   }
   if (key === "abandoned-cart" && config.orderBranch) {
     const dueAt = new Date(+at + 1440 * 60000);

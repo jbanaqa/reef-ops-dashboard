@@ -5,7 +5,7 @@ import { date, DAY } from "./rules";
 import { enroll } from "./flows";
 
 type Customer = { id?: string | number; email?: string; phone?: string; first_name?: string; last_name?: string; tags?: string | string[]; updated_at?: string; email_marketing_consent?: { state: string | null; consent_updated_at?: string | null }; sms_marketing_consent?: { state: string | null; consent_updated_at?: string | null } };
-type Payload = Customer & { customer?: Customer; customerId?: string | number; customer_id?: string | number; email_address?: string; occurredAt?: string; created_at?: string; total_price?: string; currency?: string; test?: boolean; order_id?: string | number; expected_delivery_at?: string; abandoned_checkout_url?: string; financial_status?: string; checkout_token?: string; token?: string };
+type Payload = Customer & { customer?: Customer; customerId?: string | number; customer_id?: string | number; email_address?: string; occurredAt?: string; created_at?: string; total_price?: string; currency?: string; test?: boolean; order_id?: string | number; expected_delivery_at?: string; abandoned_checkout_url?: string; financial_status?: string; checkout_token?: string; token?: string; shopify_current_tags?: string[] };
 
 function isCustomerTagTopic(topic: string) {
   return ["customer.tags_added", "customer.tags_removed", "customers/tags_added", "customers/tags_removed"].includes(topic);
@@ -81,6 +81,7 @@ async function hydrateCustomerTagPayload(topic: string, p: Payload): Promise<Pay
       last_name: c.lastName || undefined,
       email_marketing_consent: normalizeConsent(c.emailMarketingConsent),
       sms_marketing_consent: normalizeConsent(c.smsMarketingConsent),
+      shopify_current_tags: c.tags || undefined,
     };
   } catch (error) {
     // The tag event is still recorded against the Shopify ID when a lookup is
@@ -110,10 +111,11 @@ export async function ingestShopify(topic: string, key: string, p: Payload, hist
     if (topic.startsWith("customers/") || tagTopic) {
       const incomingTags = webhookTags(p.tags);
       const removedTags = tagTopic && topic.endsWith("tags_removed") ? new Set(incomingTags) : new Set<string>();
+      const currentShopifyTags = tagTopic && Array.isArray(p.shopify_current_tags) ? webhookTags(p.shopify_current_tags) : null;
       // Full customer payloads are authoritative. Dedicated tag events are
       // deltas, so merge or remove only the tags named in the event.
       const tags = tagTopic
-        ? [...new Set(topic.endsWith("tags_removed") ? profile.tags.filter(t => !removedTags.has(t)) : [...profile.tags, ...incomingTags])]
+        ? currentShopifyTags || [...new Set(topic.endsWith("tags_removed") ? profile.tags.filter(t => !removedTags.has(t)) : [...profile.tags, ...incomingTags])]
         : incomingTags;
       // Full customer payloads are authoritative and use the timestamp guard.
       // Tag webhooks are deltas; a neighboring customers/update event must not
@@ -121,7 +123,8 @@ export async function ingestShopify(topic: string, key: string, p: Payload, hist
       const newer = tagTopic ? null : await tx.marketingEvent.findFirst({ where: { profileId: profile.id, type: { in: ["customers/create", "customers/update", "customer.tags_added", "customer.tags_removed", "customers/tags_added", "customers/tags_removed"] }, occurredAt: { gt: at } } });
       if (!newer) {
         await tx.marketingProfile.update({ where: { id: profile.id }, data: { tags } });
-        if (!historical && tags.includes("b2b") && !profile.tags.includes("b2b") && !topic.endsWith("tags_removed")) await enroll(tx, "b2b-welcome", profile.id, key, at);
+        const b2bAdded = tagTopic && topic.endsWith("tags_added") && incomingTags.includes("b2b");
+        if (!historical && tags.includes("b2b") && (!profile.tags.includes("b2b") || b2bAdded) && !topic.endsWith("tags_removed")) await enroll(tx, "b2b-welcome", profile.id, key, at);
       }
     }
     for (const [channel, value] of [["EMAIL", c.email_marketing_consent], ["SMS_MARKETING", c.sms_marketing_consent]] as const) {
