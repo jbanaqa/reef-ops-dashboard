@@ -15,6 +15,7 @@
     "species-library:verify-validation": "tsx scripts/verify-species-validation.ts",
     "collection-rotation:scheduled": "tsx scripts/run-collection-rotations.ts",
     "marketing:scheduled": "tsx scripts/run-marketing.ts",
+    "scheduled:all": "tsx scripts/run-scheduled-jobs.ts",
     "marketing:test": "tsx --test scripts/marketing.test.ts"
   },
   "dependencies": {
