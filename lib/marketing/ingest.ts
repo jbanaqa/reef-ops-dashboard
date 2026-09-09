@@ -57,17 +57,15 @@ const SHOPIFY_CUSTOMER_LOOKUP = `
 `;
 
 /**
- * Shopify's dedicated customer tag webhook intentionally contains only the
- * customer ID and the tag delta. Hydrate a profile that was created before
- * webhooks were connected so a tag event can still enroll the correct person.
+ * Shopify's dedicated customer tag webhook contains the customer ID and a
+ * tag delta, but it is not a reliable source for identity or consent. Always
+ * hydrate the current customer so a tag change also refreshes consent that
+ * may have been set before marketing webhooks were connected.
  */
 async function hydrateCustomerTagPayload(topic: string, p: Payload): Promise<Payload> {
   if (!isCustomerTagTopic(topic)) return p;
   const id = customerIdFromTagPayload(p);
   if (!id) throw new Error("Shopify customer tag event is missing customerId.");
-
-  const existing = await prisma.marketingProfile.findFirst({ where: { shop: shop(), shopifyId: id }, select: { id: true } });
-  if (existing) return { ...p, id };
 
   try {
     const result = await shopifyGraphql<ShopifyCustomerLookup>(SHOPIFY_CUSTOMER_LOOKUP, { id: `gid://shopify/Customer/${id}` });
