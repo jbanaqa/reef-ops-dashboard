@@ -129,7 +129,13 @@ export default function EmailDesigner({
   onTest,
   organizationName,
   postalAddress,
+  contentFields,
+  previewSubject,
+  previewCaption,
 }: {
+  contentFields?: React.ReactNode;
+  previewSubject?: string;
+  previewCaption?: string;
   organizationName: string;
   postalAddress: string;
   title: string;
@@ -161,11 +167,13 @@ export default function EmailDesigner({
   const [notice, setNotice] = useState("");
   useEffect(() => {
     const node = dialog.current;
+    const previous = document.activeElement as HTMLElement | null;
     node?.showModal();
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       node?.close();
+      previous?.focus();
       document.body.style.overflow = overflow;
     };
   }, []);
@@ -245,9 +253,10 @@ export default function EmailDesigner({
         <aside className="mk-designer-sidebar">
           <nav className="mk-designer-tabs" aria-label="Email editing sections">
             {(["content", "artwork", "footer", "test"] as const)
-              .filter(
-                (tab) =>
-                  tab !== "artwork" || content.template === "b2b-wholesale",
+              .filter((tab) =>
+                contentFields
+                  ? tab === "content"
+                  : tab !== "artwork" || content.template === "b2b-wholesale",
               )
               .map((tab) => (
                 <button
@@ -267,72 +276,77 @@ export default function EmailDesigner({
               ))}
           </nav>
           <div className="mk-designer-fields">
-            {panel === "content" && (
-              <>
-                <section className="mk-editor-section">
-                  <h3>Inbox details</h3>
-                  <p>The first thing your customer sees.</p>
-                  <label>
-                    Subject
-                    <input
-                      value={subject}
-                      onChange={(e) => {
-                        setNotice("");
-                        onSubject(e.target.value);
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Preview text
-                    <input
-                      value={content.preview || ""}
-                      placeholder="A short introduction beside the subject"
-                      onChange={(e) => changeContent("preview", e.target.value)}
-                    />
-                  </label>
-                </section>
-                <section className="mk-editor-section">
-                  <h3>Email content</h3>
-                  {!includesHeading ? (
+            {panel === "content" &&
+              (contentFields || (
+                <>
+                  <section className="mk-editor-section">
+                    <h3>Inbox details</h3>
+                    <p>The first thing your customer sees.</p>
                     <label>
-                      Heading
+                      Subject
                       <input
-                        value={content.heading}
+                        value={subject}
+                        onChange={(e) => {
+                          setNotice("");
+                          onSubject(e.target.value);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Preview text
+                      <input
+                        value={content.preview || ""}
+                        placeholder="A short introduction beside the subject"
                         onChange={(e) =>
-                          changeContent("heading", e.target.value)
+                          changeContent("preview", e.target.value)
                         }
                       />
                     </label>
-                  ) : (
-                    <p>Your heading is included in the message below.</p>
-                  )}
-                  <RichEmailCopy
-                    value={copy}
-                    onChange={(value) => changeContent("bodyHtml", value)}
-                  />
-                </section>
-                <section className="mk-editor-section">
-                  <h3>Call to action</h3>
-                  <p>The button at the end of your message.</p>
-                  <label>
-                    Button text
-                    <input
-                      value={content.button}
-                      onChange={(e) => changeContent("button", e.target.value)}
+                  </section>
+                  <section className="mk-editor-section">
+                    <h3>Email content</h3>
+                    {!includesHeading ? (
+                      <label>
+                        Heading
+                        <input
+                          value={content.heading}
+                          onChange={(e) =>
+                            changeContent("heading", e.target.value)
+                          }
+                        />
+                      </label>
+                    ) : (
+                      <p>Your heading is included in the message below.</p>
+                    )}
+                    <RichEmailCopy
+                      value={copy}
+                      onChange={(value) => changeContent("bodyHtml", value)}
                     />
-                  </label>
-                  <label>
-                    Button destination
-                    <input
-                      type="url"
-                      value={content.url}
-                      placeholder="https://"
-                      onChange={(e) => changeContent("url", e.target.value)}
-                    />
-                  </label>
-                </section>
-              </>
-            )}
+                  </section>
+                  <section className="mk-editor-section">
+                    <h3>Call to action</h3>
+                    <p>The button at the end of your message.</p>
+                    <label>
+                      Button text
+                      <input
+                        value={content.button}
+                        onChange={(e) =>
+                          changeContent("button", e.target.value)
+                        }
+                      />
+                    </label>
+                    <label>
+                      Button destination
+                      <input
+                        type="url"
+                        value={content.url}
+                        placeholder="https://"
+                        onChange={(e) => changeContent("url", e.target.value)}
+                      />
+                    </label>
+                  </section>
+                </>
+              ))}
             {panel === "artwork" && (
               <>
                 <div className="mk-editor-section">
@@ -548,7 +562,9 @@ export default function EmailDesigner({
             >
               <div className="mk-preview-inbox">
                 <span>Subject</span>
-                <strong>{subject || "No subject yet"}</strong>
+                <strong>
+                  {previewSubject ?? (subject || "No subject yet")}
+                </strong>
                 {content.preview && <p>{content.preview}</p>}
               </div>
               {html ? (
@@ -564,7 +580,8 @@ export default function EmailDesigner({
               )}
             </div>
             <p className="mk-preview-caption">
-              Responsive preview · Send a test to check your email app.
+              {previewCaption ||
+                "Responsive preview · Send a test to check your email app."}
             </p>
           </div>
         </section>

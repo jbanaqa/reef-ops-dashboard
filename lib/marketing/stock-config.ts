@@ -1,4 +1,4 @@
-import { email, phone } from "./rules";
+import { email, phone, content, defaultContent } from "./rules";
 export type StockConfig = {
   collectionId: string;
   threshold: number;
@@ -115,4 +115,20 @@ export function stockQuietHours(timezone: string, at = new Date()) {
     }).format(at),
   );
   return hour < 11 || hour >= 20;
+}
+
+export function stockMessageContent(
+  s: StockConfig,
+  channel: string,
+  values: Record<(typeof stockTokens)[number], string>,
+) {
+  return content({
+    ...defaultContent,
+    heading: "Low stock alert",
+    preview: "Internal inventory alert",
+    body: stockCopy(channel === "EMAIL" ? s.emailBody : s.smsBody, values),
+    bodyHtml: undefined,
+    url: values.ProductURL,
+    button: "View product",
+  });
 }

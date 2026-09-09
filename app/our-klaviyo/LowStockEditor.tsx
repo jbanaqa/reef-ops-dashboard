@@ -1,8 +1,15 @@
 "use client";
+import EmailDesigner from "./EmailDesigner";
+import {
+  render,
+  defaultContent,
+  type MarketingSettings,
+} from "@/lib/marketing/rules";
 import { useEffect, useRef, useState } from "react";
 import {
   defaultStockConfig,
   stockCopy,
+  stockMessageContent,
   stockTokens,
   validateStock,
   type StockConfig,
@@ -119,11 +126,13 @@ export default function LowStockEditor({
   resource,
   busy,
   setup,
+  settings,
   save,
 }: {
   resource: FlowResource;
   busy: boolean;
   setup: Record<string, unknown>;
+  settings: MarketingSettings;
   save: (
     data: Record<string, unknown>,
     enabled: boolean,
@@ -210,6 +219,21 @@ export default function LowStockEditor({
     InventoryQuantity: "4",
     ProductURL: "https://coralsanonymous.com/products/example",
   };
+  let emailContent = defaultContent,
+    emailHtml = "",
+    emailPreviewError = "";
+  try {
+    emailContent = stockMessageContent(s, "EMAIL", sample);
+    emailHtml = render(
+      emailContent,
+      "#unsubscribe",
+      settings.postalAddress,
+      undefined,
+      settings.organizationName,
+    );
+  } catch (e) {
+    emailPreviewError = e instanceof Error ? e.message : "Preview unavailable";
+  }
   async function saveFlow() {
     setError("");
     setNotice("");
@@ -226,8 +250,10 @@ export default function LowStockEditor({
         setDraft(initial(result));
         setNotice("Stock alert settings saved.");
       }
+      return !!result;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed.");
+      return false;
     }
   }
   async function check() {
@@ -396,7 +422,7 @@ export default function LowStockEditor({
           {busy ? "Saving…" : "Save stock flow"}
         </button>
       </div>
-      {panel && (
+      {panel && panel !== "email" && (
         <StockDialog title={panelTitles[panel]} close={() => setPanel(null)}>
           {panel === "trigger" && (
             <div>
@@ -558,56 +584,21 @@ export default function LowStockEditor({
               )}
             </div>
           )}
-          {(panel === "email" || panel === "sms") && (
+          {panel === "sms" && (
             <div>
               <label className="stock-check">
                 <input
                   type="checkbox"
-                  checked={panel === "email" ? s.emailEnabled : s.smsEnabled}
-                  onChange={(e) =>
-                    set(
-                      panel === "email" ? "emailEnabled" : "smsEnabled",
-                      e.target.checked,
-                    )
-                  }
+                  checked={s.smsEnabled}
+                  onChange={(e) => set("smsEnabled", e.target.checked)}
                 />
-                Enable this {panel === "email" ? "email" : "text"} alert
+                Enable this text alert
               </label>
               <p className="stock-help">
                 Product details fill in automatically. Keep these fields in your
                 copy: {stockTokens.map((t) => "{{ " + t + " }}").join(", ")}.
               </p>
               <div className="stock-grid">
-                {panel === "email" && (
-                  <div>
-                    <label>
-                      Email subject
-                      <input
-                        maxLength={200}
-                        aria-label="Email subject"
-                        value={s.emailSubject}
-                        onChange={(e) => set("emailSubject", e.target.value)}
-                      />
-                    </label>
-                    <label>
-                      Email message
-                      <textarea
-                        rows={8}
-                        aria-label="Email message"
-                        value={s.emailBody}
-                        onChange={(e) => set("emailBody", e.target.value)}
-                      />
-                    </label>
-                    <details>
-                      <summary>See example email copy</summary>
-                      <div className="stock-copy">
-                        <strong>{stockCopy(s.emailSubject, sample)}</strong>
-                        <p>{stockCopy(s.emailBody, sample)}</p>
-                        <span>View product →</span>
-                      </div>
-                    </details>
-                  </div>
-                )}
                 {panel === "sms" && (
                   <div>
                     <label>
@@ -716,6 +707,78 @@ export default function LowStockEditor({
             </p>
           )}
         </StockDialog>
+      )}
+
+      {panel === "email" && (
+        <EmailDesigner
+          title="Low stock email"
+          subject={s.emailSubject}
+          previewSubject={stockCopy(s.emailSubject, sample)}
+          content={emailContent}
+          html={emailHtml}
+          previewError={emailPreviewError}
+          previewCaption="Example stock data · Actual product details are filled in when the alert runs."
+          busy={busy || checking || !ready}
+          status={
+            notice ||
+            "Changes are kept as a draft in this browser. Save flow to apply them."
+          }
+          organizationName={settings.organizationName}
+          postalAddress={settings.postalAddress}
+          onSubject={(value) => set("emailSubject", value)}
+          onContent={() => {}}
+          onSave={saveFlow}
+          onClose={() => setPanel(null)}
+          contentFields={
+            <>
+              <section className="mk-editor-section">
+                <h3>Stock email</h3>
+                <p>
+                  Edit the message here and see the finished email alongside it.
+                </p>
+                <label className="stock-check">
+                  <input
+                    type="checkbox"
+                    checked={s.emailEnabled}
+                    onChange={(e) => set("emailEnabled", e.target.checked)}
+                  />
+                  Enable this email alert
+                </label>
+                <label>
+                  Subject
+                  <input
+                    aria-label="Email subject"
+                    maxLength={200}
+                    value={s.emailSubject}
+                    onChange={(e) => set("emailSubject", e.target.value)}
+                  />
+                </label>
+                <label>
+                  Message
+                  <textarea
+                    aria-label="Email message"
+                    rows={10}
+                    value={s.emailBody}
+                    onChange={(e) => set("emailBody", e.target.value)}
+                  />
+                </label>
+                <small>
+                  Product name, variant, and quantity fill in automatically. A
+                  product button is added below the message.
+                </small>
+                <details>
+                  <summary>Available product fields</summary>
+                  <p>{stockTokens.map((t) => "{{ " + t + " }}").join(", ")}</p>
+                </details>
+                {error && (
+                  <p role="alert" className="stock-error">
+                    {error}
+                  </p>
+                )}
+              </section>
+            </>
+          }
+        />
       )}
     </article>
   );

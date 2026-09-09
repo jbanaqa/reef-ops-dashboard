@@ -2,8 +2,13 @@ import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
 import { atomic, identify, json, record, shop } from "./store";
-import { content, defaultContent, marketingSettings } from "./rules";
-import { StockConfig, stockCopy, validateStock } from "./stock-config";
+import { marketingSettings } from "./rules";
+import {
+  StockConfig,
+  stockCopy,
+  validateStock,
+  stockMessageContent,
+} from "./stock-config";
 
 export type StockVariant = {
   id: string;
@@ -157,19 +162,7 @@ export async function observeStock(
       ...(s.emailEnabled ? ["EMAIL"] : []),
       ...(s.smsEnabled ? ["SMS_TRANSACTIONAL"] : []),
     ]) {
-      const body = stockCopy(
-        channel === "EMAIL" ? s.emailBody : s.smsBody,
-        values,
-      );
-      const c = content({
-        ...defaultContent,
-        heading: "Low stock alert",
-        preview: "Internal inventory alert",
-        body,
-        bodyHtml: undefined,
-        url: productUrl,
-        button: "View product",
-      });
+      const c = stockMessageContent(s, channel, values);
       await tx.marketingMessage.upsert({
         where: { key: condition + ":" + profile.id + ":" + channel },
         create: {

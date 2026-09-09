@@ -192,6 +192,7 @@ export default function FlowsWorkspace({
               resource={selected}
               busy={busy}
               setup={setup}
+              settings={settings}
               save={async (data, enabled) => {
                 const result = await save(selected, data, enabled);
                 if (result) setSelected(result);

@@ -22,7 +22,7 @@ const { chromium } = require("playwright");
     (await fs.readFile("app/our-klaviyo/marketing.css", "utf8")) +
     (await fs.readFile("app/our-klaviyo/flows.css", "utf8")) +
     (await fs.readFile("app/our-klaviyo/stock.css", "utf8")) +
-    ":root{--surface:#fff;--surface-muted:#f5f8f7;--border:#dce5e3;--text-main:#203e38;--text-muted:#627872}*{box-sizing:border-box}body{font-family:Arial,sans-serif}";
+    ":root{--surface:#fff;--surface-muted:#f5f8f7;--border:#dce5e3;--text-main:#203e38;--text-muted:#627872}*{box-sizing:border-box}dialog{margin:0}body{font-family:Arial,sans-serif}";
   const server = http.createServer((req, res) => {
     if (req.url === "/app.js") {
       res.setHeader("Content-Type", "text/javascript");
@@ -222,10 +222,18 @@ const { chromium } = require("playwright");
     const openNode = async (name) =>
       page.locator(".mk-flow-map").getByRole("button", { name }).click();
     const closePanel = async () =>
-      page
-        .getByRole("button", { name: "Back to stock flow", exact: true })
-        .click();
+      page.getByRole("button", { name: /^Back to (stock )?flow$/ }).click();
     await openNode(/Notify the staff recipient/);
+    assert.ok(
+      await page.getByRole("dialog").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return (
+          Math.abs(r.left + r.width / 2 - innerWidth / 2) < 2 &&
+          Math.abs(r.top + r.height / 2 - innerHeight / 2) < 2
+        );
+      }),
+      "Stock settings dialog is centered despite global dialog margin reset",
+    );
     assert.equal(
       await page.getByLabel("Mobile number", { exact: true }).inputValue(),
       "+16573450924",
@@ -249,10 +257,35 @@ const { chromium } = require("playwright");
     await closePanel();
     await openNode(/Low stock email/);
     await page
+      .getByRole("region", { name: "Live email preview", exact: true })
+      .waitFor();
+    assert.ok(
+      await page.getByRole("dialog").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return (
+          Math.abs(r.left + r.width / 2 - innerWidth / 2) < 2 &&
+          Math.abs(r.top + r.height / 2 - innerHeight / 2) < 2
+        );
+      }),
+      "Stock email designer is centered",
+    );
+    await page
       .getByLabel("Email message", { exact: true })
       .fill(
         "Please restock {{ ProductTitle }}. Remaining: {{ InventoryQuantity }}.",
       );
+    await page
+      .frameLocator('iframe[title="Email preview"]')
+      .getByText("Please restock Example coral. Remaining: 4.", { exact: true })
+      .waitFor();
+    await page.getByRole("button", { name: "Mobile", exact: true }).click();
+    await page
+      .getByLabel("Mobile preview width", { exact: true })
+      .selectOption("320");
+    await page.waitForFunction(() => {const f=document.querySelector('iframe[title="Email preview"]');const body=f?.contentDocument?.body;return body && body.getBoundingClientRect().bottom <= f.clientHeight;});
+    await page.screenshot({
+      path: path.join(output, "stock-email-preview.png"),
+    });
     await closePanel();
     await page
       .getByRole("button", { name: "← All flows", exact: true })
@@ -288,6 +321,10 @@ const { chromium } = require("playwright");
     await page
       .getByText("Stock alert settings saved.", { exact: true })
       .waitFor();
+    await openNode(/Low stock email/);
+    await page.getByRole("button",{name:"Save email",exact:true}).click();
+    await page.getByText("Saved to flow",{exact:true}).waitFor();
+    await closePanel();
     const savedStock = await page.evaluate(
       () => JSON.parse(localStorage.getItem("savedFlow")).data.stock,
     );
