@@ -146,9 +146,10 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     setError("");
     setNotice("");
     try {
-      await fn();
+      const result = await fn();
       await load();
       setNotice(message);
+      return result;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
@@ -889,6 +890,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                           enabled,
                         });
                         setResource(saved);
+                        return saved;
                       }, "Flow saved; already queued messages keep their reviewed content.")
                     }
                   />

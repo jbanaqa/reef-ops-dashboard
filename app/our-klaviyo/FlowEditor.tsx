@@ -1,6 +1,6 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Content,
   content as normalizeContent,
@@ -10,6 +10,8 @@ import {
   render,
 } from "@/lib/marketing/rules";
 import { FlowMap, Node } from "./FlowMap";
+import EmailPreview from "./EmailPreview";
+import { readDraft, writeDraft } from "./flow-drafts";
 
 import { FlowTarget } from "@/lib/marketing/flow-config";
 
@@ -32,6 +34,7 @@ type Data = {
   orderBranch?: { yes: Branch; no: Branch };
 };
 type Resource = {
+  id?: string;
   key: string;
   name: string;
   enabled: boolean;
@@ -57,7 +60,7 @@ function FlowEditorState({
 }: {
   resource: Resource;
   busy: boolean;
-  save: (data: Data, enabled: boolean) => void;
+  save: (data: Data, enabled: boolean) => void | Promise<unknown>;
   settings: MarketingSettings;
   testEmail?: (to: string, subject: string, content: Content) => void;
 }) {
@@ -68,6 +71,87 @@ function FlowEditorState({
   const [mobile, setMobile] = useState(false);
   const [recipient, setRecipient] = useState("");
   const [enabled, setEnabled] = useState(resource.enabled);
+  const latest = useRef({ flow, enabled });
+  useEffect(() => { latest.current = { flow, enabled }; }, [flow, enabled]);
+  async function saveFlow() {
+    const submitted = JSON.stringify({ flow, enabled });
+    const result = (await save(flow, enabled)) as Resource | undefined;
+    if (result?.data && JSON.stringify(latest.current) === submitted) {
+      setFlow(result.data as unknown as Data);
+      setEnabled(result.enabled);
+      setDraftStatus("Flow saved, including copy and artwork.");
+    }
+  }
+  const draftKey = resource.id || resource.key;
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftStatus, setDraftStatus] = useState("Loading saved draft…");
+  const writes = useRef(Promise.resolve());
+  const savedSnapshot = JSON.stringify({
+    flow: resource.data,
+    enabled: resource.enabled,
+  });
+  useEffect(() => {
+    let active = true;
+    readDraft<{ flow: Data; enabled: boolean; base: string }>(draftKey)
+      .then((draft) => {
+        if (!active) return;
+        if (
+          draft &&
+          draft.base !==
+            JSON.stringify({ flow: draft.flow, enabled: draft.enabled })
+        ) {
+          setFlow(draft.flow);
+          setEnabled(draft.enabled);
+          setDraftStatus(
+            draft.base === savedSnapshot
+              ? "Restored unfinished draft. Save flow to apply it."
+              : "Restored unfinished draft; the saved flow also changed. Review before saving.",
+          );
+        } else
+          setDraftStatus(
+            "Changes are kept as a draft in this browser. Save flow to apply them.",
+          );
+        setDraftReady(true);
+      })
+      .catch(() => {
+        if (active) {
+          setDraftStatus(
+            "Browser draft storage is unavailable. Save flow before leaving.",
+          );
+          setDraftReady(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+    // Load once per resource. Server refreshes must not replace active edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  useEffect(() => {
+    if (!draftReady) return;
+    let active = true;
+    writes.current = writes.current
+      .catch(() => {})
+      .then(() => writeDraft(draftKey, { flow, enabled, base: savedSnapshot }))
+      .catch(() => {
+        if (active)
+          setDraftStatus(
+            "Draft could not be stored. Save flow before leaving to protect your copy and artwork.",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [flow, enabled, draftReady, draftKey, savedSnapshot]);
+  useEffect(() => {
+    if (JSON.stringify({ flow, enabled }) === savedSnapshot) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [flow, enabled, savedSnapshot]);
   const [selected, setSelected] = useState<{
     node: Node;
     target: Target;
@@ -322,6 +406,7 @@ function FlowEditorState({
         </label>
       </div>
     );
+  if (!draftReady) return <p>Loading saved draft…</p>;
   return (
     <article className="mk-panel">
       <div className="mk-flow-editor-heading">
@@ -375,6 +460,24 @@ function FlowEditorState({
           </label>
         </div>
       )}
+      <p>{draftStatus}</p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          if (
+            window.confirm(
+              "Discard this browser draft and reload the last saved flow?",
+            )
+          ) {
+            setFlow(JSON.parse(JSON.stringify(resource.data)) as Data);
+            setEnabled(resource.enabled);
+            setDraftStatus("Loaded the last saved flow.");
+          }
+        }}
+      >
+        Discard draft and reload saved flow
+      </button>
       <div className="mk-flow-controls">
         <label className="mk-check">
           <input
@@ -392,7 +495,7 @@ function FlowEditorState({
           />
           Enable this flow
         </label>
-        <button disabled={busy} onClick={() => save(flow, enabled)}>
+        <button disabled={busy} onClick={saveFlow}>
           Save flow
         </button>
       </div>
@@ -470,13 +573,7 @@ function FlowEditorState({
                 <button type="button" onClick={() => setMobile(!mobile)}>
                   {mobile ? "Desktop preview" : "Mobile preview"}
                 </button>
-                <iframe
-                  style={{ width: mobile ? 320 : "100%", maxWidth: "100%" }}
-                  title="Email preview"
-                  sandbox=""
-                  scrolling="no"
-                  srcDoc={preview}
-                />
+                <EmailPreview html={preview} mobile={mobile} />
               </div>
             )}
             {selected.target.kind === "sms" && (
@@ -484,9 +581,13 @@ function FlowEditorState({
                 SMS requires marketing consent and an unsuppressed profile.
               </p>
             )}
+            <p>{draftStatus}</p>
             <div className="mk-modal-actions">
+              <button type="button" disabled={busy} onClick={saveFlow}>
+                Save flow
+              </button>
               <button type="button" onClick={() => setSelected(null)}>
-                Done
+                Close editor
               </button>
             </div>
           </div>

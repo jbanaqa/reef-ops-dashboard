@@ -678,3 +678,19 @@ test("marketing identity conflicts remain retryable without blocking inventory c
   const result = await worker.runMarketing();
   assert.ok("skipped" in result);
 });
+
+test("repeated setup preserves saved B2B copy and uploaded artwork", async () => {
+  const where = { shop_kind_key: { shop, kind: "FLOW", key: "b2b-welcome" } };
+  const original = await prisma.marketingResource.findUniqueOrThrow({ where });
+  const data = JSON.parse(JSON.stringify(original.data));
+  data.steps[0].subject = "Custom wholesale welcome";
+  data.steps[0].content.bodyHtml = "<p>Saved custom copy</p>";
+  data.steps[0].content.logo = "data:image/png;base64,aGVsbG8=";
+  data.steps[0].content.footerImage = "data:image/png;base64,d29ybGQ=";
+  await prisma.marketingResource.update({ where, data: { data } });
+  await store.seed();
+  await store.seed();
+  const saved = await prisma.marketingResource.findUniqueOrThrow({ where });
+  assert.deepEqual(saved.data, data);
+  assert.equal(saved.enabled, original.enabled);
+});
