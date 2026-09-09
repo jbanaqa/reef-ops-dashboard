@@ -28,3 +28,7 @@ CAN-SPAM applies to B2B commercial email. Review accurate sender/subject informa
 For Gmail, verify authentication and applicable sender-volume requirements, plus working unsubscribe headers on actual marketing mail. A preview message has a different test purpose and intentionally does not claim a real subscription. Check the received workflow message and domain setup against [Google sender guidelines](https://support.google.com/mail/answer/81126?hl=en-GB).
 
 Outstanding before sign-off: real sender domain/authentication, current customer consent evidence, valid organization/address, truthful current offer claims, Gmail rendering/delivery, and live unsubscribe/provider callbacks. Automated checks provide technical evidence; they do not establish overall legal compliance.
+
+### Manual Shopify event processing
+
+In Our Klaviyo → Settings → Delivery health, use **Process Shopify events now** to process up to 100 due inbox events without waiting for the scheduler. The action requires dashboard authentication and enabled ingestion. It refreshes profiles, consent, and flow enrollment but does not invoke email or SMS delivery. Keep general sending disabled during enrollment testing because the scheduled worker remains independent. The result reports completed and unresolved events; failed events and delayed retries still require the existing retry controls after resolving their cause. This processes received events, not a historical Shopify customer import.

@@ -141,14 +141,17 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
       });
     return () => controller.abort();
   }, [query, cursor]);
-  async function run(fn: () => Promise<unknown>, message = "Saved") {
+  async function run<T>(
+    fn: () => Promise<T>,
+    message: string | ((result: T) => string) = "Saved",
+  ) {
     setBusy(true);
     setError("");
     setNotice("");
     try {
       const result = await fn();
       await load();
-      setNotice(message);
+      setNotice(typeof message === "function" ? message(result) : message);
       return result;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
@@ -988,6 +991,26 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
               {data.health && (
                 <article className="mk-panel">
                   <h2>Delivery health</h2>
+                  <p>
+                    Process up to 100 received Shopify events now to update profiles,
+                    consent, and flow enrollment. This action does not send emails
+                    or SMS. Keep sending disabled while testing enrollment.
+                  </p>
+                  <button
+                    disabled={busy || !data.setup.ingestEnabled}
+                    onClick={() =>
+                      run(
+                        () => action({ action: "process-inbox" }),
+                        (result: { processed: number; unresolved: number }) =>
+                          `Processed ${result.processed} Shopify events. ${result.unresolved} unresolved events remain.${result.processed === 0 ? " No events were ready to process. Check the errors below if your customer is still missing." : ""}`,
+                      )
+                    }
+                  >
+                    {busy ? "Please wait…" : "Process Shopify events now"}
+                  </button>
+                  {!data.setup.ingestEnabled && (
+                    <p>Enable and save Shopify ingestion below to run this action.</p>
+                  )}
                   <p>
                     {data.health.unresolved} unresolved Shopify events. Sending
                     waits until they are processed.

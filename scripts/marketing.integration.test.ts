@@ -784,3 +784,47 @@ test("internal preview sends do not advertise a real unsubscribe subscription", 
   assert.equal(info.status, 200);
   assert.match(await info.text(), /No subscription was changed/);
 });
+
+
+test("manual inbox action requires login, respects ingestion switch, and never sends", async () => {
+  const api = await import("../app/api/marketing/route");
+  process.env.DASHBOARD_USERNAME = "staff";
+  process.env.DASHBOARD_PASSWORD = "test-password";
+  const request = (authorized = true) => new Request("https://app.example/api/marketing", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://app.example",
+      ...(authorized ? { authorization: "Basic " + Buffer.from("staff:test-password").toString("base64") } : {}),
+    },
+    body: JSON.stringify({ action: "process-inbox" }),
+  });
+  const previousIngest = process.env.MARKETING_INGEST_ENABLED;
+  const beforeSent = sent.length;
+  customer = { ...customer, id: "gid://shopify/Customer/990", legacyResourceId: "990", email: "manual@example.com", tags: [], emailMarketingConsent: { marketingState: "SUBSCRIBED", consentUpdatedAt: new Date().toISOString() } };
+  await inbox.queueShopify("customer.tags_removed", "manual-remove-990", {
+    customerId: customer.id, tags: ["b2b"], occurredAt: new Date().toISOString(),
+  });
+  try {
+    assert.equal((await api.POST(request(false))).status, 401);
+    process.env.MARKETING_INGEST_ENABLED = "false";
+    assert.equal((await api.POST(request())).status, 409);
+    assert.equal(await prisma.marketingProfile.count({ where: { shop, shopifyId: "990" } }), 0);
+    process.env.MARKETING_INGEST_ENABLED = "true";
+    const response = await api.POST(request());
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.ok(result.processed >= 1);
+    assert.equal(typeof result.unresolved, "number");
+    const profile = await prisma.marketingProfile.findUniqueOrThrow({ where: { shop_shopifyId: { shop, shopifyId: "990" } }, include: { consents: true } });
+    assert.equal(profile.email, "manual@example.com");
+    assert.deepEqual(profile.tags, []);
+    assert.ok(profile.consents.some(c => c.channel === "EMAIL" && c.status === "SUBSCRIBED"));
+    assert.equal(sent.length, beforeSent);
+    assert.equal((await api.POST(request())).status, 200);
+    assert.equal(sent.length, beforeSent);
+  } finally {
+    if (previousIngest === undefined) delete process.env.MARKETING_INGEST_ENABLED;
+    else process.env.MARKETING_INGEST_ENABLED = previousIngest;
+  }
+});

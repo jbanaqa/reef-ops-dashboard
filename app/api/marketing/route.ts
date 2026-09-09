@@ -21,6 +21,7 @@ import {
   segment,
 } from "@/lib/marketing/rules";
 import { resendProvider, setup } from "@/lib/marketing/delivery";
+import { processMarketingInbox, inboxUnresolved } from "@/lib/marketing/inbox";
 import { importProfiles } from "@/lib/marketing/ingest";
 import { validateFlow } from "@/lib/marketing/flow-config";
 import { shopifyGraphql } from "@/lib/shopify";
@@ -341,6 +342,15 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 12000000) throw new Error("Request too large.");
     const b = JSON.parse(raw);
+    if (b.action === "process-inbox") {
+      const result = await processMarketingInbox();
+      if (result.disabled)
+        return Response.json(
+          { error: "Shopify ingestion is disabled. Enable and save ingestion settings first." },
+          { status: 409 },
+        );
+      return Response.json({ ...result, unresolved: await inboxUnresolved() });
+    }
     if (b.action === "retry-inbox") {
       const result = await prisma.marketingWebhookInbox.updateMany({
         where: {
