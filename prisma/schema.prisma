@@ -7,6 +7,23 @@ datasource db {
   provider = "postgresql"
 }
 
+model MarketingWebhookInbox {
+  id String @id @default(cuid())
+  shop String
+  key String
+  topic String
+  payload Json
+  status String @default("PENDING")
+  attempts Int @default(0)
+  dueAt DateTime @default(now())
+  claimedAt DateTime?
+  error String?
+  createdAt DateTime @default(now())
+  processedAt DateTime?
+  @@unique([shop, key])
+  @@index([shop, status, dueAt])
+}
+
 model MarketingProfile {
   id String @id @default(cuid())
   shop String

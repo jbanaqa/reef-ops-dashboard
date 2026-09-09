@@ -27,6 +27,7 @@ export async function getShopifyAccessToken() {
     `https://${shopDomain}/admin/oauth/access_token`,
     {
       method: "POST",
+      signal: AbortSignal.timeout(20000),
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
@@ -64,6 +65,7 @@ export async function shopifyGraphql<TData = unknown>(
     `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
     {
       method: "POST",
+      signal: AbortSignal.timeout(20000),
       headers: {
         "Content-Type": "application/json",
         "X-Shopify-Access-Token": accessToken,

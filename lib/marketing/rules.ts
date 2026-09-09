@@ -1,60 +1,483 @@
-export const channels = ["EMAIL", "SMS_MARKETING", "SMS_TRANSACTIONAL"] as const;
-export type Channel = typeof channels[number];
-export type Content = { heading: string; body: string; bodyHtml?: string; button: string; url: string; hero?: string; preview?: string; template?: "standard" | "b2b-wholesale"; logo?: string; logoScale?: number; footerImage?: string; footerScale?: number; /** @deprecated Older saved flows may still contain these pixel values. */ logoWidth?: number; logoHeight?: number; footerWidth?: number; footerHeight?: number; products?: { title: string; url: string; image?: string; price?: string }[] };
-export type MarketingOperations = { sendingEnabled: boolean; migrationConfirmed: boolean; ingestEnabled: boolean; formEnabled: boolean };
-export type MarketingSettings = { postalAddress: string; organizationName: string; operations: MarketingOperations };
-export const defaultMarketingSettings: MarketingSettings = { postalAddress: "", organizationName: "Corals Anonymous", operations: { sendingEnabled: false, migrationConfirmed: false, ingestEnabled: false, formEnabled: false } };
+import { FilterXSS } from "xss";
+import { decode } from "he";
+export const channels = [
+  "EMAIL",
+  "SMS_MARKETING",
+  "SMS_TRANSACTIONAL",
+] as const;
+export type Channel = (typeof channels)[number];
+export type Content = {
+  heading: string;
+  body: string;
+  bodyHtml?: string;
+  button: string;
+  url: string;
+  hero?: string;
+  preview?: string;
+  template?: "standard" | "b2b-wholesale";
+  logo?: string;
+  logoScale?: number;
+  footerImage?: string;
+  footerScale?: number;
+  /** @deprecated Older saved flows may still contain these pixel values. */ logoWidth?: number;
+  logoHeight?: number;
+  footerWidth?: number;
+  footerHeight?: number;
+  products?: { title: string; url: string; image?: string; price?: string }[];
+};
+export type MarketingOperations = {
+  sendingEnabled: boolean;
+  migrationConfirmed: boolean;
+  ingestEnabled: boolean;
+  formEnabled: boolean;
+};
+export type MarketingSettings = {
+  postalAddress: string;
+  organizationName: string;
+  operations: MarketingOperations;
+};
+export const defaultMarketingSettings: MarketingSettings = {
+  postalAddress: "",
+  organizationName: "Corals Anonymous",
+  operations: {
+    sendingEnabled: false,
+    migrationConfirmed: false,
+    ingestEnabled: false,
+    formEnabled: false,
+  },
+};
 const envFlag = (name: string) => process.env[name] === "true";
-export function marketingSettings(value: unknown, fallbackAddress = process.env.MARKETING_POSTAL_ADDRESS || defaultMarketingSettings.postalAddress): MarketingSettings {
-  const v = (value || {}) as Partial<MarketingSettings> & Partial<MarketingOperations>;
+export function marketingSettings(
+  value: unknown,
+  fallbackAddress = process.env.MARKETING_POSTAL_ADDRESS ||
+    defaultMarketingSettings.postalAddress,
+): MarketingSettings {
+  const v = (value || {}) as Partial<MarketingSettings> &
+    Partial<MarketingOperations>;
   const saved = (v.operations || {}) as Partial<MarketingOperations>;
-  return { postalAddress: String(v.postalAddress ?? fallbackAddress).slice(0, 500), organizationName: String(v.organizationName || defaultMarketingSettings.organizationName).slice(0, 120), operations: {
-    sendingEnabled: typeof saved.sendingEnabled === "boolean" ? saved.sendingEnabled : typeof v.sendingEnabled === "boolean" ? v.sendingEnabled : envFlag("MARKETING_SEND_ENABLED"),
-    migrationConfirmed: typeof saved.migrationConfirmed === "boolean" ? saved.migrationConfirmed : typeof v.migrationConfirmed === "boolean" ? v.migrationConfirmed : envFlag("MARKETING_MIGRATION_CONFIRMED"),
-    ingestEnabled: typeof saved.ingestEnabled === "boolean" ? saved.ingestEnabled : typeof v.ingestEnabled === "boolean" ? v.ingestEnabled : envFlag("MARKETING_INGEST_ENABLED"),
-    formEnabled: typeof saved.formEnabled === "boolean" ? saved.formEnabled : typeof v.formEnabled === "boolean" ? v.formEnabled : envFlag("MARKETING_FORM_ENABLED"),
-  } };
+  return {
+    postalAddress: String(v.postalAddress ?? fallbackAddress).slice(0, 500),
+    organizationName: String(
+      v.organizationName || defaultMarketingSettings.organizationName,
+    ).slice(0, 120),
+    operations: {
+      sendingEnabled:
+        typeof saved.sendingEnabled === "boolean"
+          ? saved.sendingEnabled
+          : typeof v.sendingEnabled === "boolean"
+            ? v.sendingEnabled
+            : envFlag("MARKETING_SEND_ENABLED"),
+      migrationConfirmed:
+        typeof saved.migrationConfirmed === "boolean"
+          ? saved.migrationConfirmed
+          : typeof v.migrationConfirmed === "boolean"
+            ? v.migrationConfirmed
+            : envFlag("MARKETING_MIGRATION_CONFIRMED"),
+      ingestEnabled:
+        typeof saved.ingestEnabled === "boolean"
+          ? saved.ingestEnabled
+          : typeof v.ingestEnabled === "boolean"
+            ? v.ingestEnabled
+            : envFlag("MARKETING_INGEST_ENABLED"),
+      formEnabled:
+        typeof saved.formEnabled === "boolean"
+          ? saved.formEnabled
+          : typeof v.formEnabled === "boolean"
+            ? v.formEnabled
+            : envFlag("MARKETING_FORM_ENABLED"),
+    },
+  };
 }
-export type Segment = { openedDays?: number; tag?: string; list?: string; purchasedDays?: number; excludePurchasedDays?: number };
+export type Segment = {
+  openedDays?: number;
+  tag?: string;
+  list?: string;
+  purchasedDays?: number;
+  excludePurchasedDays?: number;
+};
 export const DAY = 86400000;
-export function email(value: unknown) { const result = String(value || "").trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(result) || result.length > 254) throw new Error("Enter a valid email address."); return result; }
-export function phone(value: unknown) { const result = String(value || "").replace(/[ ()-]/g, ""); if (!/^\+[1-9]\d{7,14}$/.test(result)) throw new Error("Use an international phone number, such as +15551234567."); return result; }
-export function date(value: unknown) { const result = new Date(String(value)); if (!Number.isFinite(result.getTime())) throw new Error("Invalid date."); return result; }
-export function imageSource(value: unknown) { const result = String(value || ""); if (!result) return undefined; if (result.startsWith("data:image/")) { if (result.length > 5000000) throw new Error("Images must be smaller than 5 MB."); return result; } return safeUrl(result); }
-export function safeUrl(value: unknown) { const url = new URL(String(value)); if (url.protocol !== "https:" || url.username || url.password) throw new Error("Links and images must use HTTPS."); return url.href; }
-export function sanitizeEmailHtml(value: unknown) { return String(value || "").slice(0, 30000).replace(/<!--[\s\S]*?-->/g, "").replace(/<\s*(script|style|iframe|object|embed|form|input|meta|link|base|svg|math)\b[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, "").replace(/<\/?\s*(script|style|iframe|object|embed|form|input|meta|link|base|svg|math)[^>]*>/gi, "").replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "").replace(/\s(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (match, attr, raw) => { const link = String(raw).replace(/^["']|["']$/g, ""); return /^https?:\/\//i.test(link) ? ` ${attr}="${escapeHtml(link)}"` : ` ${attr}="#"`; }).replace(/<(?!\/?\s*(?:p|br|div|span|strong|b|em|i|u|a|ul|ol|li|h1|h2|h3)\b)[^>]*>/gi, ""); }
-export function content(value: unknown): Content {
-  if (!value || typeof value !== "object") throw new Error("Message content is required.");
-  const c = value as Content;
-  if (!c.heading?.trim() || !c.body?.trim() || c.body.length > 20000) throw new Error("Add a heading and message (up to 20,000 characters).");
-  const scale = (value: unknown, legacyWidth: unknown, base: number) => { const fallback = legacyWidth != null ? Number(legacyWidth) / base : 1; const n = Number(value); return Number.isFinite(n) ? Math.min(2.5, Math.max(0.25, Math.round(n * 10) / 10)) : Math.min(2.5, Math.max(0.25, Math.round(fallback * 10) / 10)); };
-  return { heading: c.heading.slice(0, 200), body: c.body, bodyHtml: c.bodyHtml ? sanitizeEmailHtml(c.bodyHtml) : undefined, button: String(c.button || "Shop now").slice(0, 80), url: safeUrl(c.url), hero: c.hero ? safeUrl(c.hero) : undefined, preview: String(c.preview || "").slice(0, 200), template: c.template === "b2b-wholesale" ? "b2b-wholesale" : "standard", logo: c.logo ? imageSource(c.logo) : undefined, logoScale: c.logo ? scale(c.logoScale, c.logoWidth, 260) : undefined, footerImage: c.footerImage ? imageSource(c.footerImage) : undefined, footerScale: c.footerImage ? scale(c.footerScale, c.footerWidth, 560) : undefined, products: (c.products || []).slice(0, 12).map(p => ({ title: String(p.title).slice(0, 200), url: safeUrl(p.url), image: p.image ? safeUrl(p.image) : undefined, price: String(p.price || "").slice(0, 80) })) };
+export function email(value: unknown) {
+  const result = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(result) || result.length > 254)
+    throw new Error("Enter a valid email address.");
+  return result;
 }
-export function segment(value: unknown): Segment { const s = (value || {}) as Segment; const result: Segment = {}; for (const key of ["openedDays", "purchasedDays", "excludePurchasedDays"] as const) { if (s[key] != null) { if (!Number.isInteger(s[key]) || s[key]! < 1 || s[key]! > 3650) throw new Error("Audience windows must be 1–3650 days."); result[key] = s[key]; } } if (s.tag) result.tag = String(s.tag).toLowerCase().slice(0, 100); if (s.list) result.list = String(s.list).slice(0, 100); return result; }
-export function eligible(consent: { status: string; suppressed: boolean } | null | undefined) { return consent?.status === "SUBSCRIBED" && !consent.suppressed; }
-export function matches(profile: { tags: string[]; lists: string[]; lastOpenedAt: Date | null; lastOrderAt: Date | null }, s: Segment, now = new Date()) { const recent = (d: Date | null, days: number) => !!d && d.getTime() >= now.getTime() - days * DAY && d <= now; return (!s.openedDays || recent(profile.lastOpenedAt, s.openedDays)) && (!s.tag || profile.tags.includes(s.tag)) && (!s.list || profile.lists.includes(s.list)) && (!s.purchasedDays || recent(profile.lastOrderAt, s.purchasedDays)) && (!s.excludePurchasedDays || !recent(profile.lastOrderAt, s.excludePurchasedDays)); }
-export function escapeHtml(value: string) { return value.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!)); }
-export function render(c: Content, unsubscribe: string, address: string, profileName?: string, organizationName = "Corals Anonymous") {
+export function phone(value: unknown) {
+  const result = String(value || "").replace(/[ ()-]/g, "");
+  if (!/^\+[1-9]\d{7,14}$/.test(result))
+    throw new Error("Use an international phone number, such as +15551234567.");
+  return result;
+}
+export function date(value: unknown) {
+  const result = new Date(String(value));
+  if (!Number.isFinite(result.getTime())) throw new Error("Invalid date.");
+  return result;
+}
+export function imageSource(value: unknown) {
+  const result = String(value || "");
+  if (!result) return undefined;
+  if (/^data:image\/(png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=]+$/.test(result)) {
+    if (result.length > 5000000)
+      throw new Error("Images must be smaller than 5 MB.");
+    return result;
+  }
+  return safeUrl(result);
+}
+export function safeUrl(value: unknown) {
+  const url = new URL(String(value));
+  if (url.protocol !== "https:" || url.username || url.password)
+    throw new Error("Links and images must use HTTPS.");
+  return url.href;
+}
+const emailHtmlFilter = new FilterXSS({
+  whiteList: {
+    p: ["style"],
+    br: [],
+    div: ["style"],
+    span: ["style"],
+    strong: ["style"],
+    b: [],
+    em: [],
+    i: [],
+    u: [],
+    a: ["href", "style"],
+    ul: ["style"],
+    ol: ["style"],
+    li: ["style"],
+    h1: ["style"],
+    h2: ["style"],
+    h3: ["style"],
+  },
+  stripIgnoreTag: true,
+  stripIgnoreTagBody: ["script", "style", "iframe", "object", "svg", "math"],
+  onTagAttr(_tag, name, value) {
+    if (name === "href") {
+      try {
+        return (
+          'href="' +
+          escapeHtml(safeUrl(decode(value, { isAttributeValue: true }))) +
+          '"'
+        );
+      } catch {
+        return 'href="#"';
+      }
+    }
+  },
+});
+export function sanitizeEmailHtml(value: unknown) {
+  return emailHtmlFilter.process(String(value || "").slice(0, 30000));
+}
+export function htmlText(html: string) {
+  return decode(
+    sanitizeEmailHtml(html)
+      .replace(
+        /<a\b[^>]*href="(https:[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
+        "$2 ($1)",
+      )
+      .replace(/<br\s*\/?>|<\/(?:p|div|h[123]|li)>/gi, "\n")
+      .replace(/<[^>]*>/g, ""),
+  ).trim();
+}
+export function personalize(value: string, name = "", html = false) {
+  const first = name.trim().split(/\s+/)[0];
+  return value.replace(
+    /\{\{\s*first_name\s*\|\s*default\s*:["']([^"']+)["']\s*\}\}/gi,
+    (_match, fallback: string) =>
+      html ? escapeHtml(first || fallback) : first || fallback,
+  );
+}
+export function textBody(c: Content, name = "") {
+  return personalize(c.bodyHtml?.trim() ? htmlText(c.bodyHtml) : c.body, name);
+}
+export function withCoupon(c: Content, code: string): Content {
+  const line = "Your first-order 10% discount code: " + code;
+  return {
+    ...c,
+    body: c.body + "\n" + line,
+    ...(c.bodyHtml
+      ? { bodyHtml: c.bodyHtml + "<p>" + escapeHtml(line) + "</p>" }
+      : {}),
+  };
+}
+function productHtml(c: Content) {
+  return (c.products || [])
+    .map(
+      (p) =>
+        '<div style="padding:18px 0;border-top:1px solid #ddd"><a href="' +
+        escapeHtml(p.url) +
+        '">' +
+        (p.image
+          ? '<img src="' +
+            escapeHtml(p.image) +
+            '" width="240" style="max-width:100%" alt="' +
+            escapeHtml(p.title) +
+            '"><br>'
+          : "") +
+        escapeHtml(p.title) +
+        "</a>" +
+        (p.price ? "<p>" + escapeHtml(p.price) + "</p>" : "") +
+        "</div>",
+    )
+    .join("");
+}
+export function content(value: unknown): Content {
+  if (!value || typeof value !== "object")
+    throw new Error("Message content is required.");
+  const c = value as Content;
+  if (!c.heading?.trim() || !c.body?.trim() || c.body.length > 20000)
+    throw new Error("Add a heading and message (up to 20,000 characters).");
+  const scale = (value: unknown, legacyWidth: unknown, base: number) => {
+    const fallback = legacyWidth != null ? Number(legacyWidth) / base : 1;
+    const n = Number(value);
+    return Number.isFinite(n)
+      ? Math.min(2.5, Math.max(0.25, Math.round(n * 10) / 10))
+      : Math.min(2.5, Math.max(0.25, Math.round(fallback * 10) / 10));
+  };
+  return {
+    heading: c.heading.slice(0, 200),
+    body: c.body,
+    bodyHtml: c.bodyHtml ? sanitizeEmailHtml(c.bodyHtml) : undefined,
+    button: String(c.button || "Shop now").slice(0, 80),
+    url: safeUrl(c.url),
+    hero: c.hero ? safeUrl(c.hero) : undefined,
+    preview: String(c.preview || "").slice(0, 200),
+    template: c.template === "b2b-wholesale" ? "b2b-wholesale" : "standard",
+    logo: c.logo ? imageSource(c.logo) : undefined,
+    logoScale: c.logo ? scale(c.logoScale, c.logoWidth, 260) : undefined,
+    footerImage: c.footerImage ? imageSource(c.footerImage) : undefined,
+    footerScale: c.footerImage
+      ? scale(c.footerScale, c.footerWidth, 560)
+      : undefined,
+    products: (c.products || [])
+      .slice(0, 12)
+      .map((p) => ({
+        title: String(p.title).slice(0, 200),
+        url: safeUrl(p.url),
+        image: p.image ? safeUrl(p.image) : undefined,
+        price: String(p.price || "").slice(0, 80),
+      })),
+  };
+}
+export function segment(value: unknown): Segment {
+  const s = (value || {}) as Segment;
+  const result: Segment = {};
+  for (const key of [
+    "openedDays",
+    "purchasedDays",
+    "excludePurchasedDays",
+  ] as const) {
+    if (s[key] != null) {
+      if (!Number.isInteger(s[key]) || s[key]! < 1 || s[key]! > 3650)
+        throw new Error("Audience windows must be 1–3650 days.");
+      result[key] = s[key];
+    }
+  }
+  if (s.tag) result.tag = String(s.tag).toLowerCase().slice(0, 100);
+  if (s.list) result.list = String(s.list).slice(0, 100);
+  return result;
+}
+export function eligible(
+  consent: { status: string; suppressed: boolean } | null | undefined,
+) {
+  return consent?.status === "SUBSCRIBED" && !consent.suppressed;
+}
+export function matches(
+  profile: {
+    tags: string[];
+    lists: string[];
+    lastOpenedAt: Date | null;
+    lastOrderAt: Date | null;
+  },
+  s: Segment,
+  now = new Date(),
+) {
+  const recent = (d: Date | null, days: number) =>
+    !!d && d.getTime() >= now.getTime() - days * DAY && d <= now;
+  return (
+    (!s.openedDays || recent(profile.lastOpenedAt, s.openedDays)) &&
+    (!s.tag || profile.tags.includes(s.tag)) &&
+    (!s.list || profile.lists.includes(s.list)) &&
+    (!s.purchasedDays || recent(profile.lastOrderAt, s.purchasedDays)) &&
+    (!s.excludePurchasedDays ||
+      !recent(profile.lastOrderAt, s.excludePurchasedDays))
+  );
+}
+export function escapeHtml(value: string) {
+  return value.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ]!,
+  );
+}
+export function render(
+  c: Content,
+  unsubscribe: string,
+  address: string,
+  profileName?: string,
+  organizationName = "Corals Anonymous",
+) {
+  c = content(c);
   const e = escapeHtml;
   if (c.template === "b2b-wholesale") {
-    const lines = c.body.split(String.fromCharCode(10)); const first = String(profileName || "").trim().split(/\s+/)[0] || "Friend";
-    const greeting = (lines[0] || 'Hi {{ first_name|default:"Friend!" }}!').replace(/\{\{\s*first_name\s*\|\s*default\s*:["']([^"']+)["']\s*\}\}/gi, first).replace(/first_name\s*\|\s*default\s*:["']([^"']+)["']/gi, first);
-    const plainBody = e(lines.slice(2).join(String.fromCharCode(10))).replace(/50-80%/g, '<span style="color:#f05a28">50-80%</span>').replace(/\bhomepage\b/gi, '<a style="color:#1f5f9e" href="' + e(c.url) + '">homepage</a>');
-    const bodyHtml = c.bodyHtml?.trim() ? c.bodyHtml.replace(/\{\{\s*first_name\s*\|\s*default\s*:["']([^"']+)["']\s*\}\}/gi, first).replace(/first_name\s*\|\s*default\s*:["']([^"']+)["']/gi, first) : plainBody;
-    const customBody = !!c.bodyHtml?.trim() && (/<h1\b/i.test(c.bodyHtml) || /first_name\s*\|\s*default/i.test(c.bodyHtml));
-    const logoScale = Math.min(2.5, Math.max(0.25, Number(c.logoScale ?? (c.logoWidth ? c.logoWidth / 260 : 1)) || 1));
-    const footerScale = Math.min(2.5, Math.max(0.25, Number(c.footerScale ?? (c.footerWidth ? c.footerWidth / 560 : 1)) || 1));
-    const logo = c.logo ? '<img src="' + e(c.logo) + '" alt="Corals Anonymous" style="max-width:100%;width:' + String(Math.round(260 * logoScale)) + 'px;height:auto">' : '<div style="display:inline-block;padding:18px 26px;border:1px dashed #9aa8bb;color:#68778d;font-size:13px">Upload Corals Anonymous logo</div>';
-    const footer = c.footerImage ? '<img src="' + e(c.footerImage) + '" alt="Thank you for your business" style="display:block;margin:0 auto;max-width:100%;width:' + String(Math.round(560 * footerScale)) + 'px;height:auto;object-fit:contain">' : '<div style="font-size:29px;font-style:italic;font-weight:bold;color:white">Thank you for your business</div>';
-    return '<!doctype html><html><body style="margin:0;background:#07143a;font-family:Arial,sans-serif;color:#101820"><table role="presentation" width="100%"><tr><td align="center" style="padding:14px"><table role="presentation" width="600" style="max-width:100%;background:white"><tr><td style="padding:12px 28px 18px;text-align:center">' + logo + '<hr style="border:0;border-top:1px solid #c9c9c9;margin:14px 0 0"></td></tr><tr><td style="padding:36px 52px 24px;font-size:13px;line-height:1.55">' + (customBody ? bodyHtml : '<h1 style="text-align:center;font-size:27px;line-height:1.15;margin:0 0 45px">' + e(c.heading) + '</h1><p style="text-align:center;font-weight:bold;font-size:16px">' + e(greeting) + '</p><div style="font-size:13px;line-height:1.55">' + bodyHtml + '</div>') + '</td></tr><tr><td style="padding:0 15px 8px;text-align:center"><a style="display:block;background:#ee984e;color:white;text-decoration:none;padding:13px 18px;font-weight:bold;font-size:16px" href="' + e(c.url) + '">' + e(c.button) + '</a></td></tr><tr><td style="padding:12px 18px 30px;background:#244b7b;text-align:center">' + footer + '<p style="margin:18px 0 0;color:#9fb5d2;font-size:11px">' + e(organizationName) + '</p><p style="margin:5px 0 0;color:#9fb5d2;font-size:11px">No longer want to receive these emails? <a style="color:#f0a064" href="' + e(unsubscribe) + '">Unsubscribe</a></p><p style="margin:5px 0 0;color:#819bbd;font-size:10px">' + (address ? e(address) : '') + '</p></td></tr></table></td></tr></table></body></html>';
+    const lines = c.body.split(String.fromCharCode(10));
+    const greeting = personalize(
+      lines[0] || 'Hi {{ first_name|default:"Friend" }}!',
+      profileName,
+    );
+    const plainBody = e(lines.slice(2).join(String.fromCharCode(10)))
+      .replace(/\n/g, "<br>")
+      .replace(/50-80%/g, '<span style="color:#f05a28">50-80%</span>')
+      .replace(
+        /\bhomepage\b/gi,
+        '<a style="color:#1f5f9e" href="' + e(c.url) + '">homepage</a>',
+      );
+    const bodyHtml = c.bodyHtml?.trim()
+      ? personalize(c.bodyHtml, profileName, true)
+      : plainBody;
+    const customBody =
+      !!c.bodyHtml?.trim() &&
+      (/<h1\b/i.test(c.bodyHtml) ||
+        /first_name\s*\|\s*default/i.test(c.bodyHtml));
+    const logoScale = Math.min(
+      2.5,
+      Math.max(
+        0.25,
+        Number(c.logoScale ?? (c.logoWidth ? c.logoWidth / 260 : 1)) || 1,
+      ),
+    );
+    const footerScale = Math.min(
+      2.5,
+      Math.max(
+        0.25,
+        Number(c.footerScale ?? (c.footerWidth ? c.footerWidth / 560 : 1)) || 1,
+      ),
+    );
+    const logo = c.logo
+      ? '<img src="' +
+        e(c.logo) +
+        '" alt="Corals Anonymous" style="max-width:100%;width:' +
+        String(Math.round(260 * logoScale)) +
+        'px;height:auto">'
+      : '<div style="display:inline-block;padding:18px 26px;border:1px dashed #9aa8bb;color:#68778d;font-size:13px">Upload Corals Anonymous logo</div>';
+    const footer = c.footerImage
+      ? '<img src="' +
+        e(c.footerImage) +
+        '" alt="Thank you for your business" style="display:block;margin:0 auto;max-width:100%;width:' +
+        String(Math.round(560 * footerScale)) +
+        'px;height:auto;object-fit:contain">'
+      : '<div style="font-size:29px;font-style:italic;font-weight:bold;color:white">Thank you for your business</div>';
+    return (
+      '<!doctype html><html><body style="margin:0;background:#07143a;font-family:Arial,sans-serif;color:#101820"><table role="presentation" width="100%"><tr><td align="center" style="padding:14px"><table role="presentation" width="600" style="max-width:100%;background:white"><tr><td style="padding:12px 28px 18px;text-align:center">' +
+      logo +
+      '<hr style="border:0;border-top:1px solid #c9c9c9;margin:14px 0 0"></td></tr><tr><td style="padding:36px 52px 24px;font-size:13px;line-height:1.55">' +
+      (customBody
+        ? bodyHtml
+        : '<h1 style="text-align:center;font-size:27px;line-height:1.15;margin:0 0 45px">' +
+          e(c.heading) +
+          '</h1><p style="text-align:center;font-weight:bold;font-size:16px">' +
+          e(greeting) +
+          '</p><div style="font-size:13px;line-height:1.55">' +
+          bodyHtml +
+          "</div>") +
+      productHtml(c) +
+      '</td></tr><tr><td style="padding:0 15px 8px;text-align:center"><a style="display:block;background:#ee984e;color:white;text-decoration:none;padding:13px 18px;font-weight:bold;font-size:16px" href="' +
+      e(c.url) +
+      '">' +
+      e(c.button) +
+      '</a></td></tr><tr><td style="padding:12px 18px 30px;background:#244b7b;text-align:center">' +
+      footer +
+      '<p style="margin:18px 0 0;color:#9fb5d2;font-size:11px">' +
+      e(organizationName) +
+      '</p><p style="margin:5px 0 0;color:#9fb5d2;font-size:11px">No longer want to receive these emails? <a style="color:#f0a064" href="' +
+      e(unsubscribe) +
+      '">Unsubscribe</a></p><p style="margin:5px 0 0;color:#819bbd;font-size:10px">' +
+      (address ? e(address) : "") +
+      "</p></td></tr></table></td></tr></table></body></html>"
+    );
   }
-  return '<!doctype html><html><body style="margin:0;background:#eef5f4;font-family:Arial,sans-serif;color:#123334"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="600" style="max-width:100%;background:white"><tr><td style="padding:28px;text-align:center;background:#083b3b;color:white;font-size:25px;font-weight:bold">CORALS ANONYMOUS</td></tr><tr><td style="display:none">' + e(c.preview || "") + '</td></tr>' + (c.hero ? '<tr><td><a href="' + e(c.url) + '"><img src="' + e(c.hero) + '" alt="' + e(c.heading) + '" width="600" style="max-width:100%"></a></td></tr>' : "") + '<tr><td style="padding:28px"><h1>' + e(c.heading) + '</h1><div style="line-height:1.7">' + (c.bodyHtml?.trim() ? c.bodyHtml : e(c.body)) + '</div><p><a style="display:inline-block;background:#087f78;padding:16px 24px;color:white" href="' + e(c.url) + '">' + e(c.button) + '</a></p></td></tr><tr><td style="padding:24px;font-size:12px;text-align:center">' + e(organizationName) + '<br>' + e(address) + '<br><a href="' + e(unsubscribe) + '">Unsubscribe from email marketing</a></td></tr></table></td></tr></table></body></html>';
+  return (
+    '<!doctype html><html><body style="margin:0;background:#eef5f4;font-family:Arial,sans-serif;color:#123334"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="600" style="max-width:100%;background:white"><tr><td style="padding:28px;text-align:center;background:#083b3b;color:white;font-size:25px;font-weight:bold">CORALS ANONYMOUS</td></tr><tr><td style="display:none">' +
+    e(c.preview || "") +
+    "</td></tr>" +
+    (c.hero
+      ? '<tr><td><a href="' +
+        e(c.url) +
+        '"><img src="' +
+        e(c.hero) +
+        '" alt="' +
+        e(c.heading) +
+        '" width="600" style="max-width:100%"></a></td></tr>'
+      : "") +
+    '<tr><td style="padding:28px"><h1>' +
+    e(c.heading) +
+    '</h1><div style="line-height:1.7">' +
+    (c.bodyHtml?.trim()
+      ? personalize(c.bodyHtml, profileName, true)
+      : e(personalize(c.body, profileName)).replace(/\n/g, "<br>")) +
+    productHtml(c) +
+    '</div><p><a style="display:inline-block;background:#087f78;padding:16px 24px;color:white" href="' +
+    e(c.url) +
+    '">' +
+    e(c.button) +
+    '</a></p></td></tr><tr><td style="padding:24px;font-size:12px;text-align:center">' +
+    e(organizationName) +
+    "<br>" +
+    e(address) +
+    '<br><a href="' +
+    e(unsubscribe) +
+    '">Unsubscribe from email marketing</a></td></tr></table></td></tr></table></body></html>'
+  );
 }
-export const defaultContent: Content = { heading: "Discover your next reef favorite", body: "Explore the latest arrivals at Corals Anonymous.", button: "Shop now", url: "https://coralsanonymous.com", preview: "Fresh arrivals for your reef." };
+export const defaultContent: Content = {
+  heading: "Discover your next reef favorite",
+  body: "Explore the latest arrivals at Corals Anonymous.",
+  button: "Shop now",
+  url: "https://coralsanonymous.com",
+  preview: "Fresh arrivals for your reef.",
+};
 export const flowDefaults = [
-  { key: "delivery-upsell", name: "24 Hour Notice | Upsell", trigger: "DELIVERY_SCHEDULED", description: "Schedule 24 hours before a trusted expected-delivery timestamp. Requires delivery-source mapping.", delays: [0] },
-  { key: "abandoned-cart", name: "Abandoned Cart", trigger: "CHECKOUT_STARTED", description: "Email sequence with purchase checks before every message; SMS branch at 30 minutes when eligible. Review email delays and copy.", delays: [180, 1440] },
-  { key: "b2b-welcome", name: "B2B Welcoming Email", trigger: "B2B_ENTERED", description: "Once per profile on entering Shopify tag b2b. Existing imports do not enroll.", delays: [0] },
-  { key: "low-stock", name: "Low Stock Alert: T5", trigger: "LOW_STOCK", description: "Internal SMS for configured recipients when existing inventory state crosses threshold. Confirm threshold and recipients.", delays: [0] },
-  { key: "welcome", name: "Welcome Series 08.2025", trigger: "EMAIL_SUBSCRIBED", description: "Once per profile after new email signup; configured first-order coupon in the first message. Review subsequent delays and copy.", delays: [0, 1440, 4320] },
+  {
+    key: "delivery-upsell",
+    name: "24 Hour Notice | Upsell",
+    trigger: "DELIVERY_SCHEDULED",
+    description:
+      "Schedule 24 hours before a trusted expected-delivery timestamp. Requires delivery-source mapping.",
+    delays: [0],
+  },
+  {
+    key: "abandoned-cart",
+    name: "Abandoned Cart",
+    trigger: "CHECKOUT_STARTED",
+    description:
+      "Email sequence with purchase checks before every message; SMS branch at 30 minutes when eligible. Review email delays and copy.",
+    delays: [180, 1440],
+  },
+  {
+    key: "b2b-welcome",
+    name: "B2B Welcoming Email",
+    trigger: "B2B_ENTERED",
+    description:
+      "Once per profile on entering Shopify tag b2b. Existing imports do not enroll.",
+    delays: [0],
+  },
+  {
+    key: "low-stock",
+    name: "Low Stock Alert: T5",
+    trigger: "LOW_STOCK",
+    description:
+      "Internal SMS for configured recipients when existing inventory state crosses threshold. Confirm threshold and recipients.",
+    delays: [0],
+  },
+  {
+    key: "welcome",
+    name: "Welcome Series 08.2025",
+    trigger: "EMAIL_SUBSCRIBED",
+    description:
+      "Once per profile after new email signup; configured first-order coupon in the first message. Review subsequent delays and copy.",
+    delays: [0, 1440, 4320],
+  },
 ] as const;

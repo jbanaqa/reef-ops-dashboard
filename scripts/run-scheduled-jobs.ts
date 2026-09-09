@@ -33,12 +33,12 @@ function run(command: string, args: string[]) {
 }
 
 async function main() {
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  const runner = "node_modules/tsx/dist/cli.mjs";
   const failures: Error[] = [];
 
   console.log("[scheduled] Running marketing worker.");
   try {
-    await run(npmCommand, ["run", "marketing:scheduled"]);
+    await run(process.execPath, [runner, "scripts/run-marketing.ts"]);
   } catch (error) {
     const failure =
       error instanceof Error ? error : new Error(String(error));
@@ -48,7 +48,7 @@ async function main() {
 
   console.log("[scheduled] Running collection rotation scheduler.");
   try {
-    await run(npmCommand, ["run", "collection-rotation:scheduled"]);
+    await run(process.execPath, [runner, "scripts/run-collection-rotations.ts"]);
   } catch (error) {
     const failure =
       error instanceof Error ? error : new Error(String(error));
