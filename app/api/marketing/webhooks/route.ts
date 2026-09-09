@@ -21,6 +21,8 @@ export async function POST(request: Request) {
         "customer.tags_removed",
         "customers/tags_added",
         "customers/tags_removed",
+        "customers_email_marketing_consent/update",
+        "customers_marketing_consent/update",
         "orders/create",
         "checkouts/create",
       ];

@@ -4,11 +4,15 @@ import { atomic, consent, identify, json, record, shop, Tx } from "./store";
 import { date, DAY } from "./rules";
 import { enroll } from "./flows";
 
-type Customer = { id?: string | number; email?: string; phone?: string; first_name?: string; last_name?: string; tags?: string | string[]; updated_at?: string; email_marketing_consent?: { state: string; consent_updated_at?: string }; sms_marketing_consent?: { state: string; consent_updated_at?: string } };
-type Payload = Customer & { customer?: Customer; customerId?: string | number; customer_id?: string | number; occurredAt?: string; created_at?: string; total_price?: string; currency?: string; test?: boolean; order_id?: string | number; expected_delivery_at?: string; abandoned_checkout_url?: string; financial_status?: string; checkout_token?: string; token?: string };
+type Customer = { id?: string | number; email?: string; phone?: string; first_name?: string; last_name?: string; tags?: string | string[]; updated_at?: string; email_marketing_consent?: { state: string | null; consent_updated_at?: string | null }; sms_marketing_consent?: { state: string | null; consent_updated_at?: string | null } };
+type Payload = Customer & { customer?: Customer; customerId?: string | number; customer_id?: string | number; email_address?: string; occurredAt?: string; created_at?: string; total_price?: string; currency?: string; test?: boolean; order_id?: string | number; expected_delivery_at?: string; abandoned_checkout_url?: string; financial_status?: string; checkout_token?: string; token?: string };
 
 function isCustomerTagTopic(topic: string) {
   return ["customer.tags_added", "customer.tags_removed", "customers/tags_added", "customers/tags_removed"].includes(topic);
+}
+
+function isCustomerConsentTopic(topic: string) {
+  return ["customers_email_marketing_consent/update", "customers_marketing_consent/update"].includes(topic);
 }
 
 function customerIdFromTagPayload(p: Payload) {
@@ -99,9 +103,10 @@ export async function ingestShopify(topic: string, key: string, p: Payload, hist
   return atomic(async tx => {
     if (await tx.marketingEvent.findUnique({ where: { shop_key: { shop: shop(), key } } })) return { duplicate: true };
     const tagTopic = isCustomerTagTopic(topic);
-    const c = tagTopic ? p : topic.startsWith("customers/") ? p : p.customer || {};
+    const consentTopic = isCustomerConsentTopic(topic);
+    const c = tagTopic ? p : consentTopic ? { ...p, id: p.customer_id || p.id, email: p.email_address || p.email } : topic.startsWith("customers/") ? p : p.customer || {};
     const profile = await identify(tx, { email: c.email || p.email, phone: c.phone || p.phone, shopifyId: c.id ? String(c.id) : undefined, name: [c.first_name, c.last_name].filter(Boolean).join(" ") });
-    const at = date(p.updated_at || p.created_at || p.occurredAt || new Date().toISOString());
+    const at = date(p.updated_at || p.created_at || p.occurredAt || p.email_marketing_consent?.consent_updated_at || p.sms_marketing_consent?.consent_updated_at || new Date().toISOString());
     if (at > new Date(Date.now() + 300000)) throw new Error("Future event timestamp rejected.");
     await record(tx, { key, type: topic, profileId: profile.id, occurredAt: at, payload: p });
     if (topic.startsWith("customers/") || tagTopic) {
