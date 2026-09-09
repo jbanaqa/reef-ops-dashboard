@@ -32,3 +32,5 @@ Outstanding before sign-off: real sender domain/authentication, current customer
 ### Manual Shopify event processing
 
 In Our Klaviyo → Settings → Delivery health, use **Process Shopify events now** to process up to 100 due inbox events without waiting for the scheduler. The action requires dashboard authentication and enabled ingestion. It refreshes profiles, consent, and flow enrollment but does not invoke email or SMS delivery. Keep general sending disabled during enrollment testing because the scheduled worker remains independent. The result reports completed and unresolved events; failed events and delayed retries still require the existing retry controls after resolving their cause. This processes received events, not a historical Shopify customer import.
+
+In the redesigned Audiences tab, open a contact and use **Overview** to check subscription and tags, **Messages** to check the welcome status, and **Activity** to confirm the tag event. The panel opens beside the list and can be refreshed independently.

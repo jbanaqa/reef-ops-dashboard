@@ -785,46 +785,175 @@ test("internal preview sends do not advertise a real unsubscribe subscription", 
   assert.match(await info.text(), /No subscription was changed/);
 });
 
-
 test("manual inbox action requires login, respects ingestion switch, and never sends", async () => {
   const api = await import("../app/api/marketing/route");
   process.env.DASHBOARD_USERNAME = "staff";
   process.env.DASHBOARD_PASSWORD = "test-password";
-  const request = (authorized = true) => new Request("https://app.example/api/marketing", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      origin: "https://app.example",
-      ...(authorized ? { authorization: "Basic " + Buffer.from("staff:test-password").toString("base64") } : {}),
-    },
-    body: JSON.stringify({ action: "process-inbox" }),
-  });
+  const request = (authorized = true) =>
+    new Request("https://app.example/api/marketing", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://app.example",
+        ...(authorized
+          ? {
+              authorization:
+                "Basic " +
+                Buffer.from("staff:test-password").toString("base64"),
+            }
+          : {}),
+      },
+      body: JSON.stringify({ action: "process-inbox" }),
+    });
   const previousIngest = process.env.MARKETING_INGEST_ENABLED;
   const beforeSent = sent.length;
-  customer = { ...customer, id: "gid://shopify/Customer/990", legacyResourceId: "990", email: "manual@example.com", tags: [], emailMarketingConsent: { marketingState: "SUBSCRIBED", consentUpdatedAt: new Date().toISOString() } };
+  customer = {
+    ...customer,
+    id: "gid://shopify/Customer/990",
+    legacyResourceId: "990",
+    email: "manual@example.com",
+    tags: [],
+    emailMarketingConsent: {
+      marketingState: "SUBSCRIBED",
+      consentUpdatedAt: new Date().toISOString(),
+    },
+  };
   await inbox.queueShopify("customer.tags_removed", "manual-remove-990", {
-    customerId: customer.id, tags: ["b2b"], occurredAt: new Date().toISOString(),
+    customerId: customer.id,
+    tags: ["b2b"],
+    occurredAt: new Date().toISOString(),
   });
   try {
     assert.equal((await api.POST(request(false))).status, 401);
     process.env.MARKETING_INGEST_ENABLED = "false";
     assert.equal((await api.POST(request())).status, 409);
-    assert.equal(await prisma.marketingProfile.count({ where: { shop, shopifyId: "990" } }), 0);
+    assert.equal(
+      await prisma.marketingProfile.count({
+        where: { shop, shopifyId: "990" },
+      }),
+      0,
+    );
     process.env.MARKETING_INGEST_ENABLED = "true";
     const response = await api.POST(request());
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.ok(result.processed >= 1);
     assert.equal(typeof result.unresolved, "number");
-    const profile = await prisma.marketingProfile.findUniqueOrThrow({ where: { shop_shopifyId: { shop, shopifyId: "990" } }, include: { consents: true } });
+    const profile = await prisma.marketingProfile.findUniqueOrThrow({
+      where: { shop_shopifyId: { shop, shopifyId: "990" } },
+      include: { consents: true },
+    });
     assert.equal(profile.email, "manual@example.com");
     assert.deepEqual(profile.tags, []);
-    assert.ok(profile.consents.some(c => c.channel === "EMAIL" && c.status === "SUBSCRIBED"));
+    assert.ok(
+      profile.consents.some(
+        (c) => c.channel === "EMAIL" && c.status === "SUBSCRIBED",
+      ),
+    );
     assert.equal(sent.length, beforeSent);
     assert.equal((await api.POST(request())).status, 200);
     assert.equal(sent.length, beforeSent);
   } finally {
-    if (previousIngest === undefined) delete process.env.MARKETING_INGEST_ENABLED;
+    if (previousIngest === undefined)
+      delete process.env.MARKETING_INGEST_ENABLED;
     else process.env.MARKETING_INGEST_ENABLED = previousIngest;
   }
+});
+
+test("audience directory searches all contacts, pages without duplicates, and applies consent to saved groups", async () => {
+  const { audienceDirectory } = await import("../lib/marketing/audiences");
+  await prisma.marketingProfile.createMany({
+    data: Array.from({ length: 30 }, (_, i) => ({
+      id: "audience-test-" + String(i).padStart(2, "0"),
+      shop,
+      name: "Directory Fixture " + i,
+      email: "directory-" + i + "@example.com",
+      tags: i % 2 ? [] : ["b2b"],
+      createdAt: new Date(1700000000000 + i * 1000),
+    })),
+  });
+  await prisma.marketingConsent.createMany({
+    data: Array.from({ length: 29 }, (_, i) => ({
+      profileId: "audience-test-" + String(i).padStart(2, "0"),
+      channel: "EMAIL",
+      status: i === 0 ? "UNSUBSCRIBED" : "SUBSCRIBED",
+      suppressed: i === 0 || i === 2,
+      source: "test",
+      occurredAt: new Date(),
+    })),
+  });
+  const url = (extra = "") =>
+    new URL(
+      "https://app.example/api/marketing?view=audience&q=Directory%20Fixture" +
+        extra,
+    );
+  const first = await audienceDirectory(url());
+  assert.equal(first.total, 30);
+  assert.equal(first.profiles.length, 25);
+  assert.ok(first.nextCursor);
+  const second = await audienceDirectory(url("&cursor=" + first.nextCursor));
+  assert.equal(second.profiles.length, 5);
+  assert.equal(second.nextCursor, null);
+  assert.equal(
+    new Set([...first.profiles, ...second.profiles].map((p) => p.id)).size,
+    30,
+  );
+  const subscribers = await audienceDirectory(url("&status=subscribed"));
+  assert.equal(subscribers.total, 27);
+  assert.equal((await audienceDirectory(url("&status=blocked"))).total, 2);
+  assert.equal((await audienceDirectory(url("&status=unsubscribed"))).total, 1);
+  assert.equal(
+    (await audienceDirectory(url("&status=not-subscribed"))).total,
+    1,
+  );
+  assert.equal((await audienceDirectory(url("&b2b=true"))).total, 15);
+  const b2b = await audienceDirectory(url("&group=b2b"));
+  assert.equal(b2b.total, 13);
+  assert.ok(
+    b2b.profiles.every(
+      (p) =>
+        p.tags.includes("b2b") &&
+        p.consents.some(
+          (c) =>
+            c.channel === "EMAIL" && c.status === "SUBSCRIBED" && !c.suppressed,
+        ),
+    ),
+  );
+  await assert.rejects(
+    () => audienceDirectory(url("&group=missing")),
+    /no longer available/,
+  );
+  await assert.rejects(
+    () => audienceDirectory(url("&status=invalid")),
+    /valid email status/,
+  );
+  assert.equal(
+    (
+      await audienceDirectory(
+        new URL(
+          "https://app.example/api/marketing?view=audience&q=directory-28@example.com",
+        ),
+      )
+    ).total,
+    1,
+  );
+});
+
+test("contact panel exposes readable history without delivery tokens or email artwork", async () => {
+  const { contactDetails } = await import("../lib/marketing/audiences");
+  const profile = await prisma.marketingProfile.findFirstOrThrow({
+    where: { shop, shopifyId: "10" },
+  });
+  const detail = await contactDetails(profile.id);
+  assert.ok(detail);
+  assert.ok(detail.messages.length);
+  assert.ok(detail.messages.every((m) => !("token" in m) && !("content" in m)));
+  assert.ok(
+    detail.events.every((e) =>
+      Object.keys(e.payload).every((k) =>
+        ["channel", "status", "ignored", "tags"].includes(k),
+      ),
+    ),
+  );
+  assert.equal(await contactDetails("nonexistent-contact"), null);
 });

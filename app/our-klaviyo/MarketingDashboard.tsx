@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import FlowEditor from "./FlowEditor";
+import AudienceWorkspace from "./AudienceWorkspace";
+import "./audiences.css";
 import {
   Content,
   defaultContent,
@@ -84,9 +86,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
-  const [query, setQuery] = useState(""),
-    [cursor, setCursor] = useState(""),
-    [profile, setProfile] = useState<unknown>(null);
+
   const [campaign, setCampaign] = useState<{
     id?: string;
     name: string;
@@ -113,20 +113,14 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     ),
     [shopifyWebhookResult, setShopifyWebhookResult] = useState<unknown>(null);
   const load = useCallback(async () => {
-    const r = await fetch(
-      `/api/marketing?q=${encodeURIComponent(query)}&cursor=${encodeURIComponent(cursor)}`,
-      { cache: "no-store" },
-    );
+    const r = await fetch("/api/marketing", { cache: "no-store" });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     setData(d);
-  }, [query, cursor]);
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
-    fetch(
-      `/api/marketing?q=${encodeURIComponent(query)}&cursor=${encodeURIComponent(cursor)}`,
-      { cache: "no-store", signal: controller.signal },
-    )
+    fetch("/api/marketing", { cache: "no-store", signal: controller.signal })
       .then(async (r) => {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
@@ -140,7 +134,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, [query, cursor]);
+  }, []);
   async function run<T>(
     fn: () => Promise<T>,
     message: string | ((result: T) => string) = "Saved",
@@ -650,169 +644,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
             </div>
           )}
           {tab === "audiences" && (
-            <>
-              <article className="mk-panel">
-                <h2>Profiles and channel consent</h2>
-                <label>
-                  Search by name or email
-                  <input
-                    value={query}
-                    onChange={(e) => {
-                      setQuery(e.target.value);
-                      setCursor("");
-                    }}
-                  />
-                </label>
-                <div className="mk-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Profile</th>
-                        <th>Consent</th>
-                        <th>Lists / tags</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.profiles.map((p) => (
-                        <tr key={p.id}>
-                          <td>
-                            {p.name || p.email || p.phone}
-                            <small>
-                              {p.email}
-                              <br />
-                              {p.phone}
-                            </small>
-                          </td>
-                          <td>
-                            {p.consents.map((c) => (
-                              <small key={c.channel}>
-                                {c.channel}:{" "}
-                                {c.suppressed ? "SUPPRESSED" : c.status}
-                              </small>
-                            ))}
-                          </td>
-                          <td>{[...p.lists, ...p.tags].join(", ")}</td>
-                          <td>
-                            <button
-                              onClick={async () => {
-                                setBusy(true);
-                                setError("");
-                                setNotice("");
-                                try {
-                                  const r = await fetch(
-                                    `/api/marketing?view=profile&id=${p.id}`,
-                                  );
-                                  const result = await r.json();
-                                  if (!r.ok)
-                                    throw new Error(
-                                      result.error ||
-                                        "Profile history is unavailable.",
-                                    );
-                                  setProfile(
-                                    result.profile || { notFound: true },
-                                  );
-                                  setNotice("Profile loaded");
-                                } catch (e) {
-                                  setError(
-                                    e instanceof Error
-                                      ? e.message
-                                      : "Profile history is unavailable.",
-                                  );
-                                } finally {
-                                  setBusy(false);
-                                }
-                              }}
-                            >
-                              View history
-                            </button>
-                            <button
-                              disabled={busy}
-                              onClick={() =>
-                                run(
-                                  () =>
-                                    action({
-                                      action: "suppress",
-                                      id: p.id,
-                                      channel: "EMAIL",
-                                    }),
-                                  "Email suppressed",
-                                )
-                              }
-                            >
-                              Suppress email
-                            </button>
-                            <button
-                              disabled={busy}
-                              onClick={() =>
-                                run(
-                                  () =>
-                                    action({
-                                      action: "suppress",
-                                      id: p.id,
-                                      channel: "SMS_MARKETING",
-                                    }),
-                                  "SMS suppressed",
-                                )
-                              }
-                            >
-                              Suppress SMS
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="mk-actions">
-                  <button onClick={() => setCursor("")}>First page</button>
-                  {data.nextCursor && (
-                    <button onClick={() => setCursor(data.nextCursor!)}>
-                      Next 100
-                    </button>
-                  )}
-                </div>
-              </article>
-              {profile !== null && (
-                <article className="mk-panel">
-                  <h2>Profile history</h2>
-                  <button onClick={() => setProfile(null)}>Close</button>
-                  {(profile as { notFound?: boolean })?.notFound ? (
-                    <p>Profile not found in the marketing database.</p>
-                  ) : (
-                    <pre>{JSON.stringify(profile, null, 2)}</pre>
-                  )}
-                </article>
-              )}
-              <article className="mk-panel">
-                <h2>Dynamic audiences</h2>
-                <p>
-                  Every audience also requires current channel consent and no
-                  suppression. Static lists are assigned through imports.
-                </p>
-                {data.resources
-                  .filter((r) => r.kind === "SEGMENT")
-                  .map((r) => (
-                    <div className="mk-row" key={r.id}>
-                      <strong>{r.name}</strong>
-                      <p>{JSON.stringify(r.data)}</p>
-                    </div>
-                  ))}
-                <AudienceForm
-                  busy={busy}
-                  save={(name, data) =>
-                    run(() =>
-                      action({
-                        action: "save-resource",
-                        kind: "SEGMENT",
-                        name,
-                        data,
-                      }),
-                    )
-                  }
-                />
-              </article>
-            </>
+            <AudienceWorkspace sendingEnabled={!!data.setup.sendingEnabled} />
           )}
           {tab === "flows" && (
             <>
@@ -992,9 +824,10 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                 <article className="mk-panel">
                   <h2>Delivery health</h2>
                   <p>
-                    Process up to 100 received Shopify events now to update profiles,
-                    consent, and flow enrollment. This action does not send emails
-                    or SMS. Keep sending disabled while testing enrollment.
+                    Process up to 100 received Shopify events now to update
+                    profiles, consent, and flow enrollment. This action does not
+                    send emails or SMS. Keep sending disabled while testing
+                    enrollment.
                   </p>
                   <button
                     disabled={busy || !data.setup.ingestEnabled}
@@ -1009,7 +842,10 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                     {busy ? "Please wait…" : "Process Shopify events now"}
                   </button>
                   {!data.setup.ingestEnabled && (
-                    <p>Enable and save Shopify ingestion below to run this action.</p>
+                    <p>
+                      Enable and save Shopify ingestion below to run this
+                      action.
+                    </p>
                   )}
                   <p>
                     {data.health.unresolved} unresolved Shopify events. Sending
@@ -1298,66 +1134,5 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
         </>
       )}
     </section>
-  );
-}
-function AudienceForm({
-  busy,
-  save,
-}: {
-  busy: boolean;
-  save: (name: string, data: unknown) => void;
-}) {
-  const [name, setName] = useState(""),
-    [tag, setTag] = useState(""),
-    [list, setList] = useState(""),
-    [days, setDays] = useState("365"),
-    [exclude, setExclude] = useState("");
-  return (
-    <div>
-      <h3>Create audience</h3>
-      <label>
-        Name
-        <input value={name} onChange={(e) => setName(e.target.value)} />
-      </label>
-      <label>
-        Opened email in previous days (optional)
-        <input
-          type="number"
-          min="1"
-          value={days}
-          onChange={(e) => setDays(e.target.value)}
-        />
-      </label>
-      <label>
-        Shopify tag (optional)
-        <input value={tag} onChange={(e) => setTag(e.target.value)} />
-      </label>
-      <label>
-        Static list (optional)
-        <input value={list} onChange={(e) => setList(e.target.value)} />
-      </label>
-      <label>
-        Exclude purchases in previous days (optional)
-        <input
-          type="number"
-          min="1"
-          value={exclude}
-          onChange={(e) => setExclude(e.target.value)}
-        />
-      </label>
-      <button
-        disabled={busy || !name}
-        onClick={() =>
-          save(name, {
-            ...(days ? { openedDays: Number(days) } : {}),
-            ...(tag ? { tag } : {}),
-            ...(list ? { list } : {}),
-            ...(exclude ? { excludePurchasedDays: Number(exclude) } : {}),
-          })
-        }
-      >
-        Save audience
-      </button>
-    </div>
   );
 }

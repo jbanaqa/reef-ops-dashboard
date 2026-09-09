@@ -22,6 +22,7 @@ import {
 } from "@/lib/marketing/rules";
 import { resendProvider, setup } from "@/lib/marketing/delivery";
 import { processMarketingInbox, inboxUnresolved } from "@/lib/marketing/inbox";
+import { audienceDirectory, contactDetails } from "@/lib/marketing/audiences";
 import { importProfiles } from "@/lib/marketing/ingest";
 import { validateFlow } from "@/lib/marketing/flow-config";
 import { shopifyGraphql } from "@/lib/shopify";
@@ -171,6 +172,15 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url),
       view = url.searchParams.get("view") || "overview";
+    if (view === "contact")
+      return Response.json(
+        { profile: await contactDetails(url.searchParams.get("id") || "") },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    if (view === "audience")
+      return Response.json(await audienceDirectory(url), {
+        headers: { "Cache-Control": "no-store" },
+      });
     if (view === "preview") {
       const s = await loadMarketingSettings();
       return new Response(
@@ -346,7 +356,10 @@ export async function POST(request: Request) {
       const result = await processMarketingInbox();
       if (result.disabled)
         return Response.json(
-          { error: "Shopify ingestion is disabled. Enable and save ingestion settings first." },
+          {
+            error:
+              "Shopify ingestion is disabled. Enable and save ingestion settings first.",
+          },
           { status: 409 },
         );
       return Response.json({ ...result, unresolved: await inboxUnresolved() });
