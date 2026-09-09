@@ -81,6 +81,7 @@ const { chromium } = require("playwright");
     const saves = [];
     let failSave = false;
     let syncRuns = 0;
+    let deliveryRuns = 0;
     let imports = 0;
     await page.route("**/api/marketing**", async (route) => {
       const req = route.request();
@@ -99,6 +100,10 @@ const { chromium } = require("playwright");
             operations: { ...settings.operations, ...body.settings.operations },
           };
           return route.fulfill({ json: { settings } });
+        }
+        if (body.action === "run-delivery") {
+          deliveryRuns++;
+          return route.fulfill({ json: { sent: 1, inspected: 1 } });
         }
         if (body.action === "process-inbox") {
           syncRuns++;
@@ -288,6 +293,32 @@ const { chromium } = require("playwright");
       });
     }
     assert.equal(settings.operations.sendingEnabled, false);
+    assert.ok(
+      await page
+        .getByRole("button", { name: "Run delivery now", exact: true })
+        .isDisabled(),
+    );
+    assert.equal(deliveryRuns, 0);
+    settings.operations.migrationConfirmed = true;
+    await page.getByRole("button", { name: /Sending & signup/ }).click();
+    await page
+      .getByRole("switch", { name: "Allow customer sending", exact: true })
+      .check();
+    await page
+      .getByRole("button", { name: "Save sending preferences", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Confirm sending preference", exact: true })
+      .click();
+    await page.getByText("Changes saved.", { exact: true }).waitFor();
+    await page.getByRole("button", { name: /Overview/ }).click();
+    await page
+      .getByRole("button", { name: "Run delivery now", exact: true })
+      .click();
+    await page
+      .getByText(/Delivery run complete. 1 messages sent; 1 checked./)
+      .waitFor();
+    assert.equal(deliveryRuns, 1);
     assert.deepEqual(errors, []);
     console.log(
       "PASS: manual sync without delivery, section-scoped saves, drafts survive navigation/refresh/save failure, sending review, import validation invalidation, responsive 320/390 layouts",

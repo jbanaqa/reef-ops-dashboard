@@ -23,11 +23,13 @@ import {
 import { resendProvider, setup } from "@/lib/marketing/delivery";
 import { processMarketingInbox, inboxUnresolved } from "@/lib/marketing/inbox";
 import { audienceDirectory, contactDetails } from "@/lib/marketing/audiences";
+import { runMarketing } from "@/lib/marketing/worker";
 import { importProfiles } from "@/lib/marketing/ingest";
 import { validateFlow } from "@/lib/marketing/flow-config";
 import { shopifyGraphql } from "@/lib/shopify";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 async function loadMarketingSettings() {
   const row = await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
@@ -352,6 +354,9 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 12000000) throw new Error("Request too large.");
     const b = JSON.parse(raw);
+    if (b.action === "run-delivery") {
+      return Response.json(await runMarketing());
+    }
     if (b.action === "process-inbox") {
       const result = await processMarketingInbox();
       if (result.disabled)

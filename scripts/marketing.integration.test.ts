@@ -995,3 +995,120 @@ test("saving business settings preserves independently saved operational control
     ingestEnabled: false,
   });
 });
+
+test("manual delivery respects sending gates, sends due messages once, and preserves future schedules", async () => {
+  const api = await import("../app/api/marketing/route");
+  const request = (authorized = true) =>
+    new Request("https://app.example/api/marketing", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://app.example",
+        ...(authorized
+          ? {
+              authorization:
+                "Basic " +
+                Buffer.from("staff:test-password").toString("base64"),
+            }
+          : {}),
+      },
+      body: JSON.stringify({ action: "run-delivery" }),
+    });
+  assert.equal((await api.POST(request(false))).status, 401);
+  // Isolate the delivery queue from earlier failure scenarios in this disposable database.
+  await prisma.marketingMessage.updateMany({
+    where: { status: "PENDING" },
+    data: { status: "CANCELLED" },
+  });
+  await prisma.marketingWebhookInbox.updateMany({
+    where: { status: { not: "DONE" } },
+    data: { status: "DONE" },
+  });
+  await prisma.marketingCampaign.updateMany({
+    where: { status: { in: ["SCHEDULED", "SENDING"] } },
+    data: { status: "CANCELLED" },
+  });
+  const controls = {
+    sendingEnabled: false,
+    migrationConfirmed: true,
+    ingestEnabled: true,
+    formEnabled: false,
+  };
+  await prisma.marketingResource.update({
+    where: { shop_kind_key: { shop, kind: "SETTINGS", key: "global" } },
+    data: {
+      data: {
+        organizationName: "Test",
+        postalAddress: "100 Test Avenue",
+        operations: controls,
+      },
+    },
+  });
+  customer = {
+    ...customer,
+    id: "gid://shopify/Customer/991",
+    legacyResourceId: "991",
+    email: "manual-delivery@example.com",
+    tags: ["b2b"],
+    emailMarketingConsent: {
+      marketingState: "SUBSCRIBED",
+      consentUpdatedAt: new Date().toISOString(),
+    },
+  };
+  await ingest.ingestShopify("customer.tags_added", "manual-delivery-tag", {
+    customerId: customer.id,
+    tags: ["b2b"],
+    occurredAt: new Date().toISOString(),
+  });
+  const profile = await prisma.marketingProfile.findUniqueOrThrow({
+    where: { shop_shopifyId: { shop, shopifyId: "991" } },
+  });
+  const due = await prisma.marketingMessage.findFirstOrThrow({
+    where: { profileId: profile.id, flowKey: "b2b-welcome" },
+  });
+  const futureAt = new Date(Date.now() + 86400000);
+  const future = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "manual-delivery-future",
+      profileId: profile.id,
+      flowKey: "b2b-welcome",
+      flowStep: 1,
+      channel: "EMAIL",
+      subject: "Tomorrow",
+      content: store.json(defaultContent),
+      dueAt: futureAt,
+    },
+  });
+  const sentBefore = sent.length;
+  const paused = await api.POST(request());
+  assert.equal(paused.status, 200);
+  assert.ok((await paused.json()).skipped);
+  assert.equal(sent.length, sentBefore);
+  await prisma.marketingResource.update({
+    where: { shop_kind_key: { shop, kind: "SETTINGS", key: "global" } },
+    data: {
+      data: {
+        organizationName: "Test",
+        postalAddress: "100 Test Avenue",
+        operations: { ...controls, sendingEnabled: true },
+      },
+    },
+  });
+  const delivered = await api.POST(request());
+  assert.equal(delivered.status, 200);
+  assert.equal((await delivered.json()).sent, 1);
+  assert.equal(
+    (await prisma.marketingMessage.findUniqueOrThrow({ where: { id: due.id } }))
+      .status,
+    "SENT",
+  );
+  assert.equal((await api.POST(request())).status, 200);
+  assert.equal(sent.length, sentBefore + 1);
+  const waiting = await prisma.marketingMessage.findUniqueOrThrow({
+    where: { id: future.id },
+  });
+  assert.equal(waiting.status, "PENDING");
+  assert.equal(waiting.dueAt.toISOString(), futureAt.toISOString());
+  assert.equal(waiting.attempts, 0);
+});

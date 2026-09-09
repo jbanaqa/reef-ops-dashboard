@@ -159,3 +159,7 @@ Advanced retains Shopify webhook registration, migration review, prepared JSON i
 Design references: [Mailchimp settings and defaults](https://mailchimp.com/help/audience-settings-and-defaults/) and [Klaviyo sender settings](https://help.klaviyo.com/hc/en-us/articles/360024994912).
 
 Run `node scripts/settings.browser.test.cjs` for the isolated browser checks, including independent section saves, sending confirmation, import validation, save-error recovery, and mobile layout. These checks never access production services.
+
+### Manual delivery
+
+Settings → Overview → Delivery health includes **Run delivery now**. It invokes the same worker as the scheduled job, processing due messages across eligible campaigns and workflows. It does not move future due dates, enable sending, bypass consent, or retry uncertain deliveries automatically. The result reports sends/checks or why the run was skipped. This is separate from **Process Shopify events now**, which never invokes delivery. The action requires dashboard authentication and the normal origin checks.

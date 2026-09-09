@@ -494,6 +494,60 @@ export default function SettingsWorkspace({
               {data.health?.oldestPending?.error && (
                 <p className="sw-warning">{data.health.oldestPending.error}</p>
               )}
+              <div className="sw-sync-action">
+                <div>
+                  <strong>Run scheduled delivery now</strong>
+                  <p>
+                    Send messages that are due using the normal subscription and
+                    workflow checks. This applies to all eligible customers and
+                    campaigns, not only your test account. Future scheduled
+                    times are kept.
+                  </p>
+                </div>
+                <button
+                  className="sw-primary"
+                  disabled={
+                    !!busy ||
+                    !setup.sendingEnabled ||
+                    !setup.emailReady ||
+                    !setup.migrationConfirmed
+                  }
+                  onClick={() =>
+                    run(
+                      "delivery",
+                      () =>
+                        action<{
+                          sent?: number;
+                          inspected?: number;
+                          skipped?: string;
+                        }>({ action: "run-delivery" }),
+                      (result) =>
+                        result.skipped
+                          ? "Delivery did not run: " + result.skipped
+                          : "Delivery run complete. " +
+                            (result.sent || 0) +
+                            " messages sent; " +
+                            (result.inspected || 0) +
+                            " checked. Review message history for any messages still waiting or not sent.",
+                    )
+                  }
+                >
+                  {busy === "delivery"
+                    ? "Running delivery…"
+                    : "Run delivery now"}
+                </button>
+              </div>
+              {(!setup.sendingEnabled ||
+                !setup.emailReady ||
+                !setup.migrationConfirmed) && (
+                <p className="sw-hint">
+                  Complete the sending checks and save your sending preferences
+                  before running delivery.{" "}
+                  <button onClick={() => navigate("sending")}>
+                    Review sending settings
+                  </button>
+                </p>
+              )}
               <Link href="/our-klaviyo/audiences">
                 View customer activity →
               </Link>
@@ -859,7 +913,8 @@ export default function SettingsWorkspace({
                 </label>
                 <label>
                   Prepared contact data
-                  <textarea aria-label="Prepared contact data"
+                  <textarea
+                    aria-label="Prepared contact data"
                     rows={6}
                     disabled={!!busy}
                     value={importText}
