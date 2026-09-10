@@ -29,16 +29,17 @@ import {
 import { validateFlow } from "./flow-config";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
 
-export async function runMarketing() {
-  const inbox = await processMarketingInbox();
+export async function runMarketing(onlyMessageId?: string) {
+  const inbox = onlyMessageId ? null : await processMarketingInbox();
   const settingsRow = await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
   });
   const settings = marketingSettings(settingsRow?.data),
     config = setup(settings.operations, settings.postalAddress);
   const unresolved = await inboxUnresolved();
-  const heartbeat = async (data: object) =>
-    prisma.marketingResource.upsert({
+  const heartbeat = async (data: object) => {
+    if (onlyMessageId) return;
+    return prisma.marketingResource.upsert({
       where: { shop_kind_key: { shop: shop(), kind: "SYSTEM", key: "worker" } },
       create: {
         shop: shop(),
@@ -49,11 +50,13 @@ export async function runMarketing() {
       },
       update: { data: json({ at: new Date().toISOString(), inbox, ...data }) },
     });
+  };
   const now = new Date();
   await prisma.marketingMessage.updateMany({
     where: {
       shop: shop(),
       status: "SENDING",
+      ...(onlyMessageId ? { id: onlyMessageId } : {}),
       attemptedAt: { lt: new Date(+now - 300000) },
     },
     data: {
@@ -63,7 +66,7 @@ export async function runMarketing() {
   });
   let stockCheck: Awaited<ReturnType<typeof lowStock>> | null = null;
   try {
-    stockCheck = await lowStock();
+    if (!onlyMessageId) stockCheck = await lowStock();
   } catch (error) {
     await prisma.marketingResource.upsert({
       where: {
@@ -103,11 +106,13 @@ export async function runMarketing() {
   }
   now.setTime(Date.now());
   const deadline = Date.now() + 180000;
-  const campaigns = await prisma.marketingCampaign.findMany({
-    where: { shop: shop(), status: "SCHEDULED", scheduledAt: { lte: now } },
-    take: 5,
-    orderBy: { scheduledAt: "asc" },
-  });
+  const campaigns = onlyMessageId
+    ? []
+    : await prisma.marketingCampaign.findMany({
+        where: { shop: shop(), status: "SCHEDULED", scheduledAt: { lte: now } },
+        take: 5,
+        orderBy: { scheduledAt: "asc" },
+      });
   for (const campaign of campaigns) {
     // Expand only a bounded page per campaign/run. Exclude existing recipients
     // so interrupted/overlapping expansion resumes without rescanning all pages.
@@ -151,6 +156,7 @@ export async function runMarketing() {
   // either out. Deferred records receive a future dueAt before the next run.
   const emailFlow = await prisma.marketingMessage.findMany({
     where: {
+      ...(onlyMessageId ? { id: onlyMessageId } : {}),
       shop: shop(),
       status: "PENDING",
       channel: "EMAIL",
@@ -160,27 +166,31 @@ export async function runMarketing() {
     orderBy: [{ dueAt: "asc" }, { id: "asc" }],
     take: 100,
   });
-  const emailCampaign = await prisma.marketingMessage.findMany({
-    where: {
-      shop: shop(),
-      status: "PENDING",
-      channel: "EMAIL",
-      campaignId: { not: null },
-      dueAt: { lte: now },
-    },
-    orderBy: [{ dueAt: "asc" }, { id: "asc" }],
-    take: 100,
-  });
-  const sms = await prisma.marketingMessage.findMany({
-    where: {
-      shop: shop(),
-      status: "PENDING",
-      channel: { not: "EMAIL" },
-      dueAt: { lte: now },
-    },
-    orderBy: [{ dueAt: "asc" }, { id: "asc" }],
-    take: 50,
-  });
+  const emailCampaign = onlyMessageId
+    ? []
+    : await prisma.marketingMessage.findMany({
+        where: {
+          shop: shop(),
+          status: "PENDING",
+          channel: "EMAIL",
+          campaignId: { not: null },
+          dueAt: { lte: now },
+        },
+        orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+        take: 100,
+      });
+  const sms = onlyMessageId
+    ? []
+    : await prisma.marketingMessage.findMany({
+        where: {
+          shop: shop(),
+          status: "PENDING",
+          channel: { not: "EMAIL" },
+          dueAt: { lte: now },
+        },
+        orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+        take: 50,
+      });
   const pending = [...emailFlow, ...emailCampaign, ...sms];
   let sent = 0,
     inspected = 0,
@@ -783,10 +793,12 @@ export async function runMarketing() {
       });
     }
   }
-  const active = await prisma.marketingCampaign.findMany({
-    where: { shop: shop(), status: "SENDING" },
-    select: { id: true },
-  });
+  const active = onlyMessageId
+    ? []
+    : await prisma.marketingCampaign.findMany({
+        where: { shop: shop(), status: "SENDING" },
+        select: { id: true },
+      });
   for (const c of active)
     if (
       !(await prisma.marketingMessage.count({
@@ -801,13 +813,14 @@ export async function runMarketing() {
         data: { status: "COMPLETED" },
       });
   // Only transient records are retained for a short time; consent/event history remains.
-  await prisma.marketingResource.deleteMany({
-    where: {
-      shop: shop(),
-      kind: { in: ["RATE", "SIGNUP", "CONFIRMATION"] },
-      updatedAt: { lt: new Date(Date.now() - 7 * DAY) },
-    },
-  });
+  if (!onlyMessageId)
+    await prisma.marketingResource.deleteMany({
+      where: {
+        shop: shop(),
+        kind: { in: ["RATE", "SIGNUP", "CONFIRMATION"] },
+        updatedAt: { lt: new Date(Date.now() - 7 * DAY) },
+      },
+    });
   await heartbeat({ sent, inspected });
   return { sent, inspected };
 }

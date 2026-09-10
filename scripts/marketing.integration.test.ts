@@ -2439,3 +2439,234 @@ test("cart test mode isolates enrollment and sending, including previously queue
     });
   }
 });
+
+test("send this test step now advances only the selected email and keeps delivery safeguards", async () => {
+  const { enroll } = await import("../lib/marketing/flows");
+  const { cartDraft } = await import("../lib/marketing/cart-config");
+  const { validateFlow } = await import("../lib/marketing/flow-config");
+  const { contactDetails } = await import("../lib/marketing/audiences");
+  const api = await import("../app/api/marketing/route");
+  const flow = await prisma.marketingResource.findUniqueOrThrow({
+    where: { shop_kind_key: { shop, kind: "FLOW", key: "abandoned-cart" } },
+  });
+  const settings = await prisma.marketingResource.findUniqueOrThrow({
+    where: { shop_kind_key: { shop, kind: "SETTINGS", key: "global" } },
+  });
+  const f = validateFlow("abandoned-cart", cartDraft(flow.data as never));
+  f.reviewed = true;
+  f.steps[0].minutes = 180;
+  f.branchMinutes = 1440;
+  f.cart!.productCount = 0;
+  f.cart!.testEmail = "early-step@example.com";
+  const p = await store.atomic(async (tx) => {
+    const p = await store.identify(tx, { email: f.cart!.testEmail });
+    await store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "test", new Date());
+    return p;
+  });
+  const other = await store.atomic(async (tx) => {
+    const p = await store.identify(tx, { email: "unrelated-due@example.com" });
+    await store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "test", new Date());
+    return p;
+  });
+  const unrelated = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "unrelated-due",
+      profileId: other.id,
+      channel: "EMAIL",
+      subject: "Must remain queued",
+      content: defaultContent,
+      dueAt: new Date(),
+    },
+  });
+  const previous = globalThis.fetch;
+  let purchased = false;
+  globalThis.fetch = async (input, init) => {
+    if (
+      String(input).includes("/graphql.json") &&
+      String(init?.body).includes("CartOrderCheck")
+    )
+      return Response.json({
+        data: {
+          orders: {
+            nodes: purchased ? [{ createdAt: new Date().toISOString() }] : [],
+          },
+        },
+      });
+    return previous(input, init);
+  };
+  const request = (messageId: string, profileId = p.id, authorized = true) =>
+    new Request("https://app.example/api/marketing", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://app.example",
+        ...(authorized
+          ? {
+              authorization:
+                "Basic " +
+                Buffer.from("staff:test-password").toString("base64"),
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        action: "send-cart-test-now",
+        profileId,
+        messageId,
+      }),
+    });
+  const enrollTest = async (key: string) => {
+    await store.atomic((tx) =>
+      enroll(tx, "abandoned-cart", p.id, key, new Date(), {
+        url: "https://coralsanonymous.com/checkouts/" + key,
+      }),
+    );
+    return prisma.marketingMessage.findMany({
+      where: { profileId: p.id, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    });
+  };
+  try {
+    await prisma.marketingResource.update({
+      where: { id: flow.id },
+      data: { enabled: true, data: store.json(f) },
+    });
+    await prisma.marketingResource.update({
+      where: { id: settings.id },
+      data: {
+        data: store.json({
+          ...(settings.data as object),
+          operations: {
+            sendingEnabled: true,
+            migrationConfirmed: true,
+            ingestEnabled: true,
+            formEnabled: false,
+          },
+        }),
+      },
+    });
+    const messages = await enrollTest("early-test");
+    const first = messages.find((m) => m.flowCondition === "cart-v1:first")!,
+      last = messages.find((m) => m.flowCondition === "cart-v1:final")!;
+    assert.ok(first.dueAt > new Date());
+    const details = await contactDetails(p.id);
+    assert.equal(
+      details!.messages.find((m) => m.id === first.id)!.testSend?.canSendNow,
+      true,
+    );
+    assert.equal(
+      details!.messages.find((m) => m.id === last.id)!.testSend?.canSendNow,
+      false,
+    );
+    assert.equal((await api.POST(request(first.id, p.id, false))).status, 401);
+    assert.equal((await api.POST(request(first.id, other.id))).status, 400);
+    assert.equal(
+      (await api.POST(request(last.id))).status,
+      400,
+      "cannot skip the first step",
+    );
+    assert.equal((await api.POST(request(unrelated.id, other.id))).status, 400);
+    const before = sent.length;
+    const response = await api.POST(request(first.id));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).status, "SENT");
+    assert.equal(sent.length, before + 1);
+    assert.equal(
+      (
+        await prisma.marketingMessage.findUniqueOrThrow({
+          where: { id: unrelated.id },
+        })
+      ).status,
+      "PENDING",
+      "button does not drain unrelated due email",
+    );
+    assert.equal(
+      (
+        await prisma.marketingMessage.findUniqueOrThrow({
+          where: { id: last.id },
+        })
+      ).status,
+      "PENDING",
+    );
+    assert.equal(
+      (await api.POST(request(first.id))).status,
+      400,
+      "completed steps cannot resend",
+    );
+    const followup = await api.POST(request(last.id));
+    assert.equal(
+      (await followup.json()).status,
+      "CANCELLED",
+      "16-hour Smart Sending is retained",
+    );
+    assert.equal(sent.length, before + 1);
+
+    const rows = await enrollTest("purchase-before-early-test");
+    const purchaseFirst = rows.find(
+      (m) => m.flowCondition === "cart-v1:first",
+    )!;
+    purchased = true;
+    const stopped = await api.POST(request(purchaseFirst.id));
+    assert.equal((await stopped.json()).status, "CANCELLED");
+    assert.match(
+      (
+        await prisma.marketingMessage.findUniqueOrThrow({
+          where: { id: purchaseFirst.id },
+        })
+      ).error || "",
+      /purchased/,
+    );
+    assert.equal(sent.length, before + 1);
+    purchased = false;
+
+    const pending = await enrollTest("paused-early-test");
+    const paused = pending.find((m) => m.flowCondition === "cart-v1:first")!;
+    await prisma.marketingResource.update({
+      where: { id: settings.id },
+      data: {
+        data: store.json({
+          ...(settings.data as object),
+          operations: {
+            sendingEnabled: false,
+            migrationConfirmed: true,
+            ingestEnabled: true,
+          },
+        }),
+      },
+    });
+    assert.equal((await api.POST(request(paused.id))).status, 400);
+    assert.equal(
+      +(
+        await prisma.marketingMessage.findUniqueOrThrow({
+          where: { id: paused.id },
+        })
+      ).dueAt,
+      +paused.dueAt,
+      "paused action does not change the timer",
+    );
+    delete f.cart!.testEmail;
+    await prisma.marketingResource.update({
+      where: { id: flow.id },
+      data: { data: store.json(f) },
+    });
+    assert.equal(
+      (await api.POST(request(paused.id))).status,
+      400,
+      "test-only action fails when restriction is removed",
+    );
+  } finally {
+    globalThis.fetch = previous;
+    await prisma.marketingMessage.updateMany({
+      where: { profileId: { in: [p.id, other.id] }, status: "PENDING" },
+      data: { status: "CANCELLED" },
+    });
+    await prisma.marketingResource.update({
+      where: { id: flow.id },
+      data: { enabled: flow.enabled, data: store.json(flow.data) },
+    });
+    await prisma.marketingResource.update({
+      where: { id: settings.id },
+      data: { data: store.json(settings.data) },
+    });
+  }
+});

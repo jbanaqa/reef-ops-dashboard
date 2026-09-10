@@ -1,3 +1,4 @@
+import { sendCartTestNow } from "@/lib/marketing/cart-test";
 import { historyStatus, syncHistory } from "@/lib/marketing/cart-history";
 import { cartReport } from "@/lib/marketing/cart-report";
 import { cartProducts } from "@/lib/marketing/cart";
@@ -424,6 +425,11 @@ export async function POST(request: Request) {
           })),
         at: snapshot.observedAt.toISOString(),
       });
+    }
+    if (b.action === "send-cart-test-now") {
+      if (typeof b.profileId !== "string" || typeof b.messageId !== "string")
+        throw new Error("Choose a test message.");
+      return Response.json(await sendCartTestNow(b.profileId, b.messageId));
     }
     if (b.action === "run-delivery") {
       return Response.json(await runMarketing());

@@ -99,11 +99,24 @@ const { chromium } = require("playwright");
     ];
     let failSave = false;
     let blocks = 0;
+    let testMessages = false,
+      earlySends = 0;
     await page.route("**/api/marketing**", async (route) => {
       const req = route.request();
       const url = new URL(req.url());
       if (req.method() === "POST") {
         const body = req.postDataJSON();
+        if (body.action === "send-cart-test-now") {
+          assert.equal(body.profileId, "0");
+          assert.equal(body.messageId, "test-first");
+          earlySends++;
+          return route.fulfill({
+            json: {
+              status: "SENT",
+              message: "Test email sent. Check this account’s inbox.",
+            },
+          });
+        }
         if (body.action === "save-resource") {
           if (failSave)
             return route.fulfill({
@@ -128,19 +141,53 @@ const { chromium } = require("playwright");
           json: {
             profile: {
               ...profiles.find((p) => p.id === url.searchParams.get("id")),
-              messages: [
-                {
-                  id: "m1",
-                  subject: "Welcome to wholesale",
-                  status: "PENDING",
-                  channel: "EMAIL",
-                  flowKey: "b2b-welcome",
-                  createdAt: "2026-09-09T12:00:00Z",
-                  dueAt: "2026-09-09T12:00:00Z",
-                  sentAt: null,
-                  error: null,
-                },
-              ],
+              messages: testMessages
+                ? [
+                    {
+                      id: "test-first",
+                      subject: "First cart test",
+                      status: earlySends ? "SENT" : "PENDING",
+                      channel: "EMAIL",
+                      flowKey: "abandoned-cart",
+                      createdAt: "2026-09-10T12:00:00Z",
+                      dueAt: "2026-09-11T12:00:00Z",
+                      sentAt: earlySends ? "2026-09-10T12:00:00Z" : null,
+                      error: null,
+                      ...(!earlySends
+                        ? { testSend: { canSendNow: true, reason: null } }
+                        : {}),
+                    },
+                    {
+                      id: "test-last",
+                      subject: "Follow-up cart test",
+                      status: "PENDING",
+                      channel: "EMAIL",
+                      flowKey: "abandoned-cart",
+                      createdAt: "2026-09-10T12:00:00Z",
+                      dueAt: "2026-09-12T12:00:00Z",
+                      sentAt: null,
+                      error: null,
+                      testSend: {
+                        canSendNow: !!earlySends,
+                        reason: earlySends
+                          ? null
+                          : "Finish the first email step before testing this follow-up.",
+                      },
+                    },
+                  ]
+                : [
+                    {
+                      id: "m1",
+                      subject: "Welcome to wholesale",
+                      status: "PENDING",
+                      channel: "EMAIL",
+                      flowKey: "b2b-welcome",
+                      createdAt: "2026-09-09T12:00:00Z",
+                      dueAt: "2026-09-09T12:00:00Z",
+                      sentAt: null,
+                      error: null,
+                    },
+                  ],
               events: [
                 {
                   id: "e1",
@@ -321,6 +368,70 @@ const { chromium } = require("playwright");
       });
       await page.keyboard.press("Escape");
     }
+
+    testMessages = true;
+    await page.goto("http://127.0.0.1:" + server.address().port + "?sending=1");
+    await page
+      .getByRole("button", { name: "View Jaden Banawa", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Messages", exact: true }).click();
+    const firstCard = page
+      .locator(".aw-message")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "First cart test",
+          exact: true,
+        }),
+      });
+    const lastCard = page
+      .locator(".aw-message")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Follow-up cart test",
+          exact: true,
+        }),
+      });
+    assert.equal(
+      await firstCard
+        .getByRole("button", { name: "Send this step now", exact: true })
+        .isEnabled(),
+      true,
+    );
+    assert.equal(
+      await lastCard
+        .getByRole("button", { name: "Send this step now", exact: true })
+        .isDisabled(),
+      true,
+    );
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(
+        await page
+          .locator("dialog")
+          .evaluate((el) => el.scrollWidth <= el.clientWidth),
+      );
+      await page.screenshot({
+        path: path.join(output, "test-step-" + width + ".png"),
+      });
+    }
+    await firstCard
+      .getByRole("button", { name: "Send this step now", exact: true })
+      .click();
+    await page
+      .getByText("Test email sent. Check this account’s inbox.", {
+        exact: true,
+      })
+      .waitFor();
+    await firstCard.getByText("Sent", { exact: true }).waitFor();
+    assert.equal(
+      await firstCard
+        .getByRole("button", { name: "Send this step now", exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(earlySends, 1);
+    await page.keyboard.press("Escape");
+
     assert.equal(blocks, 0, "Browsing and group edits never change consent");
     assert.deepEqual(errors, []);
     console.log(

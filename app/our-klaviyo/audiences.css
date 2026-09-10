@@ -712,3 +712,11 @@
     font-size: 13px;
   }
 }
+
+.aw-test-send {
+  margin-top: 14px;
+}
+.aw-test-send p {
+  margin: 8px 0 0;
+  font-size: 12px;
+}

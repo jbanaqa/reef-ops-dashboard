@@ -25,6 +25,7 @@ type Contact = {
 };
 type Group = { id?: string; key: string; name: string; data: Segment };
 type Message = {
+  testSend?: { canSendNow: boolean; reason: string | null };
   id: string;
   subject: string;
   status: string;
@@ -147,6 +148,7 @@ function Panel({
 const messageStatus: Record<string, string> = {
   PENDING: "Scheduled",
   PROCESSING: "Processing",
+  SENDING: "Sending",
   SENT: "Sent",
   CANCELLED: "Not sent",
   FAILED: "Failed",
@@ -186,6 +188,7 @@ function eventLabel(e: Activity) {
     CLICKED: "Email link clicked",
     ORDER: "Order recorded",
     DELIVERED: "Email delivered",
+    CART_TEST_SEND_REQUESTED: "Early delivery requested for a test email",
     BOUNCED: "Email bounced",
     COMPLAINED: "Spam complaint received",
     UNSUBSCRIBED: "Unsubscribed",
@@ -213,6 +216,8 @@ function ContactPanel({
   const [confirm, setConfirm] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [noticeSuccess, setNoticeSuccess] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
     request<{ profile: Detail | null }>(
@@ -245,6 +250,7 @@ function ContactPanel({
     try {
       await post({ action: "suppress", id, channel: confirm });
       setConfirm(null);
+      setNoticeSuccess(true);
       setNotice(
         "Marketing messages blocked for this channel. Pending messages were cancelled.",
       );
@@ -258,6 +264,32 @@ function ContactPanel({
       setBusy(false);
     }
   }
+
+  async function sendStepNow(messageId: string) {
+    setBusy(true);
+    setSendingId(messageId);
+    setError("");
+    setNotice("");
+    try {
+      const result = await post<{ status: string; message: string }>({
+        action: "send-cart-test-now",
+        profileId: id,
+        messageId,
+      });
+      setNoticeSuccess(result.status === "SENT");
+      setNotice(result.message);
+      refresh();
+      changed();
+    } catch (e) {
+      refresh();
+      setError(
+        e instanceof Error ? e.message : "Could not send this test step.",
+      );
+    } finally {
+      setBusy(false);
+      setSendingId(null);
+    }
+  }
   return (
     <Panel heading={contact ? title(contact) : "Contact details"} close={close}>
       {error && (
@@ -267,7 +299,7 @@ function ContactPanel({
         </div>
       )}
       {notice && (
-        <p role="status" className="aw-success">
+        <p role="status" className={noticeSuccess ? "aw-success" : "aw-hint"}>
           {notice}
         </p>
       )}
@@ -424,6 +456,13 @@ function ContactPanel({
           {section === "emails" && (
             <section className="aw-detail-section">
               <h3>Message history</h3>
+              {contact.messages.some((m) => m.testSend) && (
+                <p className="aw-hint">
+                  Restricted cart test · Send a selected email to this account
+                  now. Only its wait is bypassed; consent, purchase and
+                  recent-email checks still apply.
+                </p>
+              )}
               {!sendingEnabled && (
                 <p className="aw-hint">
                   Sending is currently off. Scheduled messages will not send
@@ -469,6 +508,25 @@ function ContactPanel({
                           ? "Scheduled for " + date(m.dueAt)
                           : "Created " + date(m.createdAt)}
                     </p>
+                    {m.testSend && (
+                      <div className="aw-test-send">
+                        <button
+                          type="button"
+                          disabled={
+                            busy ||
+                            loading ||
+                            !sendingEnabled ||
+                            !m.testSend.canSendNow
+                          }
+                          onClick={() => sendStepNow(m.id)}
+                        >
+                          {sendingId === m.id
+                            ? "Checking and sending…"
+                            : "Send this step now"}
+                        </button>
+                        {m.testSend.reason && <p>{m.testSend.reason}</p>}
+                      </div>
+                    )}
                     {m.error && (
                       <p className="aw-reason">
                         {m.error === "Not eligible for this channel"
@@ -533,7 +591,9 @@ function GroupEditor({
   const [dirty, setDirty] = useState(false);
   const [discard, setDiscard] = useState(false);
   const discardRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (discard) discardRef.current?.focus(); }, [discard]);
+  useEffect(() => {
+    if (discard) discardRef.current?.focus();
+  }, [discard]);
   const data: Segment = Object.fromEntries(
     Object.entries(rules)
       .filter(([, v]) => v.trim())

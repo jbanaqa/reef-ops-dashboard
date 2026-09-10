@@ -1,3 +1,4 @@
+import { cartTestSendState } from "./cart-test";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/app/generated/prisma/client";
 import { audienceWhere, shop } from "./store";
@@ -138,6 +139,9 @@ export async function contactDetails(id: string) {
           status: true,
           channel: true,
           flowKey: true,
+          key: true,
+          attempts: true,
+          flowCondition: true,
           dueAt: true,
           createdAt: true,
           sentAt: true,
@@ -154,6 +158,16 @@ export async function contactDetails(id: string) {
   if (!profile) return null;
   return {
     ...profile,
+    messages: await Promise.all(
+      profile.messages.map(async (m) => {
+        const testSend = await cartTestSendState(prisma, m, profile.email);
+        const { key, attempts, flowCondition, ...publicMessage } = m;
+        void key;
+        void attempts;
+        void flowCondition;
+        return { ...publicMessage, ...(testSend ? { testSend } : {}) };
+      }),
+    ),
     events: profile.events.map((event) => {
       const payload =
         event.payload &&
