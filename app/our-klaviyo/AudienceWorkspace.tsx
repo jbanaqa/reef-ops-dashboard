@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import type { FlowProgress } from "@/lib/marketing/flow-progress";
 import type { Segment } from "@/lib/marketing/rules";
 
 type Consent = {
@@ -42,7 +43,12 @@ type Activity = {
   occurredAt: string;
   payload: Record<string, unknown>;
 };
-type Detail = Contact & { events: Activity[]; messages: Message[] };
+type Detail = Contact & {
+  events: Activity[];
+  messages: Message[];
+  flowProgress?: FlowProgress[];
+  flowProgressLimited?: boolean;
+};
 type Directory = {
   profiles: Contact[];
   groups: Group[];
@@ -338,6 +344,94 @@ function ContactPanel({
               Refresh
             </button>
           </nav>
+          {(section === "overview" || section === "emails") && (
+            <section className="aw-detail-section" aria-label="Flow progress">
+              <h3>Flow progress</h3>
+              {!contact.flowProgress?.length ? (
+                <p>No recorded flow enrollment yet.</p>
+              ) : (
+                contact.flowProgress.map((flow) => (
+                  <article className="aw-message" key={flow.id}>
+                    <div className="aw-split">
+                      <strong>{flow.name}</strong>
+                      <span
+                        className={
+                          "aw-badge " +
+                          (flow.state.includes("error") ||
+                          flow.state.includes("review")
+                            ? "warning"
+                            : "muted")
+                        }
+                      >
+                        {flow.state}
+                      </span>
+                    </div>
+                    <p>Entered {date(flow.enteredAt)}</p>
+                    <p>
+                      {flow.sentCount} sent · {flow.pendingCount} pending
+                      {flow.skippedCount > 0
+                        ? " · " + flow.skippedCount + " not sent"
+                        : ""}
+                      {flow.failedCount > 0
+                        ? " · " + flow.failedCount + " failed"
+                        : ""}
+                    </p>
+                    {flow.lastSent && (
+                      <p>
+                        <strong>Last sent: {flow.lastSent.label}</strong>
+                        <br />
+                        {flow.lastSent.subject}
+                        <br />
+                        {date(flow.lastSent.at)}
+                      </p>
+                    )}
+                    {flow.next && (
+                      <p>
+                        <strong>Next: {flow.next.label}</strong>
+                        <br />
+                        Scheduled for {date(flow.next.at)}
+                        {flow.next.branchPending && (
+                          <>
+                            <br />
+                            Reminder or discount selected at send time based on
+                            recent orders.
+                          </>
+                        )}
+                        {flow.next.reason && (
+                          <>
+                            <br />
+                            {flow.next.reason}
+                          </>
+                        )}
+                      </p>
+                    )}
+                    {flow.active && !sendingEnabled && (
+                      <p className="aw-hint">
+                        Sending is off. Pending messages will wait for sending
+                        to resume and eligibility checks to pass.
+                      </p>
+                    )}
+                    {flow.reasons.map((reason) => (
+                      <p className="aw-reason" key={reason}>
+                        {reason}
+                      </p>
+                    ))}
+                  </article>
+                ))
+              )}
+              {contact.flowProgressLimited && (
+                <p>
+                  Recent history is limited. Older completed steps may not
+                  appear in these counts.
+                </p>
+              )}
+              <small>
+                Sent means the email provider accepted the message; it does not
+                confirm the customer read it. Pending steps still require
+                send-time checks.
+              </small>
+            </section>
+          )}
           {section === "overview" && (
             <>
               <section className="aw-detail-section">

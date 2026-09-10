@@ -1570,6 +1570,25 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       +waiting.dueAt,
     );
     assert.equal((first.content as { products: unknown[] }).products.length, 1);
+    const { contactDetails } = await import("../lib/marketing/audiences");
+    const detail = await contactDetails(p.id);
+    const progress = detail!.flowProgress.find(
+      (f) => f.flowKey === "abandoned-cart",
+    )!;
+    assert.equal(progress.state, "Waiting for next step");
+    assert.equal(progress.sentCount, 1);
+    assert.equal(progress.lastSent?.label, "First reminder");
+    assert.equal(progress.next?.branchPending, true);
+    await worker.runMarketing();
+    assert.equal(
+      (
+        await prisma.marketingMessage.findUniqueOrThrow({
+          where: { id: waiting.id },
+        })
+      ).status,
+      "PENDING",
+      "worker must not send a future follow-up early",
+    );
     const final = messages[1];
     await prisma.marketingMessage.update({
       where: { id: first.id },
@@ -2203,7 +2222,7 @@ test("Shopify opaque-origin pixels record anonymous views but cannot change cons
   }
 });
 
-test("cart recommendations exclude Shipping Protection and backfill from later candidates", async () => {
+test("cart recommendations exclude Shipping Protection and Shipping Box and backfill from later candidates", async () => {
   const { cartProducts } = await import("../lib/marketing/cart");
   const { cartDraft } = await import("../lib/marketing/cart-config");
   const { validateFlow } = await import("../lib/marketing/flow-config");
@@ -2228,7 +2247,9 @@ test("cart recommendations exclude Shipping Protection and backfill from later c
             title:
               id === "gid://shopify/Product/80100"
                 ? "Test coral"
-                : "Shipping Protection - safeguard against weather damage",
+                : Number(id.split("/").at(-1)) % 2
+                  ? "Shipping Box - insulated"
+                  : "Shipping Protection - safeguard against weather damage",
             status: "ACTIVE",
             onlineStoreUrl:
               "https://coralsanonymous.com/products/" + id.split("/").at(-1),

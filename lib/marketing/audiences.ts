@@ -1,3 +1,4 @@
+import { flowProgress } from "./flow-progress";
 import { cartTestSendState } from "./cart-test";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/app/generated/prisma/client";
@@ -156,8 +157,47 @@ export async function contactDetails(id: string) {
     },
   });
   if (!profile) return null;
+  const [activeMessages, flows] = await Promise.all([
+    prisma.marketingMessage.findMany({
+      where: {
+        profileId: profile.id,
+        shop: shop(),
+        flowKey: { not: null },
+        status: { in: ["PENDING", "SENDING", "UNKNOWN"] },
+      },
+      take: 501,
+      orderBy: { dueAt: "asc" },
+      select: {
+        id: true,
+        key: true,
+        flowKey: true,
+        flowCondition: true,
+        subject: true,
+        status: true,
+        dueAt: true,
+        createdAt: true,
+        sentAt: true,
+        error: true,
+      },
+    }),
+    prisma.marketingResource.findMany({
+      where: { shop: shop(), kind: "FLOW" },
+      select: { key: true, name: true, enabled: true },
+    }),
+  ]);
+  const progressMessages = [
+    ...new Map(
+      [...profile.messages, ...activeMessages.slice(0, 500)].map((m) => [
+        m.id,
+        m,
+      ]),
+    ).values(),
+  ];
   return {
     ...profile,
+    flowProgress: flowProgress(progressMessages, flows),
+    flowProgressLimited:
+      activeMessages.length > 500 || profile.messages.length === 100,
     messages: await Promise.all(
       profile.messages.map(async (m) => {
         const testSend = await cartTestSendState(prisma, m, profile.email);

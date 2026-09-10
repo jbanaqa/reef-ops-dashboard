@@ -274,3 +274,11 @@ Flows, campaign drafts, and reusable templates use `EmailDesigner`, the shared `
 Every email has a Footer → Show business address toggle. `showPostalAddress` defaults to false for existing content without the field and for new content, and applies to HTML and plain text. The organization name and unsubscribe link remain. Turn the address on before customer marketing sends to meet postal-address requirements. This preference does not remove the configured business address or change sending gates.
 
 Browser regression: `node scripts/campaigns.browser.test.cjs` checks campaign/template editing, preview, save payloads and narrow dialogs with mocked requests.
+
+## Profile flow progress
+
+Audience profiles show flow progress in Overview and Messages: last accepted send, next pending step, pending/sent/skipped/failed counts, and recorded cancellation or error reasons. Cart checkouts are grouped separately, including re-entry. Summaries combine the latest 100 messages with up to 500 active flow messages, and disclose truncated history. A pending cart follow-up does not claim a discount branch before send-time order checks. These summaries are read-only and do not alter enrollment or delivery.
+
+Product recommendations exclude Shipping Protection and Shipping Box titles and backfill with eligible products; the actual Shopify checkout is not changed.
+
+The isolated marketing integration suite advances stored timestamps to exercise follow-ups without real-time waits. It covers future messages remaining pending, sequential deadlines, both order-history branches, purchase cancellation, Smart Sending, and mocked Shopify discount creation/retry. This verifies application behavior, not the deployed scheduler uptime or live Shopify coupon redemption.

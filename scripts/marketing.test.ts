@@ -484,3 +484,105 @@ test("stock emails preserve shared footer settings without changing stock tokens
     false,
   );
 });
+
+import { flowProgress } from "../lib/marketing/flow-progress";
+test("profile flow progress distinguishes waiting, paused, sending, uncertain, skipped and completed runs", () => {
+  const now = new Date("2026-09-10T12:00:00Z");
+  const first = {
+    id: "first",
+    key: "cart-v1:run:first",
+    flowKey: "abandoned-cart",
+    flowCondition: "cart-v1:first",
+    subject: "Reminder",
+    status: "SENT",
+    dueAt: now,
+    createdAt: now,
+    sentAt: now,
+    error: null,
+  };
+  const final = {
+    ...first,
+    id: "final",
+    key: "cart-v1:run:final",
+    flowCondition: "cart-v1:final",
+    status: "PENDING",
+    sentAt: null,
+    dueAt: new Date(+now + 86400000),
+  };
+  const flows = [
+    { key: "abandoned-cart", name: "Abandoned Cart", enabled: true },
+  ];
+  let progress = flowProgress([first, final], flows, now)[0];
+  assert.equal(progress.lastSent?.label, "First reminder");
+  assert.equal(progress.next?.branchPending, true);
+  assert.equal(progress.state, "Waiting for next step");
+  assert.equal(
+    flowProgress([first, final], [{ ...flows[0], enabled: false }], now)[0]
+      .state,
+    "Flow paused",
+  );
+  assert.equal(
+    flowProgress([{ ...final, dueAt: now }], flows, now)[0].state,
+    "Awaiting send checks",
+  );
+  assert.equal(
+    flowProgress([{ ...final, status: "SENDING" }], flows, now)[0].state,
+    "Sending",
+  );
+  assert.equal(
+    flowProgress([{ ...final, status: "UNKNOWN" }], flows, now)[0].state,
+    "Delivery needs review",
+  );
+  progress = flowProgress(
+    [
+      first,
+      {
+        ...final,
+        status: "CANCELLED",
+        error: "Skipped: recently received email (16 hours)",
+      },
+    ],
+    flows,
+    now,
+  )[0];
+  assert.equal(progress.active, false);
+  assert.equal(progress.skippedCount, 1);
+  assert.match(progress.reasons[0], /16 hours/);
+  assert.equal(
+    flowProgress(
+      [
+        {
+          ...final,
+          status: "CANCELLED",
+          error: "Customer purchased after checkout",
+        },
+      ],
+      flows,
+      now,
+    )[0].state,
+    "Stopped after purchase",
+  );
+  assert.equal(
+    flowProgress(
+      [first, { ...final, status: "SENT", sentAt: now }],
+      flows,
+      now,
+    )[0].state,
+    "Scheduled steps completed",
+  );
+  assert.equal(
+    flowProgress(
+      [{ ...final, status: "FAILED", error: "Provider rejected" }],
+      flows,
+      now,
+    )[0].state,
+    "Finished with errors",
+  );
+  const runs = flowProgress(
+    [first, { ...final, key: "cart-v1:another:final" }],
+    flows,
+    now,
+  );
+  assert.equal(runs.length, 2);
+  assert.equal(runs[0].active, true);
+});

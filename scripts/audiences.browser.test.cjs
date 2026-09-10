@@ -141,6 +141,38 @@ const { chromium } = require("playwright");
           json: {
             profile: {
               ...profiles.find((p) => p.id === url.searchParams.get("id")),
+              flowProgress: testMessages
+                ? [
+                    {
+                      id: "run",
+                      flowKey: "abandoned-cart",
+                      name: "Abandoned Cart",
+                      state: "Waiting for next step",
+                      active: true,
+                      sentCount: earlySends ? 1 : 0,
+                      pendingCount: earlySends ? 1 : 2,
+                      skippedCount: 0,
+                      failedCount: 0,
+                      enteredAt: "2026-09-10T12:00:00Z",
+                      lastSent: earlySends
+                        ? {
+                            label: "First reminder",
+                            subject: "First cart test",
+                            at: "2026-09-10T12:00:00Z",
+                          }
+                        : null,
+                      next: {
+                        label: earlySends
+                          ? "Follow-up email"
+                          : "First reminder",
+                        at: "2026-09-12T12:00:00Z",
+                        branchPending: !!earlySends,
+                        reason: null,
+                      },
+                      reasons: [],
+                    },
+                  ]
+                : [],
               messages: testMessages
                 ? [
                     {
@@ -375,22 +407,18 @@ const { chromium } = require("playwright");
       .getByRole("button", { name: "View Jaden Banawa", exact: true })
       .click();
     await page.getByRole("button", { name: "Messages", exact: true }).click();
-    const firstCard = page
-      .locator(".aw-message")
-      .filter({
-        has: page.getByRole("heading", {
-          name: "First cart test",
-          exact: true,
-        }),
-      });
-    const lastCard = page
-      .locator(".aw-message")
-      .filter({
-        has: page.getByRole("heading", {
-          name: "Follow-up cart test",
-          exact: true,
-        }),
-      });
+    const firstCard = page.locator(".aw-message").filter({
+      has: page.getByRole("heading", {
+        name: "First cart test",
+        exact: true,
+      }),
+    });
+    const lastCard = page.locator(".aw-message").filter({
+      has: page.getByRole("heading", {
+        name: "Follow-up cart test",
+        exact: true,
+      }),
+    });
     assert.equal(
       await firstCard
         .getByRole("button", { name: "Send this step now", exact: true })
@@ -430,6 +458,17 @@ const { chromium } = require("playwright");
       0,
     );
     assert.equal(earlySends, 1);
+    await page
+      .getByText("Last sent: First reminder", { exact: true })
+      .waitFor();
+    await page.getByText("Next: Follow-up email", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page
+      .getByText("Last sent: First reminder", { exact: true })
+      .waitFor();
+    await page.screenshot({
+      path: path.join(output, "flow-progress-mobile.png"),
+    });
     await page.keyboard.press("Escape");
 
     assert.equal(blocks, 0, "Browsing and group edits never change consent");
