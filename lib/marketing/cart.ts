@@ -79,11 +79,19 @@ export async function enrollCart(
           where: {
             key: { startsWith: base + ":" },
             flowCondition: condition,
-            status: "PENDING",
+            OR: [
+              { status: "PENDING" },
+              { status: "CANCELLED", error: "Checkout expired" },
+            ],
           },
           data: {
+            status: "PENDING",
             triggerAt: at,
             dueAt: new Date(+at + minutes * 60000),
+            attemptedAt: null,
+            sentAt: null,
+            providerId: null,
+            attempts: 0,
             error: null,
           },
         });
