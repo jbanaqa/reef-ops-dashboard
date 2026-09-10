@@ -1,4 +1,3 @@
-import { sendCartTestNow } from "@/lib/marketing/cart-test";
 import { historyStatus, syncHistory } from "@/lib/marketing/cart-history";
 import { cartReport } from "@/lib/marketing/cart-report";
 import { cartProducts } from "@/lib/marketing/cart";
@@ -33,6 +32,11 @@ import { processMarketingInbox, inboxUnresolved } from "@/lib/marketing/inbox";
 import { audienceDirectory, contactDetails } from "@/lib/marketing/audiences";
 import { runMarketing } from "@/lib/marketing/worker";
 import { importProfiles } from "@/lib/marketing/ingest";
+import {
+  cancelCartTestMessage,
+  clearCartTestHistory,
+  sendCartTestNow,
+} from "@/lib/marketing/cart-test";
 import { validateFlow } from "@/lib/marketing/flow-config";
 import { shopifyGraphql } from "@/lib/shopify";
 
@@ -455,6 +459,19 @@ export async function POST(request: Request) {
       if (typeof b.profileId !== "string" || typeof b.messageId !== "string")
         throw new Error("Choose a test message.");
       return Response.json(await sendCartTestNow(b.profileId, b.messageId));
+    }
+    if (b.action === "cancel-cart-test-message") {
+      if (typeof b.profileId !== "string" || typeof b.messageId !== "string")
+        throw new Error("Choose a test message.");
+      await cancelCartTestMessage(b.profileId, b.messageId);
+      return Response.json({ ok: true });
+    }
+    if (b.action === "clear-cart-test-history") {
+      if (typeof b.profileId !== "string")
+        throw new Error("Choose a contact first.");
+      return Response.json({
+        cleared: await clearCartTestHistory(b.profileId),
+      });
     }
     if (b.action === "run-delivery") {
       return Response.json(await runMarketing());

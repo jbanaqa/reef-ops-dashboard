@@ -151,3 +151,79 @@ export async function sendCartTestNow(profileId: string, messageId: string) {
                   : "Not sent yet. Refresh to see the latest delivery status."),
   };
 }
+
+/** Cancel one pending message from the current account-restricted cart test. */
+export async function cancelCartTestMessage(
+  profileId: string,
+  messageId: string,
+) {
+  if (!profileId || !messageId) throw new Error("Choose a test message.");
+  await atomic(async (tx) => {
+    const m = await tx.marketingMessage.findFirst({
+      where: {
+        id: messageId,
+        profileId,
+        shop: shop(),
+        flowKey: "abandoned-cart",
+        status: "PENDING",
+      },
+      include: { profile: { select: { email: true } } },
+    });
+    if (!m) throw new Error("This pending test message was not found.");
+    const flow = await tx.marketingResource.findUnique({
+      where: {
+        shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" },
+      },
+    });
+    const config = flow && validateFlow("abandoned-cart", flow.data);
+    if (
+      !config?.cart?.testEmail ||
+      config.cart.testEmail !== m.profile.email
+    )
+      throw new Error("Only messages in the current restricted cart test can be cancelled.");
+    await tx.marketingMessage.update({
+      where: { id: m.id },
+      data: { status: "CANCELLED", error: "Cancelled by staff for testing" },
+    });
+  });
+}
+
+/** Remove unsent messages belonging to account-restricted cart test runs. */
+export async function clearCartTestHistory(profileId: string) {
+  if (!profileId) throw new Error("Choose a contact first.");
+  return atomic(async (tx) => {
+    const messages = await tx.marketingMessage.findMany({
+      where: {
+        profileId,
+        shop: shop(),
+        flowKey: "abandoned-cart",
+        status: { in: ["PENDING", "CANCELLED", "FAILED"] },
+      },
+      select: { id: true, key: true },
+    });
+    const removable: string[] = [];
+    for (const m of messages) {
+      const run = await tx.marketingResource.findUnique({
+        where: {
+          shop_kind_key: {
+            shop: shop(),
+            kind: "CART_RUN",
+            key: cartRunKey(m.key),
+          },
+        },
+        select: { data: true },
+      });
+      const testEmail = (run?.data as { config?: { cart?: { testEmail?: string } } } | null)
+        ?.config?.cart?.testEmail;
+      if (testEmail) removable.push(m.id);
+    }
+    if (!removable.length) return 0;
+    await tx.marketingResource.deleteMany({
+      where: { shop: shop(), kind: "CART_WAIT", key: { in: removable } },
+    });
+    const result = await tx.marketingMessage.deleteMany({
+      where: { id: { in: removable }, profileId, shop: shop() },
+    });
+    return result.count;
+  });
+}

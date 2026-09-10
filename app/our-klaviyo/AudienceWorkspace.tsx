@@ -296,6 +296,55 @@ function ContactPanel({
       setSendingId(null);
     }
   }
+  async function cancelTestMessage(messageId: string) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await post({
+        action: "cancel-cart-test-message",
+        profileId: id,
+        messageId,
+      });
+      setNoticeSuccess(true);
+      setNotice("Pending test email cancelled.");
+      refresh();
+      changed();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not cancel this message.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function clearTestHistory() {
+    if (
+      !window.confirm(
+        "Clear unsent abandoned-cart test messages for this account? Sent history will remain.",
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await post<{ cleared: number }>({
+        action: "clear-cart-test-history",
+        profileId: id,
+      });
+      setNoticeSuccess(true);
+      setNotice(
+        result.cleared
+          ? `${result.cleared} unsent test message${result.cleared === 1 ? "" : "s"} cleared.`
+          : "No unsent test messages to clear.",
+      );
+      refresh();
+      changed();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not clear test history.");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <Panel heading={contact ? title(contact) : "Contact details"} close={close}>
       {error && (
@@ -549,7 +598,17 @@ function ContactPanel({
           )}
           {section === "emails" && (
             <section className="aw-detail-section">
-              <h3>Message history</h3>
+              <div className="aw-split">
+                <h3>Message history</h3>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  disabled={busy || loading}
+                  onClick={clearTestHistory}
+                >
+                  Clear unsent test history
+                </button>
+              </div>
               {contact.messages.some((m) => m.testSend) && (
                 <p className="aw-hint">
                   Restricted cart test · Send a selected email to this account
@@ -619,6 +678,14 @@ function ContactPanel({
                             : "Send this step now"}
                         </button>
                         {m.testSend.reason && <p>{m.testSend.reason}</p>}
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          disabled={busy || loading}
+                          onClick={() => cancelTestMessage(m.id)}
+                        >
+                          Cancel pending test
+                        </button>
                       </div>
                     )}
                     {m.error && (
