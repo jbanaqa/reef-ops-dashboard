@@ -2071,3 +2071,120 @@ test("cart tools require staff login and tracking download uses the configured o
   assert.ok(source.includes("https://app.example"));
   assert.ok(!source.includes("YOUR-REEF-OPS-HOST"));
 });
+
+test("Shopify opaque-origin pixels record anonymous views but cannot change consent or enroll", async () => {
+  const route = await import("../app/api/marketing/storefront/route");
+  const settings = await prisma.marketingResource.findUniqueOrThrow({
+    where: { shop_kind_key: { shop, kind: "SETTINGS", key: "global" } },
+  });
+  const saved = settings.data;
+  const body = {
+    action: "event",
+    type: "PRODUCT_VIEWED",
+    id: "sandbox-view-test",
+    anonymousId: "shopify-client-test-123",
+    productId: "gid://shopify/Product/123",
+    email: "spoof@example.com",
+    profileId: "spoof",
+    consent: true,
+  };
+  const request = (
+    payload: object,
+    origin: string | null = "null",
+    method = "POST",
+  ) =>
+    new Request("https://app.example/api/marketing/storefront", {
+      method,
+      headers: {
+        ...(origin === null ? {} : { origin }),
+        "Content-Type": "application/json",
+        "x-forwarded-for": "192.0.2.88",
+      },
+      ...(method === "POST" ? { body: JSON.stringify(payload) } : {}),
+    });
+  const profiles = await prisma.marketingProfile.count(),
+    messages = await prisma.marketingMessage.count(),
+    consents = await prisma.marketingConsent.count();
+  try {
+    await prisma.marketingResource.update({
+      where: { id: settings.id },
+      data: {
+        data: store.json({
+          ...(saved as object),
+          operations: {
+            ingestEnabled: true,
+            sendingEnabled: false,
+            formEnabled: false,
+            migrationConfirmed: false,
+          },
+        }),
+      },
+    });
+    const preflight = route.OPTIONS(request({}, "null", "OPTIONS"));
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "null");
+    assert.equal(
+      preflight.headers.get("access-control-allow-credentials"),
+      null,
+    );
+    assert.equal(
+      route
+        .OPTIONS(request({}, "https://store.example", "OPTIONS"))
+        .headers.get("access-control-allow-origin"),
+      "https://store.example",
+    );
+    for (const origin of [null, "https://unrelated.example"]) {
+      assert.equal(route.OPTIONS(request({}, origin, "OPTIONS")).status, 403);
+      assert.equal((await route.POST(request(body, origin))).status, 403);
+    }
+    for (const action of ["signup", "sms", "status", "config"]) {
+      const response = await route.POST(request({ ...body, action }));
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get("access-control-allow-origin"), "null");
+    }
+    assert.equal(
+      (await route.POST(request({ ...body, type: "ORDER" }))).status,
+      403,
+    );
+    const response = await route.POST(request(body));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("access-control-allow-origin"), "null");
+    await route.POST(request(body));
+    assert.equal(
+      await prisma.marketingEvent.count({
+        where: { key: "browser:sandbox-view-test" },
+      }),
+      1,
+    );
+    const event = await prisma.marketingEvent.findFirstOrThrow({
+      where: { key: "browser:sandbox-view-test" },
+    });
+    assert.equal(event.profileId, null);
+    assert.equal(event.anonymousId, body.anonymousId);
+    assert.deepEqual(event.payload, {
+      productId: body.productId,
+      device: "desktop",
+    });
+    assert.equal(await prisma.marketingProfile.count(), profiles);
+    assert.equal(await prisma.marketingMessage.count(), messages);
+    assert.equal(await prisma.marketingConsent.count(), consents);
+    await prisma.marketingResource.update({
+      where: { id: settings.id },
+      data: {
+        data: store.json({
+          ...(saved as object),
+          operations: { ingestEnabled: false },
+        }),
+      },
+    });
+    assert.equal(
+      (await route.POST(request({ ...body, id: "paused-sandbox" }))).status,
+      503,
+    );
+  } finally {
+    await prisma.marketingResource.update({
+      where: { id: settings.id },
+      data: { data: store.json(saved) },
+    });
+  }
+});

@@ -250,3 +250,7 @@ Refresh history after drafting the equivalent Klaviyo flow and before enabling R
 Additional verification covers paginated read-only imports and foreign-link rejection, the 90-day cart and 3-day popularity windows, overlapping history, queued content and wait edits, imported recent-email protection, report deduplication, staff authentication and production-specific tracking downloads. Browser checks cover these dialogs at desktop, 390px and 320px. Live API access, pixel installation and a controlled checkout still require verification before cutover.
 
 References: [Klaviyo product feeds](https://help.klaviyo.com/hc/en-us/articles/115005082787), [flow timing and edits](https://help.klaviyo.com/hc/en-us/articles/360017706091), [Events API](https://developers.klaviyo.com/en/reference/get_events).
+
+### Shopify custom pixel sandbox requests
+
+Shopify custom pixels send cross-origin requests with the literal Origin header `null`. The storefront endpoint answers preflight and POST requests for that origin, but accepts only anonymous PRODUCT_VIEWED, ADDED_TO_CART and CHECKOUT_STARTED observations. A null origin is not identity proof: signup, SMS consent, session status and configuration actions remain restricted to the configured storefront origin. Missing and unrelated origins are rejected. Existing event validation, rate limits, deduplication and the ingestion switch still apply. No pixel reinstallation is needed for this server-side correction.

@@ -17,25 +17,32 @@ import {
 } from "@/lib/marketing/rules";
 import { setup } from "@/lib/marketing/delivery";
 export const dynamic = "force-dynamic";
-const headers = () => ({
-  "Access-Control-Allow-Origin":
-    process.env.MARKETING_STOREFRONT_ORIGIN || "https://coralsanonymous.com",
+const allowedOrigin = (request: Request) => {
+  const origin = request.headers.get("origin");
+  const storefront = process.env.MARKETING_STOREFRONT_ORIGIN;
+  return storefront && (origin === storefront || origin === "null")
+    ? origin
+    : null;
+};
+const headers = (origin: string) => ({
+  "Access-Control-Allow-Origin": origin,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   Vary: "Origin",
   "Cache-Control": "no-store",
 });
-export function OPTIONS() {
-  return new Response(null, { status: 204, headers: headers() });
+export function OPTIONS(request: Request) {
+  const origin = allowedOrigin(request);
+  return new Response(null, {
+    status: origin ? 204 : 403,
+    ...(origin ? { headers: headers(origin) } : {}),
+  });
 }
 export async function POST(request: Request) {
-  if (
-    !process.env.MARKETING_STOREFRONT_ORIGIN ||
-    request.headers.get("origin") !== process.env.MARKETING_STOREFRONT_ORIGIN
-  )
-    return new Response("Origin denied", { status: 403 });
+  const origin = allowedOrigin(request);
+  if (!origin) return new Response("Origin denied", { status: 403 });
   const reply = (data: unknown, status = 200) =>
-    Response.json(data, { status, headers: headers() });
+    Response.json(data, { status, headers: headers(origin) });
   const settingsRow = await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
   });
@@ -45,6 +52,23 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 16000) return reply({ error: "Payload too large" }, 413);
     const b = JSON.parse(raw);
+    // Shopify custom pixels have an opaque (null) sandbox origin. This is
+    // not proof of identity: allow only rate-limited anonymous observations.
+    // Signup, consent, session lookup and other actions retain storefront-only access.
+    if (
+      origin === "null" &&
+      (b?.action !== "event" ||
+        !["PRODUCT_VIEWED", "ADDED_TO_CART", "CHECKOUT_STARTED"].includes(
+          b?.type,
+        ))
+    )
+      return reply(
+        {
+          error:
+            "Sandbox requests may only record anonymous product and checkout activity.",
+        },
+        403,
+      );
     if (b.action === "event") {
       if (!config.ingestEnabled)
         return reply({ error: "Event collection is paused." }, 503);
