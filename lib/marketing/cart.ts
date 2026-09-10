@@ -9,6 +9,7 @@ import { json, shop, Tx } from "./store";
 export type CartRun = {
   config: FlowConfig;
   profileId?: string;
+  testEmail?: string;
   productIds: string[];
   url: string;
   observedAt?: string;
@@ -74,9 +75,16 @@ export async function enrollCart(
     where: { id: profileId },
   });
   if (profile.lastOrderAt && profile.lastOrderAt >= at) return;
-  const sms = !!profile.phone && eligible(smsConsent);
+  if (
+    config.cart?.testEmail !== undefined &&
+    profile.email !== config.cart.testEmail
+  )
+    return;
+  const sms =
+    !config.cart?.testEmail && !!profile.phone && eligible(smsConsent);
   const run: CartRun = {
     config,
+    ...(config.cart?.testEmail ? { testEmail: config.cart.testEmail } : {}),
     profileId,
     url,
     observedAt: observedAt.toISOString(),

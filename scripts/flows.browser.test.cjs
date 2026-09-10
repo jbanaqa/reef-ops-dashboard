@@ -572,6 +572,65 @@ const { chromium } = require("playwright");
       });
       await page.keyboard.press("Escape");
     }
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page
+      .getByLabel("Restrict this flow to one test email", { exact: true })
+      .check();
+    await page
+      .getByLabel("Test account email", { exact: true })
+      .fill("test@example.com");
+    assert.equal(
+      await page.getByLabel("Enable this flow", { exact: true }).isChecked(),
+      false,
+    );
+    await page
+      .getByLabel(
+        "I reviewed this flow's timing, consent rules, and purchase checks.",
+        { exact: true },
+      )
+      .check();
+    await page.getByLabel("Enable this flow", { exact: true }).check();
+    await page.getByRole("button", { name: "Save flow", exact: true }).click();
+    await page.getByText(/Saved audience: Test email only/).waitFor();
+    await page
+      .locator(".mk-cart-map")
+      .getByRole("button", { name: /Product recommendations/ })
+      .click();
+    await page.getByLabel("Products per email").fill("2");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Save flow", exact: true }).click();
+    assert.equal(
+      await page.evaluate(
+        () => JSON.parse(localStorage.getItem("savedFlow")).data.cart.testEmail,
+      ),
+      "test@example.com",
+    );
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      );
+    }
+    await page
+      .getByLabel("Restrict this flow to one test email", { exact: true })
+      .uncheck();
+    assert.equal(
+      await page.getByLabel("Enable this flow", { exact: true }).isChecked(),
+      false,
+    );
+    assert.equal(
+      await page
+        .getByLabel(
+          "I reviewed this flow's timing, consent rules, and purchase checks.",
+          { exact: true },
+        )
+        .isChecked(),
+      false,
+    );
+
     assert.deepEqual(errors, []);
     console.log(
       "PASS: flow search/status/sort, real message counts, branch-aware step counts, focused navigation, keyboard focus restoration, preserved email drafts and saves, mobile 320/390",

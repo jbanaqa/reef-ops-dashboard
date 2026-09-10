@@ -462,6 +462,67 @@ function FlowEditorState({
         </div>
       )}
       {flow.cart && <CartTools flow={flow as FlowConfig} />}
+      {flow.cart && (
+        <div className="mk-cart-feed-note">
+          <strong>Test before going live</strong>
+          <p>
+            Saved audience:{" "}
+            {(resource.data.cart as CartConfig | undefined)?.testEmail
+              ? "Test email only · " +
+                (resource.data.cart as CartConfig).testEmail
+              : "All eligible customers"}
+            {resource.enabled ? " · Flow enabled" : " · Flow paused"}.
+          </p>
+          <label className="mk-check">
+            <input
+              type="checkbox"
+              checked={flow.cart.testEmail !== undefined}
+              onChange={(e) => {
+                setEnabled(false);
+                setFlow((f) => ({
+                  ...f,
+                  reviewed: false,
+                  cart: {
+                    ...f.cart!,
+                    testEmail: e.target.checked ? "" : undefined,
+                  },
+                }));
+              }}
+            />
+            Restrict this flow to one test email
+          </label>
+          {flow.cart.testEmail !== undefined && (
+            <label>
+              Test account email
+              <input
+                type="email"
+                value={flow.cart.testEmail}
+                placeholder="you@example.com"
+                onChange={(e) => {
+                  setEnabled(false);
+                  setFlow((f) => ({
+                    ...f,
+                    reviewed: false,
+                    cart: { ...f.cart!, testEmail: e.target.value },
+                  }));
+                }}
+              />
+            </label>
+          )}
+          <p>
+            {flow.cart.testEmail !== undefined
+              ? "Only this account can enter or receive this flow. Tests send email only; SMS is skipped. Consent, purchase checks, delays and the 16-hour email limit still apply. Start a fresh checkout after saving and enabling the restricted flow."
+              : "When enabled without this restriction, this flow can send to all eligible customers."}
+          </p>
+          <p>
+            Save flow to apply these settings. Changing the test audience clears
+            Enable and review in this draft. Ending test mode cancels remaining
+            test messages when delivery is checked. This restriction applies
+            only to Abandoned Cart.
+          </p>
+        </div>
+      )}
+
       {resource.key === "low-stock" && (
         <div className="mk-two">
           <label>
@@ -618,6 +679,7 @@ function FlowEditorState({
                       setFlow((f) => ({
                         ...f,
                         cart: {
+                          ...f.cart!,
                           version: 1,
                           productCount: Number(e.target.value),
                         },

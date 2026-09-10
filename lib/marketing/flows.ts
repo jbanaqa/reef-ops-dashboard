@@ -23,6 +23,13 @@ export async function enroll(
   if (!resource?.enabled) return;
   const config = validateFlow(key, resource.data);
   if (!config.reviewed) return;
+  if (key === "abandoned-cart" && config.cart?.testEmail !== undefined) {
+    const recipient = await tx.marketingProfile.findUnique({
+      where: { id: profileId },
+      select: { email: true },
+    });
+    if (recipient?.email !== config.cart.testEmail) return;
+  }
   if (key === "delivery-upsell" && !context.expectedDeliveryAt) return;
   if (key === "abandoned-cart" && at < new Date(Date.now() - 3 * DAY)) {
     if (!config.cart) return;

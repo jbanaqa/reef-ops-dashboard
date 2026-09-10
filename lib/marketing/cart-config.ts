@@ -1,7 +1,11 @@
-import { Content, defaultContent } from "./rules";
+import { Content, defaultContent, email } from "./rules";
 import type { FlowConfig } from "./flow-config";
 
-export type CartConfig = { version: 1; productCount: number };
+export type CartConfig = {
+  version: 1;
+  productCount: number;
+  testEmail?: string;
+};
 export const defaultCartConfig: CartConfig = { version: 1, productCount: 4 };
 export function validateCart(value: unknown): CartConfig {
   const c = value as CartConfig;
@@ -13,7 +17,11 @@ export function validateCart(value: unknown): CartConfig {
     c.productCount > 12
   )
     throw new Error("Choose 0–12 products for cart emails.");
-  return { version: 1, productCount: c.productCount };
+  return {
+    version: 1,
+    productCount: c.productCount,
+    ...(c.testEmail !== undefined ? { testEmail: email(c.testEmail) } : {}),
+  };
 }
 export const cartEmail = (
   kind: "first" | "yes" | "no",
@@ -98,4 +106,26 @@ export function cartDraft(f: FlowConfig): FlowConfig {
           },
     orderBranch: { yes: branch("yes"), no: branch("no") },
   };
+}
+
+/** Test runs never become customer runs when the saved audience changes. */
+export function cartTestBlock(
+  live: CartConfig | undefined,
+  run: { testEmail?: string } | null,
+  address: string | null,
+  channel: string,
+): string | null {
+  if (live?.testEmail !== undefined) {
+    if (
+      !live.testEmail ||
+      address?.toLowerCase() !== live.testEmail.toLowerCase()
+    )
+      return "Outside the cart test account";
+    if (channel !== "EMAIL") return "Cart test mode sends email only";
+    if (!run || run.testEmail !== live.testEmail)
+      return "Start a new checkout after saving test mode";
+  }
+  if (run?.testEmail && run.testEmail !== live?.testEmail)
+    return "Cart test ended or test account changed";
+  return null;
 }

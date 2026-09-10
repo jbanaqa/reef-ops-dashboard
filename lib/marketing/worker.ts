@@ -1,3 +1,4 @@
+import { cartTestBlock, type CartConfig } from "./cart-config";
 import {
   CartRun,
   advanceCart,
@@ -354,6 +355,19 @@ export async function runMarketing() {
         if (m.flowKey === "b2b-welcome" && !m.profile.tags.includes("b2b"))
           reason = "B2B tag removed";
         if (m.flowKey === "abandoned-cart") {
+          const testBlock = cartTestBlock(
+            (f?.data as { cart?: CartConfig })?.cart,
+            cartRun,
+            m.profile.email,
+            m.channel,
+          );
+          if (testBlock) {
+            await tx.marketingMessage.update({
+              where: { id: m.id },
+              data: { status: "CANCELLED", error: testBlock },
+            });
+            return null;
+          }
           if (!cartRun && (f?.data as { cart?: unknown })?.cart)
             reason =
               "Legacy cart reminder replaced; a new checkout is required";
@@ -624,6 +638,10 @@ export async function runMarketing() {
             where: { id: message.id },
             include: { profile: { include: { consents: true } } },
           });
+          const refreshedOrder = await cartLastOrder(
+            latest.profile.email!,
+            message.triggerAt!,
+          );
           const liveFlow = await prisma.marketingResource.findUnique({
             where: {
               shop_kind_key: {
@@ -643,10 +661,19 @@ export async function runMarketing() {
             settings.postalAddress,
           );
           if (latest.status !== "SENDING") continue;
-          const refreshedOrder = await cartLastOrder(
-            latest.profile.email!,
-            message.triggerAt!,
+          const testBlock = cartTestBlock(
+            (liveFlow?.data as { cart?: CartConfig })?.cart,
+            cartRun,
+            latest.profile.email,
+            message.channel,
           );
+          if (testBlock) {
+            await prisma.marketingMessage.update({
+              where: { id: message.id },
+              data: { status: "CANCELLED", error: testBlock },
+            });
+            continue;
+          }
           if (
             (refreshedOrder &&
               message.triggerAt &&

@@ -254,3 +254,9 @@ References: [Klaviyo product feeds](https://help.klaviyo.com/hc/en-us/articles/1
 ### Shopify custom pixel sandbox requests
 
 Shopify custom pixels send cross-origin requests with the literal Origin header `null`. The storefront endpoint answers preflight and POST requests for that origin, but accepts only anonymous PRODUCT_VIEWED, ADDED_TO_CART and CHECKOUT_STARTED observations. A null origin is not identity proof: signup, SMS consent, session status and configuration actions remain restricted to the configured storefront origin. Missing and unrelated origins are rejected. Existing event validation, rate limits, deduplication and the ingestion switch still apply. No pixel reinstallation is needed for this server-side correction.
+
+### Restricted abandoned-cart email testing
+
+In the cart editor, enable **Restrict this flow to one test email**, enter the internal account, review, enable and save. The Saved audience line shows the persisted restriction and enabled state separately from the browser draft. Changing or removing the restriction clears review and enable in the draft; no production setting changes until saved. Product-count and content edits preserve the restriction.
+
+Only the configured email may newly enroll, and matching test runs send email only, bypassing the SMS branch without changing subscription data. Normal consent, purchase checks, delays, Smart Sending and global send/ingest gates remain active. Worker claims and final email preparation recheck the saved test audience. Previously queued customer runs cannot send under test mode, and queued test runs cannot become production runs when test mode is removed. Start a fresh checkout after saving the restriction; existing completed/cancelled journeys are not restarted. This restriction covers Abandoned Cart only, not other flows or campaigns. No live flow is enabled automatically by this release.

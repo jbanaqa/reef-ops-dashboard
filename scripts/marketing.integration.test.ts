@@ -2256,3 +2256,186 @@ test("cart recommendations exclude Shipping Protection and backfill from later c
     globalThis.fetch = previous;
   }
 });
+
+test("cart test mode isolates enrollment and sending, including previously queued customers", async () => {
+  const { enroll } = await import("../lib/marketing/flows");
+  const { cartDraft, cartTestBlock, validateCart } = await import(
+    "../lib/marketing/cart-config"
+  );
+  const { validateFlow } = await import("../lib/marketing/flow-config");
+  assert.throws(() =>
+    validateCart({ version: 1, productCount: 4, testEmail: "" }),
+  );
+  assert.equal(
+    validateCart({
+      version: 1,
+      productCount: 4,
+      testEmail: " TEST@EXAMPLE.COM ",
+    }).testEmail,
+    "test@example.com",
+  );
+  const row = await prisma.marketingResource.findUniqueOrThrow({
+    where: { shop_kind_key: { shop, kind: "FLOW", key: "abandoned-cart" } },
+  });
+  const f = validateFlow("abandoned-cart", cartDraft(row.data as never));
+  f.reviewed = true;
+  f.steps[0].minutes = 0;
+  f.cart!.productCount = 0;
+  const previous = globalThis.fetch;
+  const make = async (email: string) =>
+    store.atomic(async (tx) => {
+      const p = await store.identify(tx, {
+        email,
+        phone: email.startsWith("restricted") ? "+16575550999" : undefined,
+      });
+      await store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "test", new Date());
+      if (p.phone)
+        await store.consent(
+          tx,
+          p.id,
+          "SMS_MARKETING",
+          "SUBSCRIBED",
+          "test",
+          new Date(),
+        );
+      return p;
+    });
+  const target = await make("restricted@example.com"),
+    other = await make("outside-test@example.com");
+  const start = async (id: string, key: string) =>
+    store.atomic((tx) =>
+      enroll(tx, "abandoned-cart", id, key, new Date(Date.now() - 1000), {
+        url: "https://coralsanonymous.com/checkouts/" + key,
+        lines: [{ product_id: "111", quantity: 1 }],
+      }),
+    );
+  const save = () =>
+    prisma.marketingResource.update({
+      where: { id: row.id },
+      data: { enabled: true, data: store.json(f) },
+    });
+  globalThis.fetch = async (input, init) => {
+    if (
+      String(input).includes("/graphql.json") &&
+      String(init?.body).includes("CartOrderCheck")
+    )
+      return Response.json({ data: { orders: { nodes: [] } } });
+    return previous(input, init);
+  };
+  try {
+    await save();
+    await start(other.id, "before-test");
+    f.cart!.testEmail = target.email!;
+    await save();
+    await start(other.id, "outside-new");
+    await start(target.id, "restricted-new");
+    assert.equal(
+      await prisma.marketingMessage.count({ where: { profileId: other.id } }),
+      2,
+      "outsider cannot newly enroll",
+    );
+    assert.equal(
+      await prisma.marketingMessage.count({
+        where: { profileId: target.id, channel: "SMS_MARKETING" },
+      }),
+      0,
+      "test is email-only despite SMS consent",
+    );
+    await worker.runMarketing();
+    const first = await prisma.marketingMessage.findFirstOrThrow({
+      where: { profileId: target.id, flowCondition: "cart-v1:first" },
+    });
+    assert.equal(first.status, "SENT");
+    assert.equal(
+      await prisma.marketingMessage.count({
+        where: { profileId: other.id, status: "SENT" },
+      }),
+      0,
+    );
+    assert.equal(
+      (
+        await prisma.marketingMessage.findFirstOrThrow({
+          where: { profileId: other.id, flowCondition: "cart-v1:first" },
+        })
+      ).status,
+      "CANCELLED",
+    );
+    delete f.cart!.testEmail;
+    await save();
+    await prisma.marketingMessage.updateMany({
+      where: { profileId: target.id, status: "PENDING" },
+      data: { dueAt: new Date(Date.now() - 1000) },
+    });
+    await worker.runMarketing();
+    const final = await prisma.marketingMessage.findFirstOrThrow({
+      where: { profileId: target.id, flowCondition: "cart-v1:final" },
+    });
+    assert.equal(final.status, "CANCELLED");
+    assert.match(final.error || "", /test ended/);
+    assert.match(
+      cartTestBlock(
+        { version: 1, productCount: 4, testEmail: target.email! },
+        null,
+        target.email,
+        "EMAIL",
+      ) || "",
+      /new checkout/,
+    );
+    assert.match(
+      cartTestBlock(
+        { version: 1, productCount: 4, testEmail: target.email! },
+        { testEmail: target.email! },
+        target.email,
+        "SMS_MARKETING",
+      ) || "",
+      /email only/,
+    );
+
+    f.cart!.testEmail = other.email!;
+    f.cart!.productCount = 1;
+    await save();
+    await start(other.id, "change-during-preparation");
+    const preparing = await prisma.marketingMessage.findFirstOrThrow({
+      where: {
+        profileId: other.id,
+        flowCondition: "cart-v1:first",
+        status: "PENDING",
+      },
+    });
+    const beforePreparation = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (
+        String(input).includes("/graphql.json") &&
+        String(init?.body).includes("CartProducts")
+      ) {
+        f.cart!.testEmail = target.email!;
+        await save();
+        return Response.json({ data: { nodes: [] } });
+      }
+      return beforePreparation(input, init);
+    };
+    await worker.runMarketing();
+    const interrupted = await prisma.marketingMessage.findUniqueOrThrow({
+      where: { id: preparing.id },
+    });
+    assert.equal(interrupted.error, "Outside the cart test account");
+    assert.equal(interrupted.status, "CANCELLED");
+    assert.equal(
+      await prisma.marketingMessage.count({
+        where: { profileId: other.id, status: "SENT" },
+      }),
+      0,
+      "audience change during preparation is rechecked before sending",
+    );
+  } finally {
+    globalThis.fetch = previous;
+    await prisma.marketingMessage.updateMany({
+      where: { profileId: { in: [target.id, other.id] }, status: "PENDING" },
+      data: { status: "CANCELLED" },
+    });
+    await prisma.marketingResource.update({
+      where: { id: row.id },
+      data: { data: store.json(row.data), enabled: row.enabled },
+    });
+  }
+});
