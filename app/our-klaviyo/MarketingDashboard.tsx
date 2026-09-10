@@ -15,6 +15,7 @@ import {
   defaultContent,
   defaultMarketingSettings,
   MarketingSettings,
+  withBranding,
 } from "@/lib/marketing/rules";
 import "./marketing.css";
 
@@ -156,9 +157,10 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     setCampaign((c) => ({ ...c, id: r.id }));
     return r.id;
   };
-  const editingContent = resource
-    ? (resource.data as unknown as Content)
-    : campaign.content;
+  const editingContent = withBranding(
+    resource ? (resource.data as unknown as Content) : campaign.content,
+    data?.settings.branding,
+  );
   let emailHtml = "",
     emailPreviewError = "";
   if (editingEmail || resource) {
@@ -169,6 +171,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
         data?.settings.postalAddress || "",
         undefined,
         data?.settings.organizationName,
+        data?.settings.branding,
       );
     } catch (e) {
       emailPreviewError =

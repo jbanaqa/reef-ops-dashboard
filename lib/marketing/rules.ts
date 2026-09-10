@@ -24,6 +24,8 @@ export type Content = {
   showPostalAddress?: boolean;
   footerText?: string;
   footerUnsubscribeText?: string;
+  instagramUrl?: string;
+  facebookUrl?: string;
   /** @deprecated Older saved flows may still contain these pixel values. */ logoWidth?: number;
   logoHeight?: number;
   footerWidth?: number;
@@ -36,14 +38,24 @@ export type MarketingOperations = {
   ingestEnabled: boolean;
   formEnabled: boolean;
 };
+export type EmailBranding = {
+  logo?: string;
+  logoScale?: number;
+  footerImage?: string;
+  footerScale?: number;
+  instagramUrl?: string;
+  facebookUrl?: string;
+};
 export type MarketingSettings = {
   postalAddress: string;
   organizationName: string;
+  branding: EmailBranding;
   operations: MarketingOperations;
 };
 export const defaultMarketingSettings: MarketingSettings = {
   postalAddress: "",
   organizationName: "Corals Anonymous",
+  branding: {},
   operations: {
     sendingEnabled: false,
     migrationConfirmed: false,
@@ -60,11 +72,35 @@ export function marketingSettings(
   const v = (value || {}) as Partial<MarketingSettings> &
     Partial<MarketingOperations>;
   const saved = (v.operations || {}) as Partial<MarketingOperations>;
+  const branding = (v.branding || {}) as Partial<EmailBranding>;
+  const brandingImage = (value: unknown) => (value ? imageSource(value) : undefined);
+  const brandingScale = (value: unknown) => {
+    const n = Number(value);
+    return Number.isFinite(n)
+      ? Math.min(2.5, Math.max(0.25, Math.round(n * 20) / 20))
+      : undefined;
+  };
   return {
     postalAddress: String(v.postalAddress ?? fallbackAddress).slice(0, 500),
     organizationName: String(
       v.organizationName || defaultMarketingSettings.organizationName,
     ).slice(0, 120),
+    branding: {
+      ...(brandingImage(branding.logo) ? { logo: brandingImage(branding.logo) } : {}),
+      ...(brandingScale(branding.logoScale) ? { logoScale: brandingScale(branding.logoScale) } : {}),
+      ...(brandingImage(branding.footerImage)
+        ? { footerImage: brandingImage(branding.footerImage) }
+        : {}),
+      ...(brandingScale(branding.footerScale)
+        ? { footerScale: brandingScale(branding.footerScale) }
+        : {}),
+      ...(branding.instagramUrl
+        ? { instagramUrl: safeUrl(branding.instagramUrl).slice(0, 500) }
+        : {}),
+      ...(branding.facebookUrl
+        ? { facebookUrl: safeUrl(branding.facebookUrl).slice(0, 500) }
+        : {}),
+    },
     operations: {
       sendingEnabled:
         typeof saved.sendingEnabled === "boolean"
@@ -299,6 +335,8 @@ export function content(value: unknown): Content {
       c.footerUnsubscribeText === undefined
         ? undefined
         : String(c.footerUnsubscribeText).slice(0, 300),
+    instagramUrl: c.instagramUrl ? safeUrl(c.instagramUrl).slice(0, 500) : undefined,
+    facebookUrl: c.facebookUrl ? safeUrl(c.facebookUrl).slice(0, 500) : undefined,
     footerScale: c.footerImage
       ? scale(c.footerScale, c.footerWidth, 560)
       : undefined,
@@ -309,6 +347,63 @@ export function content(value: unknown): Content {
       price: String(p.price || "").slice(0, 80),
     })),
   };
+}
+export function withBranding(c: Content, branding?: EmailBranding): Content {
+  if (!branding) return c;
+  return {
+    ...c,
+    ...(c.logo === undefined && branding.logo ? { logo: branding.logo } : {}),
+    ...(c.logoScale === undefined && branding.logoScale
+      ? { logoScale: branding.logoScale }
+      : {}),
+    ...(c.footerImage === undefined && branding.footerImage
+      ? { footerImage: branding.footerImage }
+      : {}),
+    ...(c.footerScale === undefined && branding.footerScale
+      ? { footerScale: branding.footerScale }
+      : {}),
+    ...(c.instagramUrl === undefined && branding.instagramUrl
+      ? { instagramUrl: branding.instagramUrl }
+      : {}),
+    ...(c.facebookUrl === undefined && branding.facebookUrl
+      ? { facebookUrl: branding.facebookUrl }
+      : {}),
+  };
+}
+export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
+  const found: Partial<EmailBranding> = {};
+  const visit = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+    const v = node as Record<string, unknown>;
+    if (typeof v.logo === "string" && v.logo) found.logo = v.logo;
+    if (typeof v.logoScale === "number") found.logoScale = v.logoScale;
+    if (typeof v.footerImage === "string" && v.footerImage)
+      found.footerImage = v.footerImage;
+    if (typeof v.footerScale === "number") found.footerScale = v.footerScale;
+    if (typeof v.instagramUrl === "string" && v.instagramUrl)
+      found.instagramUrl = v.instagramUrl;
+    if (typeof v.facebookUrl === "string" && v.facebookUrl)
+      found.facebookUrl = v.facebookUrl;
+    for (const child of Object.values(v)) {
+      if (child && typeof child === "object") visit(child);
+    }
+  };
+  visit(value);
+  return found;
+}
+function socialHtml(c: Content) {
+  if (!c.instagramUrl && !c.facebookUrl) return "";
+  return (
+    '<div style="margin:24px 0 14px;text-align:center">' +
+    '<strong style="display:block;margin-bottom:12px;color:#122f35;font-size:18px">Follow Us</strong>' +
+    (c.instagramUrl
+      ? '<a href="' + escapeHtml(c.instagramUrl) + '" style="display:inline-block;margin:0 9px;color:#122f35;font-size:24px;font-weight:bold;text-decoration:none" aria-label="Instagram">◎</a>'
+      : "") +
+    (c.facebookUrl
+      ? '<a href="' + escapeHtml(c.facebookUrl) + '" style="display:inline-block;margin:0 9px;color:#122f35;font-family:Arial,sans-serif;font-size:24px;font-weight:bold;text-decoration:none" aria-label="Facebook">f</a>'
+      : "") +
+    "</div>"
+  );
 }
 export function segment(value: unknown): Segment {
   const s = (value || {}) as Segment;
@@ -380,8 +475,9 @@ export function render(
   address: string,
   profileName?: string,
   organizationName = "Corals Anonymous",
+  branding?: EmailBranding,
 ) {
-  c = content(c);
+  c = content(withBranding(content(c), branding));
   address = c.showPostalAddress ? address : "";
   const e = escapeHtml;
   if (c.couponCode && c.template !== "cart-recovery") {
@@ -451,10 +547,16 @@ export function render(
       (c.footerText
         ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
         : "") +
+      socialHtml(c) +
       "<p>" +
       e(organizationName) +
       "<br>" +
       e(address) +
+      "</p><p>© " +
+      new Date().getFullYear() +
+      " " +
+      e(organizationName) +
+      " | All rights reserved." +
       "</p><p>" +
       e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
       ' <a style="color:#174f60" href="' +
@@ -548,6 +650,7 @@ export function render(
       '</a></td></tr><tr><td style="padding:12px 18px 30px;background:#244b7b;text-align:center">' +
       footer +
       footerCopy +
+      socialHtml(c) +
       '<p style="margin:18px 0 0;color:#9fb5d2;font-size:11px">' +
       e(organizationName) +
       '</p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
@@ -556,7 +659,11 @@ export function render(
       e(unsubscribe) +
       '">Unsubscribe</a></p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
       (address ? e(address) : "") +
-      "</p></td></tr></table></td></tr></table></body></html>"
+      '</p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">© ' +
+      new Date().getFullYear() +
+      " " +
+      e(organizationName) +
+      " | All rights reserved.</p></td></tr></table></td></tr></table></body></html>"
     );
   }
   return (
@@ -587,12 +694,18 @@ export function render(
     e(c.button) +
     '</a></p></td></tr><tr><td style="padding:24px;font-size:12px;text-align:center">' +
     (footerTitle(c) ? "<strong>" + e(footerTitle(c)) + "</strong><br>" : "") +
-    (c.footerText
-      ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
-      : "") +
+      (c.footerText
+        ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
+        : "") +
+    socialHtml(c) +
     e(organizationName) +
     "<br>" +
     e(address) +
+    "<br>© " +
+    new Date().getFullYear() +
+    " " +
+    e(organizationName) +
+    " | All rights reserved." +
     "<br>" +
     e(c.footerUnsubscribeText ?? "") +
     ' <a href="' +

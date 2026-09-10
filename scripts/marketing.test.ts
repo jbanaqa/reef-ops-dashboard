@@ -123,6 +123,29 @@ test("cart recovery renders a responsive two-column product grid", () => {
   assert.match(html, /Blue coral/);
   assert.match(html, /Product image/);
 });
+test("shared branding fills missing email artwork and footer metadata", () => {
+  const html = render(
+    content({
+      ...defaultContent,
+      template: "cart-recovery",
+      products: [],
+    }),
+    "https://coralsanonymous.com/unsubscribe",
+    "",
+    undefined,
+    "Example Co",
+    {
+      logo: "https://cdn.example.com/logo.png",
+      instagramUrl: "https://instagram.com/example",
+      facebookUrl: "https://facebook.com/example",
+    },
+  );
+  assert.match(html, /cdn\.example\.com\/logo\.png/);
+  assert.match(html, /Follow Us/);
+  assert.match(html, /instagram\.com\/example/);
+  assert.match(html, /facebook\.com\/example/);
+  assert.match(html, /All rights reserved/);
+});
 test("segment window validation rejects NaN, fractions, and negative windows", () => {
   for (const v of [NaN, 0, -1, 2.5, Infinity, 3651])
     assert.throws(() => segment({ openedDays: v }));

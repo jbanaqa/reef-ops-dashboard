@@ -22,6 +22,7 @@ import {
   defaultContent,
   defaultMarketingSettings,
   email,
+  extractEmailBranding,
   marketingSettings,
   MarketingSettings,
   render,
@@ -46,6 +47,29 @@ async function loadMarketingSettings() {
     process.env.MARKETING_POSTAL_ADDRESS ||
       defaultMarketingSettings.postalAddress,
   );
+}
+async function saveDiscoveredBranding(value: unknown) {
+  const discovered = extractEmailBranding(value);
+  if (!Object.keys(discovered).length) return;
+  const existing = await loadMarketingSettings();
+  const updated = marketingSettings({
+    ...existing,
+    branding: { ...existing.branding, ...discovered },
+  });
+  await prisma.marketingResource.upsert({
+    where: {
+      shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" },
+    },
+    create: {
+      shop: shop(),
+      kind: "SETTINGS",
+      key: "global",
+      name: "Marketing settings",
+      data: json(updated),
+      enabled: true,
+    },
+    update: { data: json(updated), enabled: true },
+  });
 }
 
 const SHOPIFY_MARKETING_WEBHOOK_TOPICS = [
@@ -241,6 +265,7 @@ export async function GET(request: Request) {
           s.postalAddress,
           undefined,
           s.organizationName,
+          s.branding,
         ),
         {
           headers: { "Content-Type": "text/html", "Cache-Control": "no-store" },
@@ -503,6 +528,7 @@ export async function POST(request: Request) {
         content: content(b.content),
         address: s.postalAddress,
         organizationName: s.organizationName,
+        branding: s.branding,
         internalPreview: true,
         unsubscribe: `${process.env.APP_BASE_URL}/api/marketing/unsubscribe?preview=1`,
       });
@@ -591,6 +617,7 @@ export async function POST(request: Request) {
         content: json(content(b.content)),
         audience: json(segment(b.audience)),
       };
+      await saveDiscoveredBranding(data.content);
       if (b.id) {
         const result = await prisma.marketingCampaign.updateMany({
           where: { id: b.id, shop: shop(), status: "DRAFT" },
@@ -691,6 +718,7 @@ export async function POST(request: Request) {
           enabled: !!b.enabled,
         },
       });
+      await saveDiscoveredBranding(data);
       await atomic((tx) =>
         record(tx, {
           key: `staff:${crypto.randomUUID()}`,

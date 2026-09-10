@@ -508,9 +508,32 @@ export default function EmailDesigner({
                     }
                   />
                 </label>
+                <label>
+                  Instagram link
+                  <input
+                    type="url"
+                    placeholder="https://instagram.com/your-account"
+                    value={content.instagramUrl ?? ""}
+                    onChange={(e) =>
+                      changeContent("instagramUrl", e.target.value || undefined)
+                    }
+                  />
+                </label>
+                <label>
+                  Facebook link
+                  <input
+                    type="url"
+                    placeholder="https://facebook.com/your-page"
+                    value={content.facebookUrl ?? ""}
+                    onChange={(e) =>
+                      changeContent("facebookUrl", e.target.value || undefined)
+                    }
+                  />
+                </label>
                 <small>
-                  The Unsubscribe link stays in every email. Footer images can
-                  be changed in Artwork.
+                  The logo, footer artwork, and social links saved here become
+                  shared defaults for future emails. The Unsubscribe link
+                  stays in every email.
                 </small>
                 <h3 style={{ marginTop: 24 }}>Sender details</h3>
                 <label

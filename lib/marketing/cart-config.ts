@@ -6,7 +6,7 @@ export type CartConfig = {
   productCount: number;
   testEmail?: string;
 };
-export const defaultCartConfig: CartConfig = { version: 1, productCount: 4 };
+export const defaultCartConfig: CartConfig = { version: 1, productCount: 6 };
 export function validateCart(value: unknown): CartConfig {
   const c = value as CartConfig;
   if (
@@ -57,7 +57,10 @@ export const cartEmail = (
 });
 /** Upgrade the editor draft only. Saved copy/artwork is never overwritten. */
 export function cartDraft(f: FlowConfig): FlowConfig {
-  if (f.cart) return f;
+  if (f.cart)
+    return f.cart.productCount === 4
+      ? { ...f, cart: { ...f.cart, productCount: 6 } }
+      : f;
   const starter = (c: Content) =>
     c.body === defaultContent.body ||
     [

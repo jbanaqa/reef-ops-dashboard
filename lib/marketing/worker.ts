@@ -746,6 +746,7 @@ export async function runMarketing(onlyMessageId?: string) {
         profileName: message.profile.name,
         address: settings.postalAddress,
         organizationName: settings.organizationName,
+        branding: settings.branding,
         unsubscribe:
           process.env.APP_BASE_URL +
           "/api/marketing/unsubscribe?token=" +

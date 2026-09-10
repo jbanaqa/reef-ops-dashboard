@@ -3,6 +3,7 @@ import EmailDesigner from "./EmailDesigner";
 import {
   render,
   defaultContent,
+  withBranding,
   type MarketingSettings,
 } from "@/lib/marketing/rules";
 import { useEffect, useRef, useState } from "react";
@@ -223,13 +224,17 @@ export default function LowStockEditor({
     emailHtml = "",
     emailPreviewError = "";
   try {
-    emailContent = stockMessageContent(s, "EMAIL", sample);
+    emailContent = withBranding(
+      stockMessageContent(s, "EMAIL", sample),
+      settings.branding,
+    );
     emailHtml = render(
       emailContent,
       "#unsubscribe",
       settings.postalAddress,
       undefined,
       settings.organizationName,
+      settings.branding,
     );
   } catch (e) {
     emailPreviewError = e instanceof Error ? e.message : "Preview unavailable";

@@ -8,6 +8,7 @@ import {
   escapeHtml,
   MarketingSettings,
   render,
+  withBranding,
 } from "@/lib/marketing/rules";
 import { FlowMap, Node } from "./FlowMap";
 import EmailDesigner from "./EmailDesigner";
@@ -238,7 +239,7 @@ function FlowEditorState({
         };
       return f;
     });
-  const content =
+  const rawContent =
     selected?.target.kind === "sms"
       ? flow.smsContent || defaultContent
       : selected?.target.kind === "step"
@@ -246,6 +247,9 @@ function FlowEditorState({
         : selected?.target.kind === "branch" && selected.target.branch
           ? flow.orderBranch?.[selected.target.branch]?.content
           : null;
+  const content = rawContent
+    ? withBranding(rawContent, settings.branding)
+    : rawContent;
   const step =
     selected?.target.kind === "step" || selected?.target.kind === "wait"
       ? flow.steps[selected.target.index || 0]
@@ -284,6 +288,7 @@ function FlowEditorState({
         settings.postalAddress,
         undefined,
         settings.organizationName,
+        settings.branding,
       );
   } catch (error) {
     previewError =

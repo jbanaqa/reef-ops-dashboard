@@ -1,8 +1,10 @@
 import {
   Content,
   MarketingOperations,
+  content,
   render,
   textBody,
+  withBranding,
   footerTitle,
 } from "./rules";
 
@@ -17,18 +19,21 @@ export type Delivery = {
   profileName?: string;
   address?: string;
   organizationName?: string;
+  branding?: import("./rules").EmailBranding;
 };
 export function emailBody(
   m: Delivery,
   address: string,
   organizationName: string,
 ) {
+  const effectiveContent = content(withBranding(m.content, m.branding));
   let html = render(
-    m.content,
+    effectiveContent,
     m.unsubscribe,
     address,
     m.profileName,
     organizationName,
+    m.branding,
   );
   const attachments: {
     filename: string;
@@ -36,7 +41,7 @@ export function emailBody(
     content_id: string;
   }[] = [];
   for (const field of ["logo", "footerImage"] as const) {
-    const image = m.content[field];
+    const image = effectiveContent[field];
     const match = image?.match(
       /^data:image\/(png|jpeg|webp|gif);base64,([a-zA-Z0-9+/=]+)$/,
     );
@@ -54,23 +59,30 @@ export function emailBody(
     html,
     attachments: attachments.length ? attachments : undefined,
     text: [
-      m.content.heading,
-      textBody(m.content, m.profileName),
-      m.content.couponCode
+      effectiveContent.heading,
+      textBody(effectiveContent, m.profileName),
+      effectiveContent.couponCode
         ? "Your 10% discount code: " +
-          m.content.couponCode +
+          effectiveContent.couponCode +
           " (one use; cannot combine with other discounts)"
         : undefined,
-      (m.content.products || [])
+      (effectiveContent.products || [])
         .map((p) => [p.title, p.price, p.url].filter(Boolean).join(" · "))
         .join("\n"),
-      m.content.url,
-      footerTitle(m.content),
-      m.content.footerText,
+      effectiveContent.url,
+      footerTitle(effectiveContent),
+      effectiveContent.footerText,
       organizationName,
-      m.content.showPostalAddress === true ? address : "",
-      m.content.footerUnsubscribeText,
+      effectiveContent.showPostalAddress === true ? address : "",
+      effectiveContent.footerUnsubscribeText,
       "Unsubscribe: " + m.unsubscribe,
+      "© " + new Date().getFullYear() + " " + organizationName + " | All rights reserved.",
+      effectiveContent.instagramUrl
+        ? "Instagram: " + effectiveContent.instagramUrl
+        : "",
+      effectiveContent.facebookUrl
+        ? "Facebook: " + effectiveContent.facebookUrl
+        : "",
     ]
       .filter(Boolean)
       .join("\n\n"),
