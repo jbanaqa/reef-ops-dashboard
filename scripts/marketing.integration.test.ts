@@ -2078,6 +2078,7 @@ test("Shopify opaque-origin pixels record anonymous views but cannot change cons
     where: { shop_kind_key: { shop, kind: "SETTINGS", key: "global" } },
   });
   const saved = settings.data;
+  const savedOrigin = process.env.MARKETING_STOREFRONT_ORIGIN;
   const body = {
     action: "event",
     type: "PRODUCT_VIEWED",
@@ -2146,6 +2147,16 @@ test("Shopify opaque-origin pixels record anonymous views but cannot change cons
       (await route.POST(request({ ...body, type: "ORDER" }))).status,
       403,
     );
+    delete process.env.MARKETING_STOREFRONT_ORIGIN;
+    assert.equal(route.OPTIONS(request({}, "null", "OPTIONS")).status, 204);
+    assert.equal(
+      route.OPTIONS(request({}, "https://store.example", "OPTIONS")).status,
+      403,
+    );
+    assert.equal(
+      (await route.POST(request({ ...body, action: "signup" }))).status,
+      403,
+    );
     const response = await route.POST(request(body));
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("access-control-allow-origin"), "null");
@@ -2182,6 +2193,9 @@ test("Shopify opaque-origin pixels record anonymous views but cannot change cons
       503,
     );
   } finally {
+    if (savedOrigin === undefined)
+      delete process.env.MARKETING_STOREFRONT_ORIGIN;
+    else process.env.MARKETING_STOREFRONT_ORIGIN = savedOrigin;
     await prisma.marketingResource.update({
       where: { id: settings.id },
       data: { data: store.json(saved) },

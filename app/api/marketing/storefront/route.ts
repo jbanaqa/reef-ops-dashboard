@@ -20,9 +20,9 @@ export const dynamic = "force-dynamic";
 const allowedOrigin = (request: Request) => {
   const origin = request.headers.get("origin");
   const storefront = process.env.MARKETING_STOREFRONT_ORIGIN;
-  return storefront && (origin === storefront || origin === "null")
-    ? origin
-    : null;
+  // Anonymous Shopify pixels do not depend on the separate signup-form origin.
+  if (origin === "null") return origin;
+  return storefront && origin === storefront ? origin : null;
 };
 const headers = (origin: string) => ({
   "Access-Control-Allow-Origin": origin,
