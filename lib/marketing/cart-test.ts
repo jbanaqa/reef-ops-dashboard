@@ -192,6 +192,11 @@ export async function cancelCartTestMessage(
 export async function clearCartTestHistory(profileId: string) {
   if (!profileId) throw new Error("Choose a contact first.");
   return atomic(async (tx) => {
+    const profile = await tx.marketingProfile.findFirst({
+      where: { id: profileId, shop: shop() },
+      select: { email: true },
+    });
+    if (!profile?.email) throw new Error("This contact has no email address.");
     const messages = await tx.marketingMessage.findMany({
       where: {
         profileId,
@@ -215,7 +220,7 @@ export async function clearCartTestHistory(profileId: string) {
       });
       const testEmail = (run?.data as { config?: { cart?: { testEmail?: string } } } | null)
         ?.config?.cart?.testEmail;
-      if (testEmail) removable.push(m.id);
+      if (testEmail === profile.email) removable.push(m.id);
     }
     if (!removable.length) return 0;
     await tx.marketingResource.deleteMany({
