@@ -230,6 +230,28 @@ function productHtml(c: Content) {
     )
     .join("");
 }
+function cartProductHtml(c: Content) {
+  const products = c.products || [];
+  if (!products.length) return "";
+  const rows: string[] = [];
+  for (let i = 0; i < products.length; i += 2) {
+    const cells = products.slice(i, i + 2).map((p) =>
+      '<td valign="top" width="50%" style="width:50%;padding:12px 8px 18px;text-align:center">' +
+      '<a href="' + escapeHtml(p.url) + '" style="color:#122f35;text-decoration:none">' +
+      (p.image
+        ? '<img src="' + escapeHtml(p.image) + '" width="240" alt="' + escapeHtml(p.title) + '" style="display:block;width:100%;max-width:240px;height:auto;margin:0 auto 9px;background:#f1f4f4">'
+        : '<div style="width:100%;height:150px;background:#f1f4f4;margin:0 auto 9px;color:#7b8789;font-size:12px;line-height:150px">Product image</div>') +
+      '<strong style="display:block;font-family:Georgia,serif;font-size:16px;line-height:1.25;text-decoration:underline">' +
+      escapeHtml(p.title) +
+      '</strong>' +
+      (p.price ? '<span style="display:block;margin-top:7px;color:#0b9b91;font-size:14px">' + escapeHtml(p.price) + '</span>' : "") +
+      '</a></td>',
+    );
+    if (cells.length === 1) cells.push('<td width="50%" style="width:50%;padding:12px 8px 18px">&nbsp;</td>');
+    rows.push('<tr>' + cells.join("") + '</tr>');
+  }
+  return '<table role="presentation" class="reef-cart-products" width="100%" style="width:100%;border-collapse:collapse;table-layout:fixed;border-top:1px solid #71cbd2;margin-top:18px"><tbody>' + rows.join("") + '</tbody></table>';
+}
 export function content(value: unknown): Content {
   if (!value || typeof value !== "object")
     throw new Error("Message content is required.");
@@ -396,12 +418,11 @@ export function render(
       e(c.preview || "") +
       "</span>" +
       logo +
-      '</td></tr><tr><td class="reef-copy reef-cart-copy" style="padding:40px 42px 26px;text-align:center;color:white;background:#70b8c2;background-image:linear-gradient(135deg,#91d6dd,#5896a4,#91d6dd)">' +
-      (c.hero
-        ? '<img src="' +
-          e(c.hero) +
-          '" alt="" style="display:block;width:100%;height:auto;margin-bottom:24px">'
-        : "") +
+      '</td></tr><tr><td align="center" style="padding:0;background:#82d2dc"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed"><tr><td class="reef-copy reef-cart-copy"' +
+      (c.hero ? ' background="' + e(c.hero) + '"' : "") +
+      ' style="padding:58px 42px 28px;text-align:center;color:white;background-color:#70b8c2;' +
+      (c.hero ? 'background-image:url(' + e(c.hero) + ');background-size:cover;background-position:center;' : 'background-image:linear-gradient(135deg,#91d6dd,#5896a4,#91d6dd);') +
+      '">' +
       '<h1 style="font-family:Georgia,serif;font-style:italic;font-size:30px;line-height:1.3;color:white;text-shadow:1px 2px 2px #173e46">' +
       e(c.heading) +
       '</h1><div style="font-family:Georgia,serif;font-style:italic;font-weight:bold;font-size:23px;line-height:1.55;color:white;text-shadow:1px 2px 2px #173e46">' +
@@ -416,8 +437,8 @@ export function render(
       e(c.url) +
       '" style="display:inline-block;max-width:100%;box-sizing:border-box;background:white;border-radius:32px;padding:16px 28px;color:#12333b;font-size:13px;font-weight:bold;text-decoration:none">' +
       e(c.button) +
-      '</a></p></td></tr><tr><td style="padding:8px 28px 24px;background:white;text-align:center">' +
-      productHtml(c) +
+      '</a></p></td></tr></table></td></tr><tr><td style="padding:8px 28px 24px;background:white;text-align:center">' +
+      cartProductHtml(c) +
       '</td></tr><tr><td style="padding:26px;text-align:center;color:#254c53;font-size:12px;line-height:1.6">' +
       (c.footerImage
         ? '<img src="' +

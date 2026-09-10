@@ -86,6 +86,43 @@ test("templates escape hostile content and reject unsafe link schemes", () => {
     content({ ...defaultContent, hero: "data:image/svg+xml,xxx" }),
   );
 });
+test("cart recovery renders a responsive two-column product grid", () => {
+  const html = render(
+    content({
+      ...defaultContent,
+      template: "cart-recovery",
+      heading: "Aloha Friend",
+      body: "Your corals are waiting.",
+      hero: "https://cdn.example.com/cart-art.jpg",
+      products: [
+        {
+          title: "Blue coral",
+          url: "https://coralsanonymous.com/products/blue",
+          image: "https://cdn.example.com/blue.jpg",
+          price: "USD 24.00",
+        },
+        {
+          title: "Red coral",
+          url: "https://coralsanonymous.com/products/red",
+          image: "https://cdn.example.com/red.jpg",
+          price: "USD 18.00",
+        },
+        {
+          title: "Green coral",
+          url: "https://coralsanonymous.com/products/green",
+          price: "USD 12.00",
+        },
+      ],
+    }),
+    "https://coralsanonymous.com/unsubscribe",
+    "",
+  );
+  assert.match(html, /class="reef-cart-products"/);
+  assert.equal((html.match(/width="50%"/g) || []).length, 4);
+  assert.match(html, /background="https:\/\/cdn\.example\.com\/cart-art\.jpg"/);
+  assert.match(html, /Blue coral/);
+  assert.match(html, /Product image/);
+});
 test("segment window validation rejects NaN, fractions, and negative windows", () => {
   for (const v of [NaN, 0, -1, 2.5, Infinity, 3651])
     assert.throws(() => segment({ openedDays: v }));
