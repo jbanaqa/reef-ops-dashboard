@@ -1,3 +1,4 @@
+import { cartReadiness } from "@/lib/marketing/cart";
 import { readStock, lowStock } from "@/lib/marketing/stock";
 import { validateStock } from "@/lib/marketing/stock-config";
 import { isDashboardRequestAuthorized } from "@/lib/dashboard-request-auth";
@@ -50,6 +51,7 @@ const SHOPIFY_MARKETING_WEBHOOK_TOPICS = [
   "CUSTOMER_TAGS_REMOVED",
   "CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE",
   "CUSTOMERS_MARKETING_CONSENT_UPDATE",
+  "ORDERS_CREATE",
   "CHECKOUTS_CREATE",
   "CHECKOUTS_UPDATE",
 ] as const;
@@ -595,6 +597,8 @@ export async function POST(request: Request) {
       });
       return Response.json({ ok: true });
     }
+    if (b.action === "cart-readiness")
+      return Response.json(await cartReadiness());
     if (b.action === "save-resource") {
       if (!["SEGMENT", "TEMPLATE", "FLOW"].includes(b.kind))
         throw new Error("Unsupported resource.");
@@ -604,6 +608,10 @@ export async function POST(request: Request) {
         if (b.enabled && !f.reviewed)
           throw new Error("Review the flow configuration before enabling.");
         if (b.enabled && b.key === "low-stock") validateStock(f.stock, true);
+        if (b.enabled && b.key === "abandoned-cart" && !f.cart)
+          throw new Error(
+            "Open and review the updated cart flow before enabling it.",
+          );
         data = json(f);
       } else
         data = json(b.kind === "SEGMENT" ? segment(b.data) : content(b.data));

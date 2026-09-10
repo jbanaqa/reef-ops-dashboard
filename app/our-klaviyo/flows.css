@@ -426,3 +426,118 @@
     font-size: 16px;
   }
 }
+
+.mk-cart-map {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 0 36px;
+  gap: 0;
+}
+.mk-cart-map .mk-flow-node {
+  margin: 0;
+  width: 100%;
+  max-width: 360px;
+  min-height: 72px;
+}
+.mk-cart-connector {
+  display: block;
+  height: 26px;
+  line-height: 26px;
+  color: #87bfc2;
+  text-align: center;
+}
+.mk-cart-fork {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+  width: 100%;
+  max-width: 780px;
+  border-top: 1px solid #badbdd;
+  margin-top: 24px;
+  padding-top: 16px;
+}
+.mk-cart-fork > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+.mk-cart-path {
+  font-size: 12px;
+  font-weight: 600;
+  color: #456b73;
+  background: #edf7f7;
+  border-radius: 20px;
+  padding: 6px 12px;
+  margin-bottom: 14px;
+}
+.mk-cart-tools {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  max-width: 780px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid #d7e7e9;
+}
+.mk-cart-tools .mk-flow-node {
+  flex: 1;
+}
+.mk-cart-feed-note {
+  margin: 18px 0;
+  padding: 16px;
+  background: #f0f8f8;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+@media (max-width: 600px) {
+  .mk-cart-fork {
+    gap: 12px;
+  }
+  .mk-cart-map .mk-flow-node {
+    padding: 14px 10px;
+    display: block;
+  }
+  .mk-cart-map .mk-flow-icon {
+    display: none;
+  }
+  .mk-cart-path {
+    padding: 5px 8px;
+    text-align: center;
+    font-size: 11px;
+  }
+  .mk-cart-tools {
+    flex-direction: column;
+    align-items: center;
+  }
+  .mk-cart-fork strong {
+    font-size: 12px;
+  }
+}
+
+.mk-flow-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: calc(100vw - 32px);
+  max-width: 680px;
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  overflow: auto;
+  border: 1px solid #c8dfe2;
+  border-radius: 18px;
+  padding: 24px;
+  background: var(--panel, #fff);
+  color: var(--text, #15353e);
+  box-shadow: 0 24px 70px #14384233;
+}
+.mk-flow-dialog::backdrop {
+  background: #102f3d80;
+}
+.mk-flow-dialog input,
+.mk-flow-dialog textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}

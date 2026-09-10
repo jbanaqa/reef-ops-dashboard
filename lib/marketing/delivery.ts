@@ -56,6 +56,11 @@ export function emailBody(
     text: [
       m.content.heading,
       textBody(m.content, m.profileName),
+      m.content.couponCode
+        ? "Your 10% discount code: " +
+          m.content.couponCode +
+          " (one use; cannot combine with other discounts)"
+        : undefined,
       (m.content.products || [])
         .map((p) => [p.title, p.price, p.url].filter(Boolean).join(" · "))
         .join("\n"),

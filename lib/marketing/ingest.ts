@@ -22,6 +22,7 @@ type Customer = {
   };
 };
 type Payload = Customer & {
+  line_items?: import("./cart").CartLine[];
   customer?: Customer;
   customerId?: string | number;
   customer_id?: string | number;
@@ -382,7 +383,7 @@ export async function ingestShopify(
         profile.id,
         String(p.token || p.id),
         date(p.created_at || at.toISOString()),
-        { url: p.abandoned_checkout_url },
+        { url: p.abandoned_checkout_url, lines: p.line_items, observedAt: at },
       );
     if (topic === "delivery/scheduled" && !historical && p.expected_delivery_at)
       await enroll(

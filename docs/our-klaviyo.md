@@ -192,3 +192,47 @@ The reviewed Shopify workflow watches collection `488202338530` (T5 Tank), tests
 5. Confirm recovery before delivery cancels a queued alert. Verify recipient suppression and actual SMS gateway delivery before relying on texts.
 
 Automated coverage: isolated PostgreSQL integration tests mock Shopify/provider calls for baseline/crossing/recovery, strict boundary, variants, duplicates, pagination, staff email, suppression, authenticated preview and failure isolation. Browser coverage exercises setup, validation, draft restoration/save, read-only preview, manual check and 320/390px layouts. These tests do not send real messages.
+
+## Abandoned Cart — first iteration (September 9, 2026)
+
+Open **Flows → Abandoned Cart**. The upgraded editor starts as an unreviewed, paused browser draft until saved. It preserves customized copy and artwork; untouched starter copy is replaced with the three supplied Klaviyo email approximations. Saving does not enable the flow unless the Enable checkbox is selected. Existing in-progress versioned checkouts keep their copy and timing.
+
+### What runs
+
+- A new identified Shopify checkout, no older than three days, enters once per checkout. A different checkout may re-enter without the old 24-hour enrollment lock.
+- Text subscribers wait 30 minutes, then receive the marketing text when permitted. Other customers bypass that text delay.
+- After the text is sent or skipped, wait three hours, then send the first soft-push email. Customers on the email-only path wait three hours from checkout.
+- Wait one day after the first email is sent or skipped. A purchase in the preceding two weeks selects the second soft push; otherwise select the 10% offer.
+- A purchase since the checkout began stops remaining reminders. Shopify order history is checked as well as locally received order events; if Shopify cannot be checked, delivery waits.
+- Current consent and suppression apply to every message. Email skips if another marketing email was sent in the last 16 hours; text skips for a text in the last 24 hours. Pending uncertain deliveries prevent overlapping cart sends.
+- Text quiet hours are 8 p.m.–11 a.m. in the profile's recorded timezone, checked before Smart Sending. Missing timezone or SMS gateway pauses that path, including subsequent email. This does not implement Klaviyo's inferred area-code timezones or additional country/state-specific SMS scheduling.
+- Failed/skipped terminal steps allow the next delay to begin; an uncertain provider outcome holds the sequence for reconciliation. Manual delivery still honors due times, consent, quiet hours and global switches.
+- Checkout updates refresh products/link without restarting the journey. Empty checkout updates cancel pending reminders. Old legacy jobs are not converted into the new sequence.
+
+### Email and recommendations
+
+All three messages use the existing responsive designer, editable footer, artwork storage and desktop/mobile preview. Turquoise styling, serif italic copy, logo area and pill-shaped cart button approximate the screenshots; exact water artwork, complete footer and product-section styling can be refined later. Test emails contain clearly marked sample products and a non-redeemable preview code.
+
+The real checkout recovery URL replaces the example cart URL. Available cart products appear first. Remaining slots alternate products ranked by recorded sales quantities and product views during the last three days, across all categories, removing duplicates and unpublished/out-of-stock products. Four slots are the editable default (0–12). Product availability, URLs, images and prices come from Shopify. Fewer products are shown if insufficient data or stock exists; unrelated static products are not substituted.
+
+The first iteration ranks Reef Ops observations, not Klaviyo's private recommendation model/history. Views count once per visitor/product/day; ranking reads at most the newest 10,000 relevant events and considers up to 100 product candidates. It needs the existing Shopify customer-events pixel installed with the correct Reef Ops URL and consent settings. Analytics collection now follows the ingestion switch and does not require the signup form or sending to be enabled. Historical views cannot be reconstructed. Order webhooks start collecting sales data once connected.
+
+### Discount
+
+The offer creates an actual Shopify basic discount: 10% off all items, no minimum, no combination with other discount classes, prefix AC300-, activation during send preparation, expiry one calendar year later. Codes are single-use (first-iteration implementation choice) and unique per message. The random code is persisted before creating it; retries look up that same code to recover a lost Shopify response. Email is withheld on preparation failure. Prepared email content is frozen for provider retries.
+
+Required Shopify access: read orders, read products and write discounts (including discount lookup access), plus protected customer-data permissions applicable to checkout/order data. The **Check Shopify connection** button checks scopes, checkout/order subscriptions and recent view activity without sending or creating a discount. It is not a full deliverability or SMS compliance certification.
+
+### Controlled live test
+
+1. Keep the flow paused. Open each email and use **Send test** to an internal allowlisted address; check desktop/mobile content and footer.
+2. Run **Check Shopify connection**. Add missing app access, and use Settings to connect Shopify events (now includes ORDERS_CREATE). Verify that product views are arriving after installing the customer-events pixel.
+3. Pause the equivalent Klaviyo automation before enabling Reef Ops to prevent duplicate customer reminders. Confirm SMS provider readiness and recipient timezone if testing texts.
+4. Review and save the flow. Use a subscribed internal Shopify customer to start a fresh checkout with products, enter contact details and leave without paying.
+5. Process events in Settings and inspect the contact's scheduled messages. Use Run deliveries now for messages already due, or wait for the worker. For a faster isolated test, save shorter delays before starting the test checkout, then restore 30 minutes / 3 hours / 1 day before live use.
+6. Test both prior-order branches, then a separate checkout followed by a purchase to confirm cancellation. Verify the generated Shopify discount's amount, restrictions and expiration without using a customer purchase.
+7. New checkouts may re-enter, but Smart Sending still applies; changing tags is unrelated to this flow.
+
+Automated tests use an isolated disposable database and mocked Shopify/email providers. They do not verify production credentials, actual checkout webhook payloads, mobile carrier delivery, inbox placement, or access grants.
+
+References: [Klaviyo quiet-hours sequencing](https://help.klaviyo.com/hc/en-us/articles/4408737146651), [Smart Sending](https://help.klaviyo.com/hc/en-us/articles/115002779311), [Shopify discount creation](https://shopify.dev/docs/api/admin-graphql/latest/mutations/discountCodeBasicCreate), [discount input fields](https://shopify.dev/docs/api/admin-graphql/latest/input-objects/DiscountCodeBasicInput).

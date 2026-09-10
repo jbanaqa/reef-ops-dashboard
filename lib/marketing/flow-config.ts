@@ -1,3 +1,4 @@
+import { CartConfig, validateCart } from "./cart-config";
 import { StockConfig, validateStock } from "./stock-config";
 import { defaultContent } from "./rules";
 import { channels, content, Content, flowDefaults } from "./rules";
@@ -21,10 +22,12 @@ export type FlowConfig = {
   internalProfileIds?: string[];
   threshold?: number;
   stock?: StockConfig;
+  cart?: CartConfig;
 };
 export type FlowTarget = {
   kind: "step" | "sms" | "branch" | "wait" | "info";
   index?: number;
+  section?: "products" | "coupon";
   branch?: "yes" | "no";
   timing?: "smsMinutes" | "branchMinutes";
 };
@@ -99,6 +102,17 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
   });
   if (key === "b2b-welcome" && steps.length !== 1)
     throw new Error("B2B welcome sends one email per profile.");
+  if (
+    f.cart &&
+    (key !== "abandoned-cart" ||
+      steps.length !== 1 ||
+      steps[0].channel !== "EMAIL" ||
+      !f.smsContent ||
+      !f.orderBranch)
+  )
+    throw new Error(
+      "Cart recovery requires a text, a first email, and both follow-up emails.",
+    );
   const branch = (b: Branch) => {
     if (!b) throw new Error("Both legacy branch objects are required.");
     return { subject: subject(b.subject), content: content(b.content) };
@@ -117,6 +131,9 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     throw new Error("Invalid inventory threshold.");
   return {
     ...(stock ? { stock } : {}),
+    ...(key === "abandoned-cart" && f.cart
+      ? { cart: validateCart(f.cart) }
+      : {}),
     reviewed: f.reviewed === true,
     description: String(f.description || "").slice(0, 1000),
     trigger: flowDefaults.find((f) => f.key === key)!.trigger,

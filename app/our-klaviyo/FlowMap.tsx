@@ -100,6 +100,12 @@ export function FlowMap({
   onNodeClick?: (node: Node) => void;
 }) {
   const nodes = suppliedNodes || flowNodes(resource);
+  if (
+    !suppliedNodes &&
+    resource.key === "abandoned-cart" &&
+    (resource.data as unknown as FlowConfig).cart
+  )
+    return <CartMap resource={resource} onNodeClick={onNodeClick} />;
   return (
     <div className="mk-flow-map" aria-label={resource.name + " automation map"}>
       {nodes.map((n, i) => {
@@ -130,6 +136,175 @@ export function FlowMap({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function CartMap({
+  resource,
+  onNodeClick,
+}: {
+  resource: Resource;
+  onNodeClick?: (node: Node) => void;
+}) {
+  const f = resource.data as unknown as FlowConfig;
+  const duration = (n: number) =>
+    n && n % 1440 === 0
+      ? n / 1440 + " day" + (n === 1440 ? "" : "s")
+      : n && n % 60 === 0
+        ? n / 60 + " hour" + (n === 60 ? "" : "s")
+        : n + " minutes";
+  const node = (
+    id: string,
+    kind: Node["kind"],
+    label: string,
+    detail: string,
+    target: FlowTarget = { kind: "info" },
+  ) => {
+    const n = { id, kind, label, detail, target };
+    return (
+      <button
+        type="button"
+        className={"mk-flow-node mk-flow-" + kind}
+        onClick={() => onNodeClick?.(n)}
+      >
+        <span className="mk-flow-icon">{icon[kind]}</span>
+        <div>
+          <strong>{label}</strong>
+          <small>{detail}</small>
+        </div>
+      </button>
+    );
+  };
+  const line = (
+    <span className="mk-cart-connector" aria-hidden="true">
+      ↓
+    </span>
+  );
+  return (
+    <div className="mk-cart-map" aria-label={resource.name + " automation map"}>
+      {node(
+        "trigger",
+        "trigger",
+        "Checkout started",
+        "New checkouts can re-enter. Duplicate updates do not restart the flow.",
+      )}
+      {line}
+      {node(
+        "entry",
+        "condition",
+        "Checkout started within the last 3 days",
+        "Older events end here. A new purchase stops every remaining reminder.",
+      )}
+      {line}
+      {node(
+        "sms-choice",
+        "condition",
+        "Can receive marketing texts?",
+        "Current text consent is required.",
+      )}
+      <div className="mk-cart-fork">
+        <div>
+          <span className="mk-cart-path">Yes · text subscriber</span>
+          {node(
+            "sms-wait",
+            "wait",
+            "Wait " + duration(f.smsMinutes ?? 30),
+            "Then check quiet hours and recent texts.",
+            { kind: "wait", timing: "smsMinutes" },
+          )}
+          {line}
+          {node(
+            "sms",
+            "sms",
+            "Text message #1",
+            "Skip if texted in the last 24 hours. Quiet hours: 8 p.m.–11 a.m.",
+            { kind: "sms" },
+          )}
+        </div>
+        <div>
+          <span className="mk-cart-path">No · continue to email</span>
+          {node(
+            "sms-bypass",
+            "condition",
+            "Skip the text",
+            "Continue without the 30-minute text delay.",
+          )}
+        </div>
+      </div>
+      {line}
+      {node(
+        "email-wait",
+        "wait",
+        "Wait " + duration(f.steps[0].minutes),
+        "After the text is sent or skipped; immediately begins on the no-text path.",
+        { kind: "wait", index: 0 },
+      )}
+      {line}
+      {node("first", "email", "Email #1 · Soft push", f.steps[0].subject, {
+        kind: "step",
+        index: 0,
+      })}
+      {line}
+      {node(
+        "followup-wait",
+        "wait",
+        "Wait " + duration(f.branchMinutes ?? 1440),
+        "After the first email is sent or skipped.",
+        { kind: "wait", timing: "branchMinutes" },
+      )}
+      {line}
+      {node(
+        "past-order",
+        "condition",
+        "Purchased in the last 2 weeks?",
+        "Only customers who have not purchased since entering this flow reach this decision.",
+      )}
+      <div className="mk-cart-fork">
+        <div>
+          <span className="mk-cart-path">Yes · recent customer</span>
+          {node(
+            "yes",
+            "email",
+            "Email #2 · Another soft push",
+            f.orderBranch!.yes.subject,
+            { kind: "branch", branch: "yes" },
+          )}
+        </div>
+        <div>
+          <span className="mk-cart-path">No · offer 10% off</span>
+          {node(
+            "no",
+            "email",
+            "Email #2 · Discount offer",
+            f.orderBranch!.no.subject,
+            { kind: "branch", branch: "no" },
+          )}
+        </div>
+      </div>
+      {line}
+      {node(
+        "end",
+        "end",
+        "End",
+        "Each email checks consent and skips customers emailed in the last 16 hours.",
+      )}
+      <div className="mk-cart-tools">
+        {node(
+          "products",
+          "condition",
+          "Product recommendations",
+          "Cart items first, then popular products from the last 3 days.",
+          { kind: "info", section: "products" },
+        )}
+        {node(
+          "coupon",
+          "condition",
+          "10% discount",
+          "Unique code · no minimum · no combinations · expires after 1 year.",
+          { kind: "info", section: "coupon" },
+        )}
+      </div>
     </div>
   );
 }

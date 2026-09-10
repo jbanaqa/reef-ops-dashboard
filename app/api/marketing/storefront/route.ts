@@ -41,18 +41,26 @@ export async function POST(request: Request) {
   });
   const settings = marketingSettings(settingsRow?.data);
   const config = setup(settings.operations, settings.postalAddress);
-  if (
-    !config.formEnabled ||
-    !config.sendingEnabled ||
-    !config.migrationConfirmed ||
-    !config.emailReady ||
-    !config.couponReady
-  )
-    return reply({ enabled: false, error: "Signup is not enabled yet." }, 503);
   try {
     const raw = await request.text();
     if (raw.length > 16000) return reply({ error: "Payload too large" }, 413);
     const b = JSON.parse(raw);
+    if (b.action === "event") {
+      if (!config.ingestEnabled)
+        return reply({ error: "Event collection is paused." }, 503);
+    } else {
+      if (
+        !config.formEnabled ||
+        !config.sendingEnabled ||
+        !config.migrationConfirmed ||
+        !config.emailReady ||
+        !config.couponReady
+      )
+        return reply(
+          { enabled: false, error: "Signup is not enabled yet." },
+          503,
+        );
+    }
     if (b.action === "config") {
       const welcome = await prisma.marketingResource.findUnique({
         where: {
@@ -287,7 +295,8 @@ export async function POST(request: Request) {
         },
       });
       const d = r?.data as
-        { confirmed?: boolean; expiresAt?: string } | undefined;
+        | { confirmed?: boolean; expiresAt?: string }
+        | undefined;
       const valid = !!d?.expiresAt && new Date(d.expiresAt) > new Date();
       return reply({
         known: valid,

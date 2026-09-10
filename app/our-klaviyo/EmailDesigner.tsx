@@ -132,7 +132,9 @@ export default function EmailDesigner({
   contentFields,
   previewSubject,
   previewCaption,
+  recoveryLink,
 }: {
+  recoveryLink?: boolean;
   contentFields?: React.ReactNode;
   previewSubject?: string;
   previewCaption?: string;
@@ -256,7 +258,9 @@ export default function EmailDesigner({
               .filter((tab) =>
                 contentFields
                   ? tab === "content"
-                  : tab !== "artwork" || content.template === "b2b-wholesale",
+                  : tab !== "artwork" ||
+                    content.template === "b2b-wholesale" ||
+                    content.template === "cart-recovery",
               )
               .map((tab) => (
                 <button
@@ -336,8 +340,17 @@ export default function EmailDesigner({
                       />
                     </label>
                     <label>
-                      Button destination
+                      {recoveryLink
+                        ? "Customer checkout link"
+                        : "Button destination"}
+                      {recoveryLink && (
+                        <small>
+                          Filled automatically for each customer. This example
+                          link is only used in previews and test emails.
+                        </small>
+                      )}
                       <input
+                        readOnly={recoveryLink}
                         type="url"
                         value={content.url}
                         placeholder="https://"

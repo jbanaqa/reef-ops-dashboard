@@ -14,7 +14,8 @@ export type Content = {
   url: string;
   hero?: string;
   preview?: string;
-  template?: "standard" | "b2b-wholesale";
+  template?: "standard" | "b2b-wholesale" | "cart-recovery";
+  couponCode?: string;
   logo?: string;
   logoScale?: number;
   footerImage?: string;
@@ -252,7 +253,13 @@ export function content(value: unknown): Content {
     url: safeUrl(c.url),
     hero: c.hero ? safeUrl(c.hero) : undefined,
     preview: String(c.preview || "").slice(0, 200),
-    template: c.template === "b2b-wholesale" ? "b2b-wholesale" : "standard",
+    template:
+      c.template === "cart-recovery"
+        ? "cart-recovery"
+        : c.template === "b2b-wholesale"
+          ? "b2b-wholesale"
+          : "standard",
+    couponCode: c.couponCode ? String(c.couponCode).slice(0, 100) : undefined,
     logo: c.logo ? imageSource(c.logo) : undefined,
     logoScale: c.logo ? scale(c.logoScale, c.logoWidth, 260) : undefined,
     footerImage: c.footerImage ? imageSource(c.footerImage) : undefined,
@@ -352,6 +359,85 @@ export function render(
 ) {
   c = content(c);
   const e = escapeHtml;
+  if (c.couponCode && c.template !== "cart-recovery") {
+    const line = "Your 10% discount code: " + c.couponCode;
+    c = {
+      ...c,
+      body: c.body + "\n\n" + line,
+      ...(c.bodyHtml !== undefined
+        ? { bodyHtml: c.bodyHtml + "<p>" + e(line) + "</p>" }
+        : {}),
+    };
+  }
+  if (c.template === "cart-recovery") {
+    const copy =
+      c.bodyHtml !== undefined
+        ? personalize(c.bodyHtml, profileName, true)
+        : e(personalize(c.body, profileName)).replace(/\n/g, "<br>");
+    const logo = c.logo
+      ? '<img src="' +
+        e(c.logo) +
+        '" alt="' +
+        e(organizationName) +
+        '" width="' +
+        Math.round(260 * (c.logoScale || 1)) +
+        '" style="max-width:100%;height:auto">'
+      : '<strong style="font-size:24px;font-style:italic;color:#102d33">' +
+        e(organizationName.toUpperCase()) +
+        "</strong>";
+    return (
+      "<!doctype html><html>" +
+      emailHead +
+      '<body style="background:#eff8f8;margin:0;font-family:Arial,sans-serif"><table role="presentation" width="100%"><tr><td align="center" class="reef-outer" style="padding:16px"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:#8bd8e2"><tr><td class="reef-logo" style="background:white;padding:24px;text-align:center">' +
+      '<span style="display:none;max-height:0;overflow:hidden;mso-hide:all">' +
+      e(c.preview || "") +
+      "</span>" +
+      logo +
+      '</td></tr><tr><td class="reef-copy reef-cart-copy" style="padding:40px 42px 26px;text-align:center;color:white;background:#70b8c2;background-image:linear-gradient(135deg,#91d6dd,#5896a4,#91d6dd)">' +
+      (c.hero
+        ? '<img src="' +
+          e(c.hero) +
+          '" alt="" style="display:block;width:100%;height:auto;margin-bottom:24px">'
+        : "") +
+      '<h1 style="font-family:Georgia,serif;font-style:italic;font-size:30px;line-height:1.3;color:white;text-shadow:1px 2px 2px #173e46">' +
+      e(c.heading) +
+      '</h1><div style="font-family:Georgia,serif;font-style:italic;font-weight:bold;font-size:23px;line-height:1.55;color:white;text-shadow:1px 2px 2px #173e46">' +
+      copy +
+      "</div>" +
+      (c.couponCode
+        ? '<p style="font-size:14px;margin-top:30px">Use Discount Code:</p><p style="font-weight:bold;font-size:22px;overflow-wrap:anywhere">' +
+          e(c.couponCode) +
+          '</p><p style="font-size:12px">10% off your order. One use. Cannot combine with other discounts.</p>'
+        : "") +
+      '<p style="margin:30px 0 8px"><a href="' +
+      e(c.url) +
+      '" style="display:inline-block;max-width:100%;box-sizing:border-box;background:white;border-radius:32px;padding:16px 28px;color:#12333b;font-size:13px;font-weight:bold;text-decoration:none">' +
+      e(c.button) +
+      '</a></p></td></tr><tr><td style="padding:8px 28px 24px;background:white;text-align:center">' +
+      productHtml(c) +
+      '</td></tr><tr><td style="padding:26px;text-align:center;color:#254c53;font-size:12px;line-height:1.6">' +
+      (c.footerImage
+        ? '<img src="' +
+          e(c.footerImage) +
+          '" alt="" width="' +
+          Math.round(560 * (c.footerScale || 1)) +
+          '" style="max-width:100%;height:auto">'
+        : "") +
+      (c.footerTitle ? "<h2>" + e(c.footerTitle) + "</h2>" : "") +
+      (c.footerText
+        ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
+        : "") +
+      "<p>" +
+      e(organizationName) +
+      "<br>" +
+      e(address) +
+      "</p><p>" +
+      e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
+      ' <a style="color:#174f60" href="' +
+      e(unsubscribe) +
+      '">Unsubscribe</a></p></td></tr></table></td></tr></table></body></html>'
+    );
+  }
   if (c.template === "b2b-wholesale") {
     const lines = c.body.split(String.fromCharCode(10));
     const greeting = personalize(

@@ -1401,3 +1401,310 @@ test("stock checks require login, previews never enroll, and Shopify failures do
     });
   }
 });
+
+test("cart v1 uses sequential waits, both purchase-history branches, real coupons and duplicate protection", async () => {
+  const { cartDraft } = await import("../lib/marketing/cart-config");
+  const { validateFlow } = await import("../lib/marketing/flow-config");
+  const { cartCoupon, cartDependency, loadCart, rankedProducts } = await import(
+    "../lib/marketing/cart"
+  );
+  const savedFetch = globalThis.fetch;
+  let latestOrder: string | null = null,
+    couponCreates = 0;
+  const discounts = new Map<string, { id: string; title: string }>();
+  const couponInputs: Record<string, unknown>[] = [];
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("/graphql.json")) {
+      const b = JSON.parse(String(init?.body));
+      if (b.query.includes("CartOrderCheck"))
+        return Response.json({
+          data: {
+            orders: { nodes: latestOrder ? [{ createdAt: latestOrder }] : [] },
+          },
+        });
+      if (b.query.includes("CartProducts"))
+        return Response.json({
+          data: {
+            nodes: b.variables.ids.map((id: string) => ({
+              id,
+              title: "Cart coral",
+              onlineStoreUrl: "https://coralsanonymous.com/products/coral",
+              status: "ACTIVE",
+              tracksInventory: true,
+              totalInventory: 3,
+              priceRangeV2: {
+                minVariantPrice: { amount: "25.00", currencyCode: "USD" },
+              },
+            })),
+          },
+        });
+      if (b.query.includes("CartCouponLookup")) {
+        const d = discounts.get(b.variables.code);
+        return Response.json({
+          data: {
+            codeDiscountNodeByCode: d
+              ? { id: d.id, codeDiscount: { title: d.title } }
+              : null,
+          },
+        });
+      }
+      if (b.query.includes("CartCouponCreate")) {
+        couponCreates++;
+        couponInputs.push(b.variables.input);
+        const d = {
+          id: "discount-" + couponCreates,
+          title: b.variables.input.title,
+        };
+        discounts.set(b.variables.input.code, d);
+        return Response.json({
+          data: {
+            discountCodeBasicCreate: { codeDiscountNode: d, userErrors: [] },
+          },
+        });
+      }
+    }
+    return savedFetch(input, init);
+  };
+  const row = await prisma.marketingResource.findUniqueOrThrow({
+    where: { shop_kind_key: { shop, kind: "FLOW", key: "abandoned-cart" } },
+  });
+  const original = row.data,
+    originalEnabled = row.enabled;
+  const f = validateFlow("abandoned-cart", cartDraft(original as never));
+  f.reviewed = true;
+  f.steps[0].minutes = 0;
+  f.branchMinutes = 1440;
+  const profiles: string[] = [];
+  const make = async (n: string, sms = false) => {
+    const p = await store.atomic((tx) =>
+      store.identify(tx, {
+        email: n + "@example.com",
+        ...(sms ? { phone: "+1657555" + n.slice(-4) } : {}),
+      }),
+    );
+    profiles.push(p.id);
+    await store.atomic((tx) =>
+      store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "test", new Date()),
+    );
+    if (sms)
+      await store.atomic((tx) =>
+        store.consent(
+          tx,
+          p.id,
+          "SMS_MARKETING",
+          "SUBSCRIBED",
+          "test",
+          new Date(),
+        ),
+      );
+    const created = new Date(Date.now() - 60000).toISOString();
+    await ingest.ingestShopify("checkouts/create", "cart-test-" + n, {
+      id: n,
+      token: n,
+      email: n + "@example.com",
+      created_at: created,
+      abandoned_checkout_url: "https://coralsanonymous.com/checkouts/" + n,
+      line_items: [{ product_id: "111", quantity: 1 }],
+    });
+    return p;
+  };
+  try {
+    await prisma.marketingResource.update({
+      where: { id: row.id },
+      data: { enabled: true, data: store.json(f) },
+    });
+    const p = await make("cart1001");
+    let messages = await prisma.marketingMessage.findMany({
+      where: { profileId: p.id },
+      orderBy: { dueAt: "asc" },
+    });
+    assert.equal(messages.length, 2, "no SMS delay for email-only subscriber");
+    await ingest.ingestShopify("checkouts/update", "cart-update-1001", {
+      token: "cart1001",
+      email: p.email!,
+      created_at: new Date(Date.now() - 60000).toISOString(),
+      abandoned_checkout_url: "https://coralsanonymous.com/checkouts/cart1001",
+    });
+    assert.equal(
+      await prisma.marketingMessage.count({ where: { profileId: p.id } }),
+      2,
+    );
+    await worker.runMarketing();
+    const first = await prisma.marketingMessage.findUniqueOrThrow({
+      where: { id: messages[0].id },
+    });
+    assert.equal(first.status, "SENT");
+    assert.equal((first.content as { products: unknown[] }).products.length, 1);
+    const final = messages[1];
+    await prisma.marketingMessage.update({
+      where: { id: first.id },
+      data: { sentAt: new Date(Date.now() - 25 * 3600000) },
+    });
+    await prisma.marketingMessage.update({
+      where: { id: final.id },
+      data: { dueAt: new Date(Date.now() - 1000) },
+    });
+    await worker.runMarketing();
+    const last = await prisma.marketingMessage.findUniqueOrThrow({
+      where: { id: final.id },
+    });
+    assert.equal(last.status, "SENT");
+    assert.equal(last.flowCondition, "cart-v1:final-no");
+    assert.match(
+      (last.content as { couponCode: string }).couponCode,
+      /^AC300-[A-Z2-9]{8}$/,
+    );
+    assert.equal(couponCreates, 1);
+    assert.equal(
+      await cartCoupon(last.id),
+      (last.content as { couponCode: string }).couponCode,
+    );
+    assert.equal(couponCreates, 1, "retry reuses discount");
+    assert.deepEqual(couponInputs[0].context, { all: "ALL" });
+    assert.deepEqual(couponInputs[0].customerGets, {
+      value: { percentage: 0.1 },
+      items: { all: true },
+    });
+    assert.equal(couponInputs[0].usageLimit, 1);
+    assert.deepEqual(couponInputs[0].combinesWith, {
+      orderDiscounts: false,
+      productDiscounts: false,
+      shippingDiscounts: false,
+    });
+    assert.equal(
+      new Date(String(couponInputs[0].endsAt)).getUTCFullYear(),
+      new Date(String(couponInputs[0].startsAt)).getUTCFullYear() + 1,
+    );
+
+    const p2 = await make("cart1002");
+    latestOrder = new Date(Date.now() - 5 * 86400000).toISOString();
+    await worker.runMarketing();
+    messages = await prisma.marketingMessage.findMany({
+      where: { profileId: p2.id },
+      orderBy: { dueAt: "asc" },
+    });
+    const first2 = messages.find((m) => m.flowCondition === "cart-v1:first")!;
+    const final2 = messages.find((m) => m.flowCondition === "cart-v1:final")!;
+    await prisma.marketingMessage.update({
+      where: { id: first2.id },
+      data: { sentAt: new Date(Date.now() - 25 * 3600000) },
+    });
+    await prisma.marketingMessage.update({
+      where: { id: final2.id },
+      data: { dueAt: new Date(Date.now() - 1000) },
+    });
+    await worker.runMarketing();
+    const yes = await prisma.marketingMessage.findUniqueOrThrow({
+      where: { id: final2.id },
+    });
+    assert.equal(yes.status, "SENT");
+    assert.equal(yes.flowCondition, "cart-v1:final-yes");
+    assert.equal(
+      (yes.content as { couponCode?: string }).couponCode,
+      undefined,
+    );
+    assert.equal(couponCreates, 1);
+
+    latestOrder = null;
+    const p3 = await make("cart1003", true);
+    const sms = await prisma.marketingMessage.findFirstOrThrow({
+      where: { profileId: p3.id, channel: "SMS_MARKETING" },
+    });
+    const email = await prisma.marketingMessage.findFirstOrThrow({
+      where: { profileId: p3.id, flowCondition: "cart-v1:first" },
+    });
+    const run = await loadCart(email.key);
+    assert.ok(
+      await store.atomic((tx) => cartDependency(tx, email, run)),
+      "email waits for the SMS branch",
+    );
+    latestOrder = new Date().toISOString();
+    await prisma.marketingMessage.updateMany({
+      where: { profileId: p3.id },
+      data: { dueAt: new Date(Date.now() - 1000) },
+    });
+    await worker.runMarketing();
+    assert.equal(
+      await prisma.marketingMessage.count({
+        where: { profileId: p3.id, status: "SENT" },
+      }),
+      0,
+    );
+    assert.equal(
+      (
+        await prisma.marketingMessage.findUniqueOrThrow({
+          where: { id: sms.id },
+        })
+      ).status,
+      "CANCELLED",
+    );
+
+    // A different checkout can re-enter immediately, but Smart Sending still skips a repeat email.
+    latestOrder = null;
+    await ingest.ingestShopify("checkouts/create", "cart-reentry", {
+      token: "cart-second-checkout",
+      email: p.email!,
+      created_at: new Date(Date.now() - 1000).toISOString(),
+      abandoned_checkout_url: "https://coralsanonymous.com/checkouts/second",
+    });
+    assert.equal(
+      await prisma.marketingMessage.count({ where: { profileId: p.id } }),
+      4,
+    );
+    await worker.runMarketing();
+    const skipped = await prisma.marketingMessage.findFirstOrThrow({
+      where: {
+        profileId: p.id,
+        flowCondition: "cart-v1:first",
+        status: "CANCELLED",
+      },
+    });
+    assert.match(skipped.error || "", /recently received/);
+
+    // A lost mutation response does not create a second discount on retry.
+    const fetchBeforeLoss = globalThis.fetch;
+    let lost = true;
+    globalThis.fetch = async (input, init) => {
+      const response = await fetchBeforeLoss(input, init);
+      if (
+        lost &&
+        String(input).includes("/graphql.json") &&
+        String(init?.body).includes("CartCouponCreate")
+      ) {
+        lost = false;
+        throw new Error("simulated lost response");
+      }
+      return response;
+    };
+    const beforeCreates = couponCreates;
+    await assert.rejects(cartCoupon("coupon-lost-response"));
+    const recovered = await cartCoupon("coupon-lost-response");
+    assert.match(recovered, /^AC300-/);
+    assert.equal(couponCreates, beforeCreates + 1);
+    globalThis.fetch = fetchBeforeLoss;
+    assert.deepEqual(
+      rankedProducts(
+        ["1", "2"],
+        new Map([
+          ["2", 5],
+          ["3", 4],
+        ]),
+        new Map([
+          ["4", 8],
+          ["3", 2],
+        ]),
+      ),
+      ["1", "2", "4", "3"],
+    );
+  } finally {
+    globalThis.fetch = savedFetch;
+    await prisma.marketingMessage.updateMany({
+      where: { profileId: { in: profiles }, status: "PENDING" },
+      data: { status: "CANCELLED" },
+    });
+    await prisma.marketingResource.update({
+      where: { id: row.id },
+      data: { data: store.json(original), enabled: originalEnabled },
+    });
+  }
+});

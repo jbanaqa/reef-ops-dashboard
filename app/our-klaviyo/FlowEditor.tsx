@@ -13,7 +13,8 @@ import { FlowMap, Node } from "./FlowMap";
 import EmailDesigner from "./EmailDesigner";
 import { readDraft, writeDraft } from "./flow-drafts";
 
-import { FlowTarget } from "@/lib/marketing/flow-config";
+import { cartDraft, CartConfig } from "@/lib/marketing/cart-config";
+import { FlowConfig, FlowTarget } from "@/lib/marketing/flow-config";
 
 type Step = {
   minutes: number;
@@ -23,6 +24,7 @@ type Step = {
 };
 type Branch = { subject: string; content: Content };
 type Data = {
+  cart?: CartConfig;
   reviewed?: boolean;
   description?: string;
   threshold?: number;
@@ -51,6 +53,49 @@ const startingHtml = (c: Content) =>
         .map((line) => (line ? `<p>${escapeHtml(line)}</p>` : ""))
         .join("\n");
 
+function FlowDialog({
+  title,
+  close,
+  children,
+}: {
+  title: string;
+  close: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = ref.current!;
+    const focus = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    el.showModal();
+    return () => {
+      el.close();
+      document.body.style.overflow = overflow;
+      focus?.focus();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className="mk-flow-dialog"
+      aria-label={title}
+      onCancel={(e) => {
+        e.preventDefault();
+        close();
+      }}
+    >
+      <div className="mk-modal-header">
+        <h3>{title}</h3>
+        <button type="button" onClick={close}>
+          Close
+        </button>
+      </div>
+      {children}
+    </dialog>
+  );
+}
+
 function FlowEditorState({
   resource,
   busy,
@@ -68,11 +113,17 @@ function FlowEditorState({
     content: Content,
   ) => void | Promise<unknown>;
 }) {
-  const initial = resource.data as unknown as Data;
+  const upgrade = (data: Data) =>
+    resource.key === "abandoned-cart" ? cartDraft(data as FlowConfig) : data;
+  const initial = upgrade(resource.data as unknown as Data);
   const [flow, setFlow] = useState<Data>(() =>
     JSON.parse(JSON.stringify(initial)),
   );
-  const [enabled, setEnabled] = useState(resource.enabled);
+  const [enabled, setEnabled] = useState(
+    resource.key === "abandoned-cart" && !resource.data.cart
+      ? false
+      : resource.enabled,
+  );
   const latest = useRef({ flow, enabled });
   useEffect(() => {
     latest.current = { flow, enabled };
@@ -105,8 +156,12 @@ function FlowEditorState({
           draft.base !==
             JSON.stringify({ flow: draft.flow, enabled: draft.enabled })
         ) {
-          setFlow(draft.flow);
-          setEnabled(draft.enabled);
+          setFlow(upgrade(draft.flow));
+          setEnabled(
+            resource.key === "abandoned-cart" && !draft.flow.cart
+              ? false
+              : draft.enabled,
+          );
           setDraftStatus(
             draft.base === savedSnapshot
               ? "Restored unfinished draft. Save flow to apply it."
@@ -157,6 +212,32 @@ function FlowEditorState({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [flow, enabled, savedSnapshot]);
+  const [checks, setChecks] = useState<{
+    ready: boolean;
+    missing: string[];
+    missingWebhooks: string[];
+    views: number;
+  } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState("");
+  async function checkSetup() {
+    setChecking(true);
+    setCheckError("");
+    try {
+      const r = await fetch("/api/marketing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cart-readiness" }),
+      });
+      const result = await r.json();
+      if (!r.ok) throw new Error(result.error || "Check failed");
+      setChecks(result);
+    } catch (error) {
+      setCheckError(error instanceof Error ? error.message : "Check failed");
+    } finally {
+      setChecking(false);
+    }
+  }
   const [selected, setSelected] = useState<{
     node: Node;
     target: Target;
@@ -219,7 +300,27 @@ function FlowEditorState({
   try {
     if (content && selected?.node.kind !== "sms")
       preview = render(
-        normalizeContent(content),
+        normalizeContent(
+          flow.cart
+            ? {
+                ...content,
+                products: Array.from(
+                  { length: flow.cart.productCount },
+                  (_, i) => ({
+                    title:
+                      i === 0
+                        ? "Example coral from your cart"
+                        : "Example recommended coral",
+                    url: "https://coralsanonymous.com/cart",
+                    price: "Sample product",
+                  }),
+                ),
+                ...(selected?.target.branch === "no"
+                  ? { couponCode: "AC300-PREVIEW" }
+                  : {}),
+              }
+            : content,
+        ),
         "#unsubscribe",
         settings.postalAddress,
         undefined,
@@ -267,13 +368,17 @@ function FlowEditorState({
           />
         </label>
       )}
-      <label>
-        Heading
-        <input
-          value={c.heading || ""}
-          onChange={(e) => updateContent(target, "heading", e.target.value)}
-        />
-      </label>
+      {!(flow.cart && selected?.node.kind === "sms") && (
+        <>
+          <label>
+            Heading
+            <input
+              value={c.heading || ""}
+              onChange={(e) => updateContent(target, "heading", e.target.value)}
+            />
+          </label>
+        </>
+      )}
       {selected?.node.kind === "sms" ? (
         <label>
           Text message
@@ -302,26 +407,37 @@ function FlowEditorState({
           />
         </label>
       )}
-      <div className="mk-two">
-        <label>
-          Button text
-          <input
-            value={c.button || ""}
-            onChange={(e) => updateContent(target, "button", e.target.value)}
-          />
-        </label>
-        <label>
-          Button destination{" "}
-          <small>
-            Must be an HTTPS link. This is used by the orange CTA and the
-            plain-text link.
-          </small>
-          <input
-            value={c.url || ""}
-            onChange={(e) => updateContent(target, "url", e.target.value)}
-          />
-        </label>
-      </div>
+      {flow.cart && selected?.node.kind === "sms" ? (
+        <p className="mk-cart-feed-note">
+          The customer’s checkout link, Corals Anonymous sender name, and “Reply
+          STOP to opt out” are added automatically.
+        </p>
+      ) : (
+        <>
+          <div className="mk-two">
+            <label>
+              Button text
+              <input
+                value={c.button || ""}
+                onChange={(e) =>
+                  updateContent(target, "button", e.target.value)
+                }
+              />
+            </label>
+            <label>
+              Button destination{" "}
+              <small>
+                Must be an HTTPS link. This is used by the orange CTA and the
+                plain-text link.
+              </small>
+              <input
+                value={c.url || ""}
+                onChange={(e) => updateContent(target, "url", e.target.value)}
+              />
+            </label>
+          </div>{" "}
+        </>
+      )}
     </>
   );
   if (!draftReady) return <p>Loading saved draft…</p>;
@@ -348,6 +464,44 @@ function FlowEditorState({
         }}
         onNodeClick={(n) => setSelected({ node: n, target: n.target })}
       />
+      {flow.cart && (
+        <div className="mk-cart-feed-note">
+          <button type="button" disabled={checking} onClick={checkSetup}>
+            {checking ? "Checking…" : "Check Shopify connection"}
+          </button>
+          <p>
+            This checks access and event connections without sending a message
+            or creating a discount.
+          </p>
+          {checkError && <p role="alert">{checkError}</p>}
+          {checks && (
+            <>
+              <strong>
+                {checks.ready
+                  ? "Shopify connection is ready for a test checkout."
+                  : "Some setup is still needed."}
+              </strong>
+              {!!checks.missing.length && (
+                <p>
+                  Shopify app access needed: {checks.missing.join(", ")}. Update
+                  the app’s access in Shopify.
+                </p>
+              )}
+              {!!checks.missingWebhooks.length && (
+                <p>
+                  Connect checkout and order events using Connect Shopify events
+                  in Settings.
+                </p>
+              )}
+              <p>
+                {checks.views
+                  ? checks.views + " product views recorded in the last 3 days."
+                  : "No product views recorded in the last 3 days. Connect the customer-events pixel before expecting most-viewed recommendations."}
+              </p>
+            </>
+          )}
+        </div>
+      )}
       {resource.key === "low-stock" && (
         <div className="mk-two">
           <label>
@@ -378,6 +532,14 @@ function FlowEditorState({
           </label>
         </div>
       )}
+      {flow.cart && (
+        <p className="mk-cart-feed-note">
+          Email and text consent are checked before sending. Existing Klaviyo
+          automations should be paused before this flow goes live to avoid
+          duplicate reminders. Saved changes apply to new checkouts; checkouts
+          already in progress keep their original copy and timing.
+        </p>
+      )}
       <p>{draftStatus}</p>
       <button
         type="button"
@@ -388,8 +550,12 @@ function FlowEditorState({
               "Discard this browser draft and reload the last saved flow?",
             )
           ) {
-            setFlow(JSON.parse(JSON.stringify(resource.data)) as Data);
-            setEnabled(resource.enabled);
+            setFlow(upgrade(JSON.parse(JSON.stringify(resource.data)) as Data));
+            setEnabled(
+              resource.key === "abandoned-cart" && !resource.data.cart
+                ? false
+                : resource.enabled,
+            );
             setDraftStatus("Loaded the last saved flow.");
           }
         }}
@@ -434,64 +600,133 @@ function FlowEditorState({
             }
             onSave={saveFlow}
             onClose={() => setSelected(null)}
-            onTest={testEmail}
+            onTest={
+              testEmail
+                ? (to, subject, c) =>
+                    testEmail(
+                      to,
+                      subject,
+                      flow.cart
+                        ? {
+                            ...c,
+                            products: Array.from(
+                              { length: flow.cart.productCount },
+                              () => ({
+                                title: "Example coral",
+                                url: "https://coralsanonymous.com/cart",
+                              }),
+                            ),
+                            ...(selected.target.branch === "no"
+                              ? { couponCode: "AC300-PREVIEW" }
+                              : {}),
+                          }
+                        : c,
+                    )
+                : undefined
+            }
+            recoveryLink={!!flow.cart}
+            previewCaption={
+              flow.cart
+                ? "Example products shown. Each customer receives their own checkout link and available recommendations."
+                : undefined
+            }
             organizationName={settings.organizationName}
             postalAddress={settings.postalAddress}
           />
         ) : (
-          <div className="mk-modal-backdrop" onClick={() => setSelected(null)}>
-            <div
-              className="mk-modal"
-              role="dialog"
-              aria-modal="true"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mk-modal-header">
-                <h3>{selected.node.label}</h3>
-                <button type="button" onClick={() => setSelected(null)}>
-                  Close
-                </button>
-              </div>
-              {selected.target.kind === "info" && (
-                <p className="mk-modal-explanation">
-                  {selected.node.detail ||
-                    "Reef Ops evaluates this decision automatically before continuing."}
+          <FlowDialog
+            title={selected.node.label}
+            close={() => setSelected(null)}
+          >
+            {selected.target.kind === "info" && (
+              <p className="mk-modal-explanation">
+                {selected.node.detail ||
+                  "Reef Ops evaluates this decision automatically before continuing."}
+              </p>
+            )}
+            {selected.target.section === "products" && flow.cart && (
+              <div className="mk-cart-feed-note">
+                <label>
+                  Products per email
+                  <input
+                    type="number"
+                    min={0}
+                    max={12}
+                    value={flow.cart.productCount}
+                    onChange={(e) =>
+                      setFlow((f) => ({
+                        ...f,
+                        cart: {
+                          version: 1,
+                          productCount: Number(e.target.value),
+                        },
+                      }))
+                    }
+                  />
+                </label>
+                <p>
+                  Show available products from the customer’s checkout first,
+                  across all categories. Fill remaining spaces by alternating
+                  best-selling and most-viewed products from the last 3 days,
+                  without duplicates.
                 </p>
-              )}
-              {selected.target.kind === "wait" && (
-                <>
-                  <p className="mk-modal-explanation">
-                    Minutes after the triggering event. This is not an
-                    additional delay after the previous step.
-                  </p>
-                  <label>
-                    Wait (minutes)
-                    <input
-                      type="number"
-                      min="0"
-                      value={waitValue}
-                      onChange={(e) => setWait(Number(e.target.value))}
-                    />
-                  </label>
-                </>
-              )}
-              {content && fields(content, selected.target)}
-              {selected.target.kind === "sms" && (
-                <p className="mk-modal-explanation">
-                  SMS requires marketing consent and an unsuppressed profile.
+                <p>
+                  Rankings use activity collected by Reef Ops. Connect the
+                  Shopify customer-events pixel for product views; Klaviyo
+                  history is not included. Fewer products appear when there is
+                  not enough recorded activity or available stock.
                 </p>
-              )}
-              <p>{draftStatus}</p>
-              <div className="mk-modal-actions">
-                <button type="button" disabled={busy} onClick={saveFlow}>
-                  Save flow
-                </button>
-                <button type="button" onClick={() => setSelected(null)}>
-                  Close editor
-                </button>
               </div>
+            )}
+            {selected.target.section === "coupon" && (
+              <div className="mk-cart-feed-note">
+                <p>
+                  10% off the entire order, no minimum purchase, and no
+                  combining with other discounts. Each generated AC300- code is
+                  single-use, activates during email preparation, and expires
+                  after one year.
+                </p>
+                <p>
+                  Shopify discount read/write access is needed. The offer waits
+                  if a valid code cannot be created; preview codes are never
+                  used for customer deliveries.
+                </p>
+              </div>
+            )}
+            {selected.target.kind === "wait" && (
+              <>
+                <p className="mk-modal-explanation">
+                  {flow.cart
+                    ? "Minutes after the previous step. Quiet hours can move the text and following emails later."
+                    : "Minutes after the triggering event, not after the previous step."}
+                </p>
+                <label>
+                  Wait (minutes)
+                  <input
+                    type="number"
+                    min="0"
+                    value={waitValue}
+                    onChange={(e) => setWait(Number(e.target.value))}
+                  />
+                </label>
+              </>
+            )}
+            {content && fields(content, selected.target)}
+            {selected.target.kind === "sms" && (
+              <p className="mk-modal-explanation">
+                SMS requires marketing consent and an unsuppressed profile.
+              </p>
+            )}
+            <p>{draftStatus}</p>
+            <div className="mk-modal-actions">
+              <button type="button" disabled={busy} onClick={saveFlow}>
+                Save flow
+              </button>
+              <button type="button" onClick={() => setSelected(null)}>
+                Close editor
+              </button>
             </div>
-          </div>
+          </FlowDialog>
         ))}
     </article>
   );

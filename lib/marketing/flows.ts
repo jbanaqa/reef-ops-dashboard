@@ -1,3 +1,4 @@
+import { enrollCart, CartLine } from "./cart";
 import { content, DAY, withCoupon } from "./rules";
 import { flowSequence, validateFlow } from "./flow-config";
 export type { FlowConfig } from "./flow-config";
@@ -8,7 +9,13 @@ export async function enroll(
   profileId: string,
   eventKey: string,
   at: Date,
-  context: { url?: string; expectedDeliveryAt?: Date; stockText?: string } = {},
+  context: {
+    url?: string;
+    expectedDeliveryAt?: Date;
+    stockText?: string;
+    lines?: CartLine[];
+    observedAt?: Date;
+  } = {},
 ) {
   const resource = await tx.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "FLOW", key } },
@@ -18,6 +25,20 @@ export async function enroll(
   if (!config.reviewed) return;
   if (key === "delivery-upsell" && !context.expectedDeliveryAt) return;
   if (key === "abandoned-cart" && at < new Date(Date.now() - 3 * DAY)) return;
+  if (key === "abandoned-cart" && config.cart) {
+    if (!context.url || !eventKey || eventKey === "undefined") return;
+    await enrollCart(
+      tx,
+      profileId,
+      eventKey,
+      at,
+      config,
+      context.url,
+      context.lines,
+      context.observedAt,
+    );
+    return;
+  }
   const once = ["welcome", "b2b-welcome"].includes(key);
   const base = once ? `${key}:${profileId}` : `${key}:${profileId}:${eventKey}`;
   if (

@@ -282,7 +282,11 @@ const { chromium } = require("playwright");
     await page
       .getByLabel("Mobile preview width", { exact: true })
       .selectOption("320");
-    await page.waitForFunction(() => {const f=document.querySelector('iframe[title="Email preview"]');const body=f?.contentDocument?.body;return body && body.getBoundingClientRect().bottom <= f.clientHeight;});
+    await page.waitForFunction(() => {
+      const f = document.querySelector('iframe[title="Email preview"]');
+      const body = f?.contentDocument?.body;
+      return body && body.getBoundingClientRect().bottom <= f.clientHeight;
+    });
     await page.screenshot({
       path: path.join(output, "stock-email-preview.png"),
     });
@@ -322,8 +326,8 @@ const { chromium } = require("playwright");
       .getByText("Stock alert settings saved.", { exact: true })
       .waitFor();
     await openNode(/Low stock email/);
-    await page.getByRole("button",{name:"Save email",exact:true}).click();
-    await page.getByText("Saved to flow",{exact:true}).waitFor();
+    await page.getByRole("button", { name: "Save email", exact: true }).click();
+    await page.getByText("Saved to flow", { exact: true }).waitFor();
     await closePanel();
     const savedStock = await page.evaluate(
       () => JSON.parse(localStorage.getItem("savedFlow")).data.stock,
@@ -369,6 +373,115 @@ const { chromium } = require("playwright");
         path: path.join(output, "stock-dialog-" + width + ".png"),
       });
       await closePanel();
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page
+      .getByRole("button", { name: "← All flows", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Open Abandoned Cart", exact: true })
+      .click();
+    await page.locator(".mk-cart-map").waitFor();
+    assert.equal(
+      await page.getByLabel("Enable this flow", { exact: true }).isChecked(),
+      false,
+    );
+    await page.screenshot({
+      path: path.join(output, "cart-desktop.png"),
+      fullPage: true,
+    });
+    await page
+      .locator(".mk-cart-map")
+      .getByRole("button", { name: /Product recommendations/ })
+      .click();
+    assert.ok(
+      await page.getByRole("dialog").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return (
+          Math.abs(r.left + r.width / 2 - innerWidth / 2) < 2 &&
+          Math.abs(r.top + r.height / 2 - innerHeight / 2) < 2
+        );
+      }),
+    );
+    await page.getByLabel("Products per email").fill("3");
+    await page.keyboard.press("Escape");
+    for (const name of [
+      "Email #1 · Soft push",
+      "Email #2 · Another soft push",
+      "Email #2 · Discount offer",
+    ]) {
+      await page
+        .locator(".mk-cart-map")
+        .getByRole("button", { name: new RegExp(name) })
+        .click();
+      await page
+        .getByRole("region", { name: "Live email preview", exact: true })
+        .waitFor();
+      assert.equal(
+        await page
+          .getByLabel("Customer checkout link")
+          .getAttribute("readonly"),
+        "",
+      );
+      const frame = page.frameLocator('iframe[title="Email preview"]');
+      await frame
+        .getByText("Example coral from your cart", { exact: true })
+        .waitFor();
+      if (name.includes("Discount"))
+        await frame.getByText("AC300-PREVIEW", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Mobile", exact: true }).click();
+      await page
+        .getByLabel("Mobile preview width", { exact: true })
+        .selectOption("320");
+      await page.waitForFunction(() => {
+        const f = document.querySelector('iframe[title="Email preview"]');
+        return (
+          f?.contentDocument?.body.getBoundingClientRect().bottom <=
+          f.clientHeight
+        );
+      });
+      assert.ok(
+        await page
+          .locator('iframe[title="Email preview"]')
+          .evaluate(
+            (f) =>
+              f.contentDocument.documentElement.scrollWidth <= f.clientWidth,
+          ),
+      );
+      await page.screenshot({
+        path: path.join(
+          output,
+          "cart-" +
+            (name.includes("Discount")
+              ? "discount"
+              : name.includes("Another")
+                ? "followup"
+                : "first") +
+            ".png",
+        ),
+      });
+      await page.getByLabel("Back to flow", { exact: true }).click();
+    }
+    await page.getByRole("button", { name: "Save flow", exact: true }).click();
+    assert.equal(
+      await page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem("savedFlow")).data.cart.productCount,
+      ),
+      3,
+    );
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        "Cart map fits at " + width,
+      );
+      await page.screenshot({
+        path: path.join(output, "cart-mobile-" + width + ".png"),
+        fullPage: true,
+      });
     }
     assert.deepEqual(errors, []);
     console.log(
