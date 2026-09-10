@@ -1,3 +1,6 @@
+import { historyStatus, syncHistory } from "@/lib/marketing/cart-history";
+import { cartReport } from "@/lib/marketing/cart-report";
+import { cartProducts } from "@/lib/marketing/cart";
 import { cartReadiness } from "@/lib/marketing/cart";
 import { readStock, lowStock } from "@/lib/marketing/stock";
 import { validateStock } from "@/lib/marketing/stock-config";
@@ -178,6 +181,36 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url),
       view = url.searchParams.get("view") || "overview";
+    if (view === "cart-report")
+      return Response.json(await cartReport(), {
+        headers: { "Cache-Control": "no-store" },
+      });
+    if (view === "cart-history")
+      return Response.json(await historyStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
+    if (view === "tracking-pixel") {
+      const template = await (
+        await import("node:fs/promises")
+      ).readFile(
+        process.cwd() + "/shopify/reef-marketing-custom-pixel.js",
+        "utf8",
+      );
+      const base = process.env.APP_BASE_URL || process.env.REEF_OPS_PUBLIC_URL;
+      if (!base || new URL(base).protocol !== "https:")
+        throw new Error("Configure the public Reef Ops URL first.");
+      return new Response(
+        template.replace("https://YOUR-REEF-OPS-HOST", new URL(base).origin),
+        {
+          headers: {
+            "Content-Type": "text/javascript",
+            "Content-Disposition":
+              "attachment; filename=reef-marketing-custom-pixel.js",
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
     if (view === "stock-status") {
       const status = await prisma.marketingResource.findUnique({
         where: {
@@ -596,6 +629,26 @@ export async function POST(request: Request) {
         });
       });
       return Response.json({ ok: true });
+    }
+    if (b.action === "sync-cart-history")
+      return Response.json(await syncHistory());
+    if (b.action === "preview-cart-products") {
+      const address = email(b.email);
+      const p = await prisma.marketingProfile.findUnique({
+        where: { shop_email: { shop: shop(), email: address } },
+        select: { id: true },
+      });
+      if (!p)
+        throw new Error("Find or import this customer in Audiences first.");
+      const f = validateFlow("abandoned-cart", b.flow);
+      if (!f.cart) throw new Error("Review the cart flow first.");
+      const products = await cartProducts({
+        profileId: p.id,
+        config: f,
+        productIds: [],
+        url: "https://coralsanonymous.com/cart",
+      });
+      return Response.json({ products });
     }
     if (b.action === "cart-readiness")
       return Response.json(await cartReadiness());

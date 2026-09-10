@@ -541,3 +541,80 @@
   max-width: 100%;
   box-sizing: border-box;
 }
+
+.mk-cart-tool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0;
+}
+.mk-cart-product-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.mk-cart-product-grid a {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+.mk-cart-product-grid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #f2f7f7;
+}
+.mk-cart-results {
+  display: grid;
+  gap: 14px;
+}
+.mk-cart-results section {
+  padding: 16px;
+  border: 1px solid #d7e7e9;
+  border-radius: 12px;
+}
+.mk-cart-results h4 {
+  margin: 0 0 12px;
+}
+.mk-cart-results dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.mk-cart-results dt {
+  font-size: 11px;
+  color: #57737a;
+}
+.mk-cart-results dd {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+.mk-flow-dialog details {
+  margin-top: 20px;
+}
+.mk-flow-dialog form {
+  display: grid;
+  gap: 12px;
+}
+.mk-flow-dialog label {
+  display: grid;
+  gap: 8px;
+}
+.mk-flow-dialog input {
+  padding: 10px;
+  border: 1px solid #c8dfe2;
+  border-radius: 8px;
+}
+.mk-flow-dialog code {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 480px) {
+  .mk-cart-results dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

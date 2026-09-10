@@ -195,11 +195,11 @@ Automated coverage: isolated PostgreSQL integration tests mock Shopify/provider 
 
 ## Abandoned Cart — first iteration (September 9, 2026)
 
-Open **Flows → Abandoned Cart**. The upgraded editor starts as an unreviewed, paused browser draft until saved. It preserves customized copy and artwork; untouched starter copy is replaced with the three supplied Klaviyo email approximations. Saving does not enable the flow unless the Enable checkbox is selected. Existing in-progress versioned checkouts keep their copy and timing.
+Open **Flows → Abandoned Cart**. The upgraded editor starts as an unreviewed, paused browser draft until saved. It preserves customized copy and artwork; untouched starter copy is replaced with the three supplied Klaviyo email approximations. Saving does not enable the flow unless the Enable checkbox is selected. Waiting versioned checkouts use updated email copy when first prepared. A wait already entered keeps its deadline; later waits use the current saved duration when they begin. Prepared provider retries keep their content and subject.
 
 ### What runs
 
-- A new identified Shopify checkout, no older than three days, enters once per checkout. A different checkout may re-enter without the old 24-hour enrollment lock.
+- An identified Shopify checkout enters once per checkout if the profile has a trusted checkout-start event in the last three days (including the triggering checkout). A different checkout may re-enter without the old 24-hour enrollment lock.
 - Text subscribers wait 30 minutes, then receive the marketing text when permitted. Other customers bypass that text delay.
 - After the text is sent or skipped, wait three hours, then send the first soft-push email. Customers on the email-only path wait three hours from checkout.
 - Wait one day after the first email is sent or skipped. A purchase in the preceding two weeks selects the second soft push; otherwise select the 10% offer.
@@ -213,13 +213,15 @@ Open **Flows → Abandoned Cart**. The upgraded editor starts as an unreviewed, 
 
 All three messages use the existing responsive designer, editable footer, artwork storage and desktop/mobile preview. Turquoise styling, serif italic copy, logo area and pill-shaped cart button approximate the screenshots; exact water artwork, complete footer and product-section styling can be refined later. Test emails contain clearly marked sample products and a non-redeemable preview code.
 
-The real checkout recovery URL replaces the example cart URL. Available cart products appear first. Remaining slots alternate products ranked by recorded sales quantities and product views during the last three days, across all categories, removing duplicates and unpublished/out-of-stock products. Four slots are the editable default (0–12). Product availability, URLs, images and prices come from Shopify. Fewer products are shown if insufficient data or stock exists; unrelated static products are not substituted.
+The real checkout recovery URL replaces the example cart URL. Available products from the current checkout and identified cart activity in the last 90 days appear first. Remaining slots alternate products ranked by recorded sales quantities and product views during the last three days, across all categories, removing duplicates and unpublished/out-of-stock products. Four slots are the editable default (0–12). Product availability, URLs, images and prices come from Shopify. Fewer products are shown if insufficient data or stock exists; unrelated static products are not substituted.
 
-The first iteration ranks Reef Ops observations, not Klaviyo's private recommendation model/history. Views count once per visitor/product/day; ranking reads at most the newest 10,000 relevant events and considers up to 100 product candidates. It needs the existing Shopify customer-events pixel installed with the correct Reef Ops URL and consent settings. Analytics collection now follows the ingestion switch and does not require the signup form or sending to be enabled. Historical views cannot be reconstructed. Order webhooks start collecting sales data once connected.
+Recommendations combine Reef Ops observations with completed Klaviyo imports. Views count per recorded event. History uses keyset pagination rather than a 10,000-event cutoff, and Shopify availability checks continue through batches of 100 candidates until the requested slots are filled or candidates run out. Slow history queries fail preparation for retry instead of silently using incomplete rankings. A completed import supplies popularity before its snapshot cutoff; native activity supplies events after that cutoff, preventing overlap from being counted twice. The mix of best sellers and most viewed is deterministic interleaving, not Klaviyo’s proprietary recommendation model.
+
+**Preview customer products** is read-only and uses the draft product count and customer history. Its tracking disclosure downloads the existing Shopify custom pixel with this deployment’s public URL filled in. Install it in Shopify Customer events with marketing and analytics consent required, then verify product views with Check Shopify connection. Anonymous browsing is not matched by an unverified email address. The Shopify pixel is not installed automatically.
 
 ### Discount
 
-The offer creates an actual Shopify basic discount: 10% off all items, no minimum, no combination with other discount classes, prefix AC300-, activation during send preparation, expiry one calendar year later. Codes are single-use (first-iteration implementation choice) and unique per message. The random code is persisted before creating it; retries look up that same code to recover a lost Shopify response. Email is withheld on preparation failure. Prepared email content is frozen for provider retries.
+The offer creates an actual Shopify basic discount: 10% off all items, no minimum, no combination with other discount classes, prefix AC300-, activation during send preparation, expiry one calendar year later. Codes are single-use (matching Klaviyo Shopify coupons) and unique per message. The random code is persisted before creating it; retries look up that same code to recover a lost Shopify response. Email is withheld on preparation failure. Prepared email content is frozen for provider retries.
 
 Required Shopify access: read orders, read products and write discounts (including discount lookup access), plus protected customer-data permissions applicable to checkout/order data. The **Check Shopify connection** button checks scopes, checkout/order subscriptions and recent view activity without sending or creating a discount. It is not a full deliverability or SMS compliance certification.
 
@@ -236,3 +238,15 @@ Required Shopify access: read orders, read products and write discounts (includi
 Automated tests use an isolated disposable database and mocked Shopify/email providers. They do not verify production credentials, actual checkout webhook payloads, mobile carrier delivery, inbox placement, or access grants.
 
 References: [Klaviyo quiet-hours sequencing](https://help.klaviyo.com/hc/en-us/articles/4408737146651), [Smart Sending](https://help.klaviyo.com/hc/en-us/articles/115002779311), [Shopify discount creation](https://shopify.dev/docs/api/admin-graphql/latest/mutations/discountCodeBasicCreate), [discount input fields](https://shopify.dev/docs/api/admin-graphql/latest/input-objects/DiscountCodeBasicInput).
+
+### History import and results
+
+**Bring over Klaviyo history** requires a server-side KLAVIYO_PRIVATE_API_KEY with events:read, metrics:read and profiles:read scopes. Add it in Railway, never in chat. The authenticated action imports one API page per request; the dialog continues batches while open and supports pause/resume. Progress, missing metrics and errors are visible. Imports read Checkout Started/Added to Cart (90 days), Viewed Product/Ordered Product (3 days), and Received Email (2 days). They do not create customers, enroll journeys, change consent, send messages or alter Klaviyo. Imported history can match a subsequently created Reef Ops profile by normalized email. Duplicate event IDs are ignored. Pagination URLs are restricted to the Klaviyo API origin.
+
+Refresh history after drafting the equivalent Klaviyo flow and before enabling Reef Ops. Recent imported email receipts count toward the 16-hour email Smart Sending window. Imports are staff-triggered snapshots, not continuous synchronization; missing metrics cannot be reconstructed. Email eligibility, SMS support and artwork are unchanged in this iteration.
+
+**View flow results** shows each cart step’s waiting, sent, delivered, unique opens/clicks, attributed orders/sales, skipped and attention counts for messages created in the last 30 days. Revenue stays separate by currency. Reporting uses existing Reef Ops attribution (last click within five days, otherwise last open within one day), so it is not exact Klaviyo attribution parity. Privacy-protected opens may inflate open measurements.
+
+Additional verification covers paginated read-only imports and foreign-link rejection, the 90-day cart and 3-day popularity windows, overlapping history, queued content and wait edits, imported recent-email protection, report deduplication, staff authentication and production-specific tracking downloads. Browser checks cover these dialogs at desktop, 390px and 320px. Live API access, pixel installation and a controlled checkout still require verification before cutover.
+
+References: [Klaviyo product feeds](https://help.klaviyo.com/hc/en-us/articles/115005082787), [flow timing and edits](https://help.klaviyo.com/hc/en-us/articles/360017706091), [Events API](https://developers.klaviyo.com/en/reference/get_events).

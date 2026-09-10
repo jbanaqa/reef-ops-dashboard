@@ -1,5 +1,6 @@
 import {
   CartRun,
+  advanceCart,
   loadCart,
   cartLastOrder,
   cartDependency,
@@ -361,6 +362,17 @@ export async function runMarketing() {
               m.content = JSON.parse(
                 JSON.stringify({ ...(m.content as Content), url: cartRun.url }),
               );
+            if (m.flowCondition === "cart-v1:first" && m.attempts === 0) {
+              m.subject = cartRun.config.steps[0].subject;
+              m.content = JSON.parse(
+                JSON.stringify({
+                  ...cartRun.config.steps[0].content,
+                  url: cartRun.url,
+                  products: [],
+                  couponCode: undefined,
+                }),
+              );
+            }
             const purchased = [m.profile.lastOrderAt, shopifyOrder].some(
               (d) => d && m.triggerAt && d >= m.triggerAt,
             );
@@ -431,6 +443,7 @@ export async function runMarketing() {
           where: { id: m.id },
           data: { status: "CANCELLED", error: reason },
         });
+        await advanceCart(tx, m);
         return null;
       }
       if (m.channel !== "EMAIL") {
@@ -491,6 +504,31 @@ export async function runMarketing() {
             ],
           },
         });
+        const externalEmail =
+          m.channel === "EMAIL"
+            ? await tx.marketingEvent.findFirst({
+                where: {
+                  shop: shop(),
+                  type: "EXTERNAL_EMAIL_SENT",
+                  occurredAt: {
+                    gte: new Date(Date.now() - 16 * 3600000),
+                    lte: new Date(),
+                  },
+                  OR: [
+                    { profileId: m.profileId },
+                    {
+                      payload: {
+                        path: ["email"],
+                        equals: m.profile.email || "",
+                      },
+                    },
+                  ],
+                },
+              })
+            : null;
+        if (externalEmail)
+          reason =
+            "Skipped: recently received email through Klaviyo (16 hours)";
         if (recent) {
           if (recent.status === "SENT")
             reason =
@@ -503,6 +541,7 @@ export async function runMarketing() {
             where: { id: m.id },
             data: { status: "CANCELLED", error: reason },
           });
+          await advanceCart(tx, m);
           return null;
         }
       }
@@ -680,6 +719,7 @@ export async function runMarketing() {
           where: { id: message.id },
           data: { status: "SENT", sentAt: new Date(), providerId },
         });
+        await advanceCart(tx, message);
         await record(tx, {
           key: "sent:" + message.id,
           type: "SENT",
@@ -696,20 +736,23 @@ export async function runMarketing() {
               "Delivery outcome or persistence uncertain",
               true,
             );
-      await prisma.marketingMessage.update({
-        where: { id: message.id },
-        data: {
-          status: e.uncertain
-            ? "UNKNOWN"
-            : e.retryable && message.attempts < 6
-              ? "PENDING"
-              : "FAILED",
-          error: e.message,
-          dueAt: new Date(
-            Date.now() +
-              Math.max(60000 * 2 ** message.attempts, e.retryAfterMs),
-          ),
-        },
+      await atomic(async (tx) => {
+        const updated = await tx.marketingMessage.update({
+          where: { id: message.id },
+          data: {
+            status: e.uncertain
+              ? "UNKNOWN"
+              : e.retryable && message.attempts < 6
+                ? "PENDING"
+                : "FAILED",
+            error: e.message,
+            dueAt: new Date(
+              Date.now() +
+                Math.max(60000 * 2 ** message.attempts, e.retryAfterMs),
+            ),
+          },
+        });
+        if (updated.status === "FAILED") await advanceCart(tx, updated);
       });
     }
   }

@@ -175,9 +175,51 @@ const { chromium } = require("playwright");
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.route("**/api/marketing*", async (route) => {
       const request = route.request();
+      if (request.url().includes("view=cart-history"))
+        return route.fulfill({
+          json: {
+            configured: false,
+            phase: "not-started",
+            imported: 0,
+            ignored: 0,
+          },
+        });
+      if (request.url().includes("view=cart-report"))
+        return route.fulfill({
+          json: {
+            rows: [
+              {
+                key: "first",
+                label: "Email #1 · Soft push",
+                waiting: 2,
+                sent: 4,
+                delivered: 4,
+                opened: 2,
+                clicked: 1,
+                orders: 1,
+                revenue: { USD: 25 },
+                stopped: 0,
+                needsAttention: 0,
+              },
+            ],
+            reasons: [],
+          },
+        });
       if (request.method() === "GET")
         return route.fulfill({ json: { status: null } });
       const body = request.postDataJSON();
+      if (body.action === "preview-cart-products")
+        return route.fulfill({
+          json: {
+            products: [
+              {
+                title: "Customer coral",
+                url: "https://coralsanonymous.com/products/test",
+                price: "USD 25.00",
+              },
+            ],
+          },
+        });
       if (body.action === "preview-stock")
         return route.fulfill({
           json: {
@@ -482,6 +524,53 @@ const { chromium } = require("playwright");
         path: path.join(output, "cart-mobile-" + width + ".png"),
         fullPage: true,
       });
+    }
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page
+        .getByRole("button", { name: "Preview customer products", exact: true })
+        .click();
+      await page
+        .getByLabel("Customer email", { exact: true })
+        .fill("test@example.com");
+      await page
+        .getByRole("button", { name: "Preview products", exact: true })
+        .click();
+      await page.getByText("Customer coral", { exact: true }).waitFor();
+      assert.ok(
+        await page
+          .getByRole("dialog")
+          .evaluate((el) => el.scrollWidth <= el.clientWidth),
+      );
+      await page.screenshot({
+        path: path.join(output, "cart-products-" + width + ".png"),
+      });
+      await page.keyboard.press("Escape");
+      await page
+        .getByRole("button", {
+          name: "Bring over Klaviyo history",
+          exact: true,
+        })
+        .click();
+      await page
+        .getByText("One connection step is needed", { exact: true })
+        .waitFor();
+      await page.keyboard.press("Escape");
+      await page
+        .getByRole("button", { name: "View flow results", exact: true })
+        .click();
+      await page
+        .getByText("Attributed sales: USD 25.00", { exact: true })
+        .waitFor();
+      assert.ok(
+        await page
+          .getByRole("dialog")
+          .evaluate((el) => el.scrollWidth <= el.clientWidth),
+      );
+      await page.screenshot({
+        path: path.join(output, "cart-results-" + width + ".png"),
+      });
+      await page.keyboard.press("Escape");
     }
     assert.deepEqual(errors, []);
     console.log(

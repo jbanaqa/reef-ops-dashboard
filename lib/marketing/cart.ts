@@ -1,12 +1,14 @@
+import { recommendationHistory } from "./cart-feed";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
 import { Content, content, DAY, eligible } from "./rules";
-import { FlowConfig } from "./flow-config";
+import { FlowConfig, validateFlow } from "./flow-config";
 import { json, shop, Tx } from "./store";
 
 export type CartRun = {
   config: FlowConfig;
+  profileId?: string;
   productIds: string[];
   url: string;
   observedAt?: string;
@@ -75,6 +77,7 @@ export async function enrollCart(
   const sms = !!profile.phone && eligible(smsConsent);
   const run: CartRun = {
     config,
+    profileId,
     url,
     observedAt: observedAt.toISOString(),
     productIds: ids,
@@ -143,7 +146,37 @@ export async function loadCart(key: string): Promise<CartRun> {
       shop_kind_key: { shop: shop(), kind: "CART_RUN", key: cartRunKey(key) },
     },
   });
-  return row.data as unknown as CartRun;
+  const run = row.data as unknown as CartRun;
+  if (!run.profileId) {
+    const message = await prisma.marketingMessage.findUnique({
+      where: { key },
+      select: { profileId: true },
+    });
+    run.profileId = message?.profileId;
+  }
+  const flow = await prisma.marketingResource.findUnique({
+    where: {
+      shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" },
+    },
+  });
+  if (flow?.data && (flow.data as { cart?: unknown }).cart) {
+    const live = validateFlow("abandoned-cart", flow.data);
+    run.config = {
+      ...run.config,
+      steps: run.config.steps.map((step, index) =>
+        index === 0
+          ? {
+              ...step,
+              subject: live.steps[0].subject,
+              content: live.steps[0].content,
+            }
+          : step,
+      ),
+      orderBranch: live.orderBranch,
+      cart: live.cart,
+    };
+  }
+  return run;
 }
 
 /** Shopify is authoritative even when a purchase webhook is delayed. */
@@ -177,6 +210,19 @@ export async function cartDependency(
   m: { key: string; flowCondition: string | null; triggerAt: Date | null },
   run: CartRun,
 ): Promise<Date | null> {
+  const current = await tx.marketingMessage.findUnique({
+    where: { key: m.key },
+    select: { id: true },
+  });
+  if (
+    current &&
+    (await tx.marketingResource.findUnique({
+      where: {
+        shop_kind_key: { shop: shop(), kind: "CART_WAIT", key: current.id },
+      },
+    }))
+  )
+    return null;
   const stage = m.flowCondition?.split(":")[1];
   if (stage === "sms") return null;
   const previous = await tx.marketingMessage.findUnique({
@@ -229,85 +275,49 @@ export async function cartProducts(
 ): Promise<NonNullable<Content["products"]>> {
   const count = run.config.cart!.productCount;
   if (!count) return [];
-  const events = await prisma.marketingEvent.findMany({
-    where: {
-      shop: shop(),
-      type: { in: ["orders/create", "PRODUCT_VIEWED"] },
-      occurredAt: { gte: new Date(Date.now() - 3 * DAY), lte: new Date() },
-    },
-    orderBy: { occurredAt: "desc" },
-    take: 10000,
-  });
-  const sales = new Map<string, number>(),
-    views = new Map<string, number>(),
-    seenOrders = new Set<string>(),
-    seenViews = new Set<string>();
-  for (const event of events) {
-    const p = event.payload as {
-      id?: string | number;
-      test?: boolean;
-      productId?: string;
-      line_items?: CartLine[];
-    };
-    if (
-      event.type === "orders/create" &&
-      !p.test &&
-      p.id &&
-      !seenOrders.has(String(p.id))
-    ) {
-      seenOrders.add(String(p.id));
-      for (const line of p.line_items || []) {
-        const id = String(line.product_id || "");
-        if (/^\d+$/.test(id))
-          sales.set(
-            id,
-            (sales.get(id) || 0) + Math.max(0, Number(line.quantity) || 0),
-          );
-      }
-    } else if (event.type === "PRODUCT_VIEWED") {
-      const id = String(p.productId || "").replace(
-        /^gid:\/\/shopify\/Product\//,
-        "",
-      );
-      const unique =
-        (event.anonymousId || event.id) +
-        ":" +
-        id +
-        ":" +
-        event.occurredAt.toISOString().slice(0, 10);
-      if (/^\d+$/.test(id) && !seenViews.has(unique)) {
-        seenViews.add(unique);
-        views.set(id, (views.get(id) || 0) + 1);
-      }
-    }
-  }
-  const ids = rankedProducts(run.productIds, sales, views).slice(0, 100);
-  if (!ids.length) return [];
-  const response = await shopifyGraphql<{
-    data?: { nodes?: (Product | null)[] };
-  }>(
-    `query CartProducts($ids: [ID!]!) { nodes(ids: $ids) { ... on Product { id title onlineStoreUrl status totalInventory tracksInventory featuredImage { url } priceRangeV2 { minVariantPrice { amount currencyCode } } } } }`,
-    { ids: ids.map((id) => "gid://shopify/Product/" + id) },
+  const history = await recommendationHistory(run.profileId);
+  const ids = rankedProducts(
+    [...run.productIds, ...history.cart],
+    history.sales,
+    history.views,
   );
-  if (!response.data?.nodes) throw new Error("Products could not be checked");
-  return response.data.nodes
-    .filter(
-      (p): p is Product =>
-        !!p &&
-        p.status === "ACTIVE" &&
-        !!p.onlineStoreUrl &&
-        (!p.tracksInventory || p.totalInventory > 0),
-    )
-    .slice(0, count)
-    .map((p) => ({
-      title: p.title,
-      url: p.onlineStoreUrl!,
-      image: p.featuredImage?.url,
-      price:
-        p.priceRangeV2.minVariantPrice.currencyCode +
-        " " +
-        p.priceRangeV2.minVariantPrice.amount,
-    }));
+  if (!ids.length) return [];
+  const result: NonNullable<Content["products"]> = [];
+  for (
+    let offset = 0;
+    offset < ids.length && result.length < count;
+    offset += 100
+  ) {
+    const batch = ids.slice(offset, offset + 100);
+    const response = await shopifyGraphql<{
+      data?: { nodes?: (Product | null)[] };
+    }>(
+      `query CartProducts($ids: [ID!]!) { nodes(ids: $ids) { ... on Product { id title onlineStoreUrl status totalInventory tracksInventory featuredImage { url } priceRangeV2 { minVariantPrice { amount currencyCode } } } } }`,
+      { ids: batch.map((id) => "gid://shopify/Product/" + id) },
+    );
+    if (!response.data?.nodes) throw new Error("Products could not be checked");
+    result.push(
+      ...response.data.nodes
+        .filter(
+          (p): p is Product =>
+            !!p &&
+            p.status === "ACTIVE" &&
+            !!p.onlineStoreUrl &&
+            (!p.tracksInventory || p.totalInventory > 0),
+        )
+        .slice(0, count - result.length)
+        .map((p) => ({
+          title: p.title,
+          url: p.onlineStoreUrl!,
+          image: p.featuredImage?.url,
+          price:
+            p.priceRangeV2.minVariantPrice.currencyCode +
+            " " +
+            p.priceRangeV2.minVariantPrice.amount,
+        })),
+    );
+  }
+  return result;
 }
 
 /** Persist the random code before contacting Shopify, then look up on every retry. */
@@ -443,4 +453,46 @@ export async function cartReadiness() {
     missingWebhooks,
     views,
   };
+}
+
+/** Start the next wait once. Later timing edits cannot move a wait already entered. */
+export async function advanceCart(
+  tx: Tx,
+  message: { key: string; flowCondition: string | null },
+  completedAt = new Date(),
+) {
+  if (!message.flowCondition?.startsWith("cart-v1:")) return;
+  const stage = message.flowCondition.split(":")[1];
+  if (stage !== "sms" && stage !== "first") return;
+  const next = await tx.marketingMessage.findUnique({
+    where: {
+      key: cartRunKey(message.key) + (stage === "sms" ? ":first" : ":final"),
+    },
+  });
+  if (!next || next.status !== "PENDING") return;
+  const where = { shop: shop(), kind: "CART_WAIT", key: next.id };
+  if (
+    await tx.marketingResource.findUnique({ where: { shop_kind_key: where } })
+  )
+    return;
+  const row = await tx.marketingResource.findUnique({
+    where: {
+      shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" },
+    },
+  });
+  const live = validateFlow("abandoned-cart", row?.data);
+  const delay =
+    stage === "sms" ? live.steps[0].minutes : (live.branchMinutes ?? 1440);
+  const dueAt = new Date(+completedAt + delay * 60000);
+  await tx.marketingResource.create({
+    data: {
+      ...where,
+      name: "Cart wait started",
+      data: { dueAt: dueAt.toISOString() },
+    },
+  });
+  await tx.marketingMessage.update({
+    where: { id: next.id },
+    data: { dueAt, error: null },
+  });
 }

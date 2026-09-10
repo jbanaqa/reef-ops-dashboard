@@ -24,7 +24,27 @@ export async function enroll(
   const config = validateFlow(key, resource.data);
   if (!config.reviewed) return;
   if (key === "delivery-upsell" && !context.expectedDeliveryAt) return;
-  if (key === "abandoned-cart" && at < new Date(Date.now() - 3 * DAY)) return;
+  if (key === "abandoned-cart" && at < new Date(Date.now() - 3 * DAY)) {
+    if (!config.cart) return;
+    const p = await tx.marketingProfile.findUnique({
+      where: { id: profileId },
+      select: { email: true },
+    });
+    const recent = await tx.marketingEvent.findFirst({
+      where: {
+        shop: shop(),
+        type: { in: ["CHECKOUT_STARTED_TRUSTED", "HISTORY_CHECKOUT"] },
+        occurredAt: { gte: new Date(Date.now() - 3 * DAY), lte: new Date() },
+        OR: [
+          { profileId },
+          ...(p?.email
+            ? [{ payload: { path: ["email"], equals: p.email } }]
+            : []),
+        ],
+      },
+    });
+    if (!recent) return;
+  }
   if (key === "abandoned-cart" && config.cart) {
     if (!context.url || !eventKey || eventKey === "undefined") return;
     await enrollCart(

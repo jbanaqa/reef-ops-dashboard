@@ -1529,11 +1529,46 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       await prisma.marketingMessage.count({ where: { profileId: p.id } }),
       2,
     );
+    const initialDue = +messages[0].dueAt;
+    f.steps[0].subject = "Updated queued cart subject";
+    f.steps[0].minutes = 20;
+    f.branchMinutes = 120;
+    await prisma.marketingResource.update({
+      where: { id: row.id },
+      data: { data: store.json(f) },
+    });
     await worker.runMarketing();
     const first = await prisma.marketingMessage.findUniqueOrThrow({
       where: { id: messages[0].id },
     });
     assert.equal(first.status, "SENT");
+    assert.equal(first.subject, "Updated queued cart subject");
+    assert.equal(
+      +first.dueAt,
+      initialDue,
+      "an entered wait keeps its deadline",
+    );
+    const waiting = await prisma.marketingMessage.findUniqueOrThrow({
+      where: { id: messages[1].id },
+    });
+    assert.ok(
+      Math.abs(+waiting.dueAt - (+first.sentAt! + 120 * 60000)) < 2000,
+      "next wait uses the current duration",
+    );
+    f.steps[0].minutes = 0;
+    f.branchMinutes = 1440;
+    await prisma.marketingResource.update({
+      where: { id: row.id },
+      data: { data: store.json(f) },
+    });
+    assert.equal(
+      +(
+        await prisma.marketingMessage.findUniqueOrThrow({
+          where: { id: waiting.id },
+        })
+      ).dueAt,
+      +waiting.dueAt,
+    );
     assert.equal((first.content as { products: unknown[] }).products.length, 1);
     const final = messages[1];
     await prisma.marketingMessage.update({
@@ -1661,6 +1696,22 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
     });
     assert.match(skipped.error || "", /recently received/);
 
+    const p4 = await make("cart1004");
+    await store.atomic((tx) =>
+      store.record(tx, {
+        key: "external-email-receipt",
+        type: "EXTERNAL_EMAIL_SENT",
+        payload: { email: p4.email },
+        occurredAt: new Date(),
+      }),
+    );
+    await worker.runMarketing();
+    const externalSkip = await prisma.marketingMessage.findFirstOrThrow({
+      where: { profileId: p4.id, flowCondition: "cart-v1:first" },
+    });
+    assert.equal(externalSkip.status, "CANCELLED");
+    assert.match(externalSkip.error || "", /Klaviyo/);
+
     // A lost mutation response does not create a second discount on retry.
     const fetchBeforeLoss = globalThis.fetch;
     let lost = true;
@@ -1707,4 +1758,316 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       data: { data: store.json(original), enabled: originalEnabled },
     });
   }
+});
+
+test("Klaviyo history is paginated, resumable, read-only and deduplicated", async () => {
+  const { syncHistory, historyStatus, productIdsFromEvent } = await import(
+    "../lib/marketing/cart-history"
+  );
+  assert.deepEqual(
+    productIdsFromEvent({ extra: { line_items: [{ product: { id: 123 } }] } }),
+    ["123"],
+  );
+  const previous = globalThis.fetch;
+  const beforeProfiles = await prisma.marketingProfile.count(),
+    beforeMessages = await prisma.marketingMessage.count(),
+    beforeConsents = await prisma.marketingConsent.count();
+  process.env.KLAVIYO_PRIVATE_API_KEY = "history-test-secret";
+  let metrics = 0,
+    events = 0;
+  const event = (id: string) => ({
+    type: "event",
+    id,
+    attributes: {
+      datetime: new Date(Date.now() - 60000).toISOString(),
+      event_properties: { ProductID: "901" },
+    },
+    relationships: { profile: { data: { id: "kp1" } } },
+  });
+  globalThis.fetch = async (input, init) => {
+    const u = new URL(String(input));
+    assert.equal(u.origin, "https://a.klaviyo.com");
+    assert.equal(
+      (init?.headers as Record<string, string>).revision,
+      "2026-07-15",
+    );
+    if (u.pathname.includes("metrics")) {
+      metrics++;
+      return Response.json({
+        data: [
+          {
+            id: "view",
+            type: "metric",
+            attributes: { name: "Viewed Product" },
+          },
+        ],
+      });
+    }
+    events++;
+    return Response.json({
+      data: [event("history-one")],
+      included: [
+        {
+          type: "profile",
+          id: "kp1",
+          attributes: { email: "not-imported@example.com" },
+        },
+      ],
+      links: {
+        next:
+          events === 1
+            ? "https://a.klaviyo.com/api/events/?page[cursor]=two"
+            : null,
+      },
+    });
+  };
+  try {
+    assert.equal((await syncHistory()).phase, "events");
+    assert.equal((await syncHistory()).phase, "events");
+    assert.equal((await syncHistory()).phase, "complete");
+    assert.equal(metrics, 1);
+    assert.equal(events, 2);
+    assert.equal(
+      await prisma.marketingEvent.count({
+        where: { key: "klaviyo:history-one" },
+      }),
+      1,
+    );
+    assert.equal(await prisma.marketingProfile.count(), beforeProfiles);
+    assert.equal(await prisma.marketingMessage.count(), beforeMessages);
+    assert.equal(await prisma.marketingConsent.count(), beforeConsents);
+    assert.ok(
+      !JSON.stringify(await historyStatus()).includes("history-test-secret"),
+    );
+    const state = await prisma.marketingResource.findUniqueOrThrow({
+      where: { shop_kind_key: { shop, kind: "HISTORY_SYNC", key: "klaviyo" } },
+    });
+    globalThis.fetch = async (input) => {
+      const u = new URL(String(input));
+      if (u.pathname.includes("metrics"))
+        return Response.json({
+          data: [
+            {
+              id: "cart-new",
+              type: "metric",
+              attributes: { name: "Added to Cart" },
+            },
+          ],
+        });
+      const filter = u.searchParams.get("filter")!;
+      const since = filter.match(/greater-or-equal\(datetime,([^)]*)\)/)![1];
+      assert.ok(
+        Date.now() - +new Date(since) > 89 * 86400000,
+        "newly available metric imports its full history",
+      );
+      return Response.json({ data: [] });
+    };
+    await syncHistory();
+    await syncHistory();
+    await prisma.marketingResource.update({
+      where: { id: state.id },
+      data: {
+        data: {
+          ...(state.data as object),
+          phase: "events",
+          index: 0,
+          next: "https://attacker.example/api/events/",
+        },
+      },
+    });
+    assert.match(
+      (await syncHistory()).error || "",
+      /Invalid Klaviyo pagination/,
+    );
+    assert.equal(
+      events,
+      2,
+      "never send credentials to a foreign pagination URL",
+    );
+  } finally {
+    globalThis.fetch = previous;
+    delete process.env.KLAVIYO_PRIVATE_API_KEY;
+    await prisma.marketingResource.deleteMany({
+      where: { shop, kind: "HISTORY_SYNC" },
+    });
+    await prisma.marketingEvent.deleteMany({
+      where: { key: "klaviyo:history-one" },
+    });
+  }
+});
+
+test("recommendations combine 90-day cart history and three-day popularity without overlap", async () => {
+  const { recommendationHistory, feedEvents } = await import(
+    "../lib/marketing/cart-feed"
+  );
+  const p = await store.atomic((tx) =>
+    store.identify(tx, { email: "feed-history@example.com" }),
+  );
+  const now = Date.now(),
+    day = 86400000;
+  const add = async (
+    key: string,
+    type: string,
+    days: number,
+    payload: object,
+  ) =>
+    store.atomic((tx) =>
+      store.record(tx, {
+        key: "feed-" + key,
+        type,
+        occurredAt: new Date(now - days * day),
+        payload,
+      }),
+    );
+  try {
+    await add("cart60", "HISTORY_CART", 60, {
+      email: p.email,
+      productIds: ["901"],
+    });
+    await add("cart91", "HISTORY_CART", 91, {
+      email: p.email,
+      productIds: ["902"],
+    });
+    await add("native-view", "PRODUCT_VIEWED", 2, { productId: "903" });
+    await add("import-view", "HISTORY_VIEW", 2, { productIds: ["903"] });
+    await add("new-view", "PRODUCT_VIEWED", 0.1, { productId: "903" });
+    await add("old-view", "PRODUCT_VIEWED", 4, { productId: "904" });
+    await add("native-sale", "orders/create", 2, {
+      id: "overlap-order",
+      line_items: [{ product_id: "905", quantity: 2 }],
+    });
+    await add("import-sale", "HISTORY_SALE", 2, {
+      productIds: ["905"],
+      quantity: 2,
+    });
+    await prisma.marketingResource.create({
+      data: {
+        shop,
+        kind: "HISTORY_SYNC",
+        key: "klaviyo",
+        name: "test",
+        data: {
+          coverage: {
+            until: new Date(now - day).toISOString(),
+            metrics: ["Viewed Product", "Ordered Product"],
+          },
+        },
+      },
+    });
+    const result = await recommendationHistory(p.id);
+    assert.deepEqual(result.cart, ["901"]);
+    assert.equal(result.views.get("903"), 2);
+    assert.equal(result.views.has("904"), false);
+    assert.equal(result.sales.get("905"), 2);
+    await prisma.marketingEvent.createMany({
+      data: Array.from({ length: 1001 }, (_, i) => ({
+        shop,
+        key: "feed-page-" + i,
+        type: "FEED_PAGE",
+        occurredAt: new Date(),
+        payload: {},
+      })),
+    });
+    let n = 0;
+    for await (const event of feedEvents({ type: "FEED_PAGE" })) {
+      assert.ok(event.id);
+      n++;
+    }
+    assert.equal(n, 1001);
+  } finally {
+    await prisma.marketingEvent.deleteMany({
+      where: { shop, key: { startsWith: "feed-" } },
+    });
+    await prisma.marketingResource.deleteMany({
+      where: { shop, kind: "HISTORY_SYNC" },
+    });
+  }
+});
+
+test("cart reports count unique engagement and keep revenue currencies separate", async () => {
+  const { cartReport } = await import("../lib/marketing/cart-report");
+  const p = await store.atomic((tx) =>
+    store.identify(tx, { email: "report-cart@example.com" }),
+  );
+  const m = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "report-cart",
+      profileId: p.id,
+      flowKey: "abandoned-cart",
+      flowCondition: "cart-v1:first",
+      channel: "EMAIL",
+      status: "SENT",
+      subject: "Report",
+      content: defaultContent,
+      dueAt: new Date(),
+    },
+  });
+  const before = (await cartReport()).rows.find((r) => r.key === "first")!;
+  for (const [i, type] of [
+    "OPENED",
+    "OPENED",
+    "CLICKED",
+    "CLICKED",
+    "DELIVERED",
+    "ORDER",
+    "ORDER",
+  ].entries())
+    await store.atomic((tx) =>
+      store.record(tx, {
+        key: "report-event-" + i,
+        type,
+        profileId: p.id,
+        messageId: m.id,
+        payload:
+          type === "ORDER"
+            ? { currency: i === 5 ? "USD" : "CAD", revenue: "12.50" }
+            : {},
+      }),
+    );
+  const after = (await cartReport()).rows.find((r) => r.key === "first")!;
+  assert.equal(after.opened - before.opened, 1);
+  assert.equal(after.clicked - before.clicked, 1);
+  assert.equal(after.delivered - before.delivered, 1);
+  assert.equal(after.orders - before.orders, 2);
+  assert.equal(after.revenue.USD - (before.revenue.USD || 0), 12.5);
+  assert.equal(after.revenue.CAD - (before.revenue.CAD || 0), 12.5);
+});
+
+test("cart tools require staff login and tracking download uses the configured origin", async () => {
+  const api = await import("../app/api/marketing/route");
+  for (const view of ["cart-history", "cart-report", "tracking-pixel"])
+    assert.equal(
+      (
+        await api.GET(
+          new Request("https://app.example/api/marketing?view=" + view),
+        )
+      ).status,
+      401,
+    );
+  for (const action of ["sync-cart-history", "preview-cart-products"])
+    assert.equal(
+      (
+        await api.POST(
+          new Request("https://app.example/api/marketing", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action }),
+          }),
+        )
+      ).status,
+      401,
+    );
+  const script = await api.GET(
+    new Request("https://app.example/api/marketing?view=tracking-pixel", {
+      headers: {
+        authorization:
+          "Basic " + Buffer.from("staff:test-password").toString("base64"),
+      },
+    }),
+  );
+  assert.equal(script.status, 200);
+  const source = await script.text();
+  assert.ok(source.includes("https://app.example"));
+  assert.ok(!source.includes("YOUR-REEF-OPS-HOST"));
 });

@@ -376,7 +376,16 @@ export async function ingestShopify(
       ["checkouts/create", "checkouts/update"].includes(topic) &&
       !historical &&
       p.abandoned_checkout_url
-    )
+    ) {
+      const checkout = String(p.token || p.id || "");
+      if (checkout)
+        await record(tx, {
+          key: "checkout-start:" + profile.id + ":" + checkout,
+          type: "CHECKOUT_STARTED_TRUSTED",
+          profileId: profile.id,
+          occurredAt: date(p.created_at || at.toISOString()),
+          payload: { checkoutId: checkout },
+        });
       await enroll(
         tx,
         "abandoned-cart",
@@ -385,6 +394,7 @@ export async function ingestShopify(
         date(p.created_at || at.toISOString()),
         { url: p.abandoned_checkout_url, lines: p.line_items, observedAt: at },
       );
+    }
     if (topic === "delivery/scheduled" && !historical && p.expected_delivery_at)
       await enroll(
         tx,

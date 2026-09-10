@@ -11,6 +11,8 @@ import {
 } from "@/lib/marketing/rules";
 import { FlowMap, Node } from "./FlowMap";
 import EmailDesigner from "./EmailDesigner";
+import FlowDialog from "./FlowDialog";
+import CartTools from "./CartTools";
 import { readDraft, writeDraft } from "./flow-drafts";
 
 import { cartDraft, CartConfig } from "@/lib/marketing/cart-config";
@@ -52,49 +54,6 @@ const startingHtml = (c: Content) =>
         .slice(c.template === "b2b-wholesale" ? 2 : 0)
         .map((line) => (line ? `<p>${escapeHtml(line)}</p>` : ""))
         .join("\n");
-
-function FlowDialog({
-  title,
-  close,
-  children,
-}: {
-  title: string;
-  close: () => void;
-  children: React.ReactNode;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const el = ref.current!;
-    const focus = document.activeElement as HTMLElement | null;
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    el.showModal();
-    return () => {
-      el.close();
-      document.body.style.overflow = overflow;
-      focus?.focus();
-    };
-  }, []);
-  return (
-    <dialog
-      ref={ref}
-      className="mk-flow-dialog"
-      aria-label={title}
-      onCancel={(e) => {
-        e.preventDefault();
-        close();
-      }}
-    >
-      <div className="mk-modal-header">
-        <h3>{title}</h3>
-        <button type="button" onClick={close}>
-          Close
-        </button>
-      </div>
-      {children}
-    </dialog>
-  );
-}
 
 function FlowEditorState({
   resource,
@@ -502,6 +461,7 @@ function FlowEditorState({
           )}
         </div>
       )}
+      {flow.cart && <CartTools flow={flow as FlowConfig} />}
       {resource.key === "low-stock" && (
         <div className="mk-two">
           <label>
@@ -536,8 +496,9 @@ function FlowEditorState({
         <p className="mk-cart-feed-note">
           Email and text consent are checked before sending. Existing Klaviyo
           automations should be paused before this flow goes live to avoid
-          duplicate reminders. Saved changes apply to new checkouts; checkouts
-          already in progress keep their original copy and timing.
+          duplicate reminders. Saved email edits apply when waiting messages are
+          prepared. A wait already in progress keeps its timing; later waits use
+          the settings saved when they begin.
         </p>
       )}
       <p>{draftStatus}</p>
@@ -665,16 +626,17 @@ function FlowEditorState({
                   />
                 </label>
                 <p>
-                  Show available products from the customer’s checkout first,
-                  across all categories. Fill remaining spaces by alternating
-                  best-selling and most-viewed products from the last 3 days,
-                  without duplicates.
+                  Show available products from the customer’s current checkout
+                  and cart activity over the last 90 days first, across all
+                  categories. Fill remaining spaces by alternating best-selling
+                  and most-viewed products from the last 3 days, without
+                  duplicates.
                 </p>
                 <p>
-                  Rankings use activity collected by Reef Ops. Connect the
-                  Shopify customer-events pixel for product views; Klaviyo
-                  history is not included. Fewer products appear when there is
-                  not enough recorded activity or available stock.
+                  Rankings use Reef Ops activity and completed Klaviyo history
+                  imports. Use Preview customer products to check the selection
+                  and connect tracking. Fewer products appear when there is not
+                  enough recorded activity or available stock.
                 </p>
               </div>
             )}
