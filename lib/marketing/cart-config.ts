@@ -5,6 +5,7 @@ export type CartConfig = {
   version: 1;
   productCount: number;
   testEmail?: string;
+  bypassRecentEmailSuppression?: boolean;
 };
 export const defaultCartConfig: CartConfig = { version: 1, productCount: 6 };
 export function validateCart(value: unknown): CartConfig {
@@ -21,6 +22,17 @@ export function validateCart(value: unknown): CartConfig {
     version: 1,
     productCount: c.productCount,
     ...(c.testEmail !== undefined ? { testEmail: email(c.testEmail) } : {}),
+    ...(c.bypassRecentEmailSuppression === true
+      ? {
+          bypassRecentEmailSuppression: (() => {
+            if (c.testEmail === undefined || !String(c.testEmail).trim())
+              throw new Error(
+                "Recent-email bypass requires a specific test email.",
+              );
+            return true;
+          })(),
+        }
+      : {}),
   };
 }
 export const cartEmail = (

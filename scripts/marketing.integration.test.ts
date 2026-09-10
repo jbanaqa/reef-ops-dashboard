@@ -2295,6 +2295,24 @@ test("cart test mode isolates enrollment and sending, including previously queue
     }).testEmail,
     "test@example.com",
   );
+  assert.throws(
+    () =>
+      validateCart({
+        version: 1,
+        productCount: 4,
+        bypassRecentEmailSuppression: true,
+      }),
+    /requires a specific test email/,
+  );
+  assert.equal(
+    validateCart({
+      version: 1,
+      productCount: 4,
+      testEmail: " TEST@EXAMPLE.COM ",
+      bypassRecentEmailSuppression: true,
+    }).bypassRecentEmailSuppression,
+    true,
+  );
   const row = await prisma.marketingResource.findUniqueOrThrow({
     where: { shop_kind_key: { shop, kind: "FLOW", key: "abandoned-cart" } },
   });
@@ -2390,6 +2408,7 @@ test("cart test mode isolates enrollment and sending, including previously queue
     await worker.runMarketing();
     const final = await prisma.marketingMessage.findFirstOrThrow({
       where: { profileId: target.id, flowCondition: "cart-v1:final" },
+      orderBy: { triggerAt: "desc" },
     });
     assert.equal(final.status, "CANCELLED");
     assert.match(final.error || "", /test ended/);

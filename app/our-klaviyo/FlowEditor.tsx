@@ -497,26 +497,51 @@ function FlowEditorState({
             Restrict this flow to one test email
           </label>
           {flow.cart.testEmail !== undefined && (
-            <label>
-              Test account email
-              <input
-                type="email"
-                value={flow.cart.testEmail}
-                placeholder="you@example.com"
-                onChange={(e) => {
-                  setEnabled(false);
-                  setFlow((f) => ({
-                    ...f,
-                    reviewed: false,
-                    cart: { ...f.cart!, testEmail: e.target.value },
-                  }));
-                }}
-              />
-            </label>
+            <>
+              <label>
+                Test account email
+                <input
+                  type="email"
+                  value={flow.cart.testEmail}
+                  placeholder="you@example.com"
+                  onChange={(e) => {
+                    setEnabled(false);
+                    setFlow((f) => ({
+                      ...f,
+                      reviewed: false,
+                      cart: {
+                        ...f.cart!,
+                        testEmail: e.target.value,
+                        bypassRecentEmailSuppression: false,
+                      },
+                    }));
+                  }}
+                />
+              </label>
+              <label className="mk-check">
+                <input
+                  type="checkbox"
+                  checked={flow.cart.bypassRecentEmailSuppression === true}
+                  disabled={!flow.cart.testEmail.trim()}
+                  onChange={(e) => {
+                    setEnabled(false);
+                    setFlow((f) => ({
+                      ...f,
+                      reviewed: false,
+                      cart: {
+                        ...f.cart!,
+                        bypassRecentEmailSuppression: e.target.checked,
+                      },
+                    }));
+                  }}
+                />
+                Bypass 16-hour email suppression for this test account
+              </label>
+            </>
           )}
           <p>
             {flow.cart.testEmail !== undefined
-              ? "Only this account can enter or receive this flow. Tests send email only; SMS is skipped. Consent, purchase checks, delays and the 16-hour email limit still apply. Start a fresh checkout after saving and enabling the restricted flow."
+              ? "Only this account can enter or receive this flow. Tests send email only; SMS is skipped. Consent, purchase checks and delays still apply. The optional bypass affects only this specific test account and only the 16-hour email suppression. Start a fresh checkout after saving and enabling the restricted flow."
               : "When enabled without this restriction, this flow can send to all eligible customers."}
           </p>
           <p>

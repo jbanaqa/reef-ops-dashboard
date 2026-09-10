@@ -497,6 +497,12 @@ export async function runMarketing(onlyMessageId?: string) {
         }
       }
       if (cartRun && !deferred) {
+        const bypassRecentEmailSuppression =
+          m.channel === "EMAIL" &&
+          cartRun.config.cart?.bypassRecentEmailSuppression === true &&
+          !!cartRun.config.cart.testEmail &&
+          cartRun.config.cart.testEmail === m.profile.email;
+        if (!bypassRecentEmailSuppression) {
         // Reserve against concurrent claims as well as already sent messages.
         const recent = await tx.marketingMessage.findFirst({
           where: {
@@ -567,6 +573,7 @@ export async function runMarketing(onlyMessageId?: string) {
           });
           await advanceCart(tx, m);
           return null;
+        }
         }
       }
       if (deferred) {
