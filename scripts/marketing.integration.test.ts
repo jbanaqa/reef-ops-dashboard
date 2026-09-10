@@ -2202,3 +2202,57 @@ test("Shopify opaque-origin pixels record anonymous views but cannot change cons
     });
   }
 });
+
+test("cart recommendations exclude Shipping Protection and backfill from later candidates", async () => {
+  const { cartProducts } = await import("../lib/marketing/cart");
+  const { cartDraft } = await import("../lib/marketing/cart-config");
+  const { validateFlow } = await import("../lib/marketing/flow-config");
+  const row = await prisma.marketingResource.findUniqueOrThrow({
+    where: { shop_kind_key: { shop, kind: "FLOW", key: "abandoned-cart" } },
+  });
+  const config = validateFlow("abandoned-cart", cartDraft(row.data as never));
+  config.cart!.productCount = 1;
+  const previous = globalThis.fetch;
+  let batches = 0;
+  globalThis.fetch = async (input, init) => {
+    if (
+      String(input).includes("/graphql.json") &&
+      String(init?.body).includes("CartProducts")
+    ) {
+      batches++;
+      const b = JSON.parse(String(init?.body));
+      return Response.json({
+        data: {
+          nodes: b.variables.ids.map((id: string) => ({
+            id,
+            title:
+              id === "gid://shopify/Product/80100"
+                ? "Test coral"
+                : "Shipping Protection - safeguard against weather damage",
+            status: "ACTIVE",
+            onlineStoreUrl:
+              "https://coralsanonymous.com/products/" + id.split("/").at(-1),
+            tracksInventory: true,
+            totalInventory: 5,
+            priceRangeV2: {
+              minVariantPrice: { amount: "25.00", currencyCode: "USD" },
+            },
+          })),
+        },
+      });
+    }
+    return previous(input, init);
+  };
+  try {
+    const result = await cartProducts({
+      config,
+      productIds: Array.from({ length: 101 }, (_, i) => String(80000 + i)),
+      url: "https://coralsanonymous.com/cart",
+    });
+    assert.equal(batches, 2);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].title, "Test coral");
+  } finally {
+    globalThis.fetch = previous;
+  }
+});

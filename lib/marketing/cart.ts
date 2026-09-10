@@ -302,6 +302,7 @@ export async function cartProducts(
           (p): p is Product =>
             !!p &&
             p.status === "ACTIVE" &&
+            !/\bshipping[\s-]+protection\b/i.test(p.title) &&
             !!p.onlineStoreUrl &&
             (!p.tracksInventory || p.totalInventory > 0),
         )
