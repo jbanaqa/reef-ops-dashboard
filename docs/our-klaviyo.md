@@ -1,5 +1,7 @@
 # Our Klaviyo — implementation and rollout
 
+> Continuation note: Read [the September 10 handoff](REEF-OPS-HANDOFF.md) first. This document includes historical implementation notes; the handoff identifies superseded statements and distinguishes live observations from automated verification.
+
 This is a local V1 implementation, not a completed Klaviyo cutover. No production database, storefront, sender configuration, or Shopify account was changed during implementation. All sends and flows default to disabled.
 
 ## Architecture inspected and reused
