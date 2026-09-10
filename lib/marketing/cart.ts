@@ -48,6 +48,9 @@ export async function enrollCart(
   if (existing) {
     const saved = existing.data as unknown as CartRun;
     const newer = !saved.observedAt || observedAt > new Date(saved.observedAt);
+    const stale =
+      !saved.observedAt ||
+      observedAt.getTime() - new Date(saved.observedAt).getTime() > 3 * DAY;
     if (newer)
       await tx.marketingResource.update({
         where: { id: existing.id },
@@ -60,6 +63,31 @@ export async function enrollCart(
           }),
         },
       });
+    if (newer && stale) {
+      const smsMinutes =
+        config.cart?.testEmail !== undefined
+          ? 0
+          : config.smsMinutes ?? 30;
+      const firstMinutes = smsMinutes + config.steps[0].minutes;
+      const finalMinutes = firstMinutes + (config.branchMinutes ?? 1440);
+      for (const [condition, minutes] of [
+        ["cart-v1:sms", smsMinutes],
+        ["cart-v1:first", firstMinutes],
+        ["cart-v1:final", finalMinutes],
+      ] as const)
+        await tx.marketingMessage.updateMany({
+          where: {
+            key: { startsWith: base + ":" },
+            flowCondition: condition,
+            status: "PENDING",
+          },
+          data: {
+            triggerAt: at,
+            dueAt: new Date(+at + minutes * 60000),
+            error: null,
+          },
+        });
+    }
     if (newer && lines && !lines.length)
       await tx.marketingMessage.updateMany({
         where: { key: { startsWith: base + ":" }, status: "PENDING" },
