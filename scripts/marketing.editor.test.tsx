@@ -217,13 +217,25 @@ test("footer fields save with the email while sender details remain visible", as
     target: { value: "Contact our wholesale team." },
   });
   assert.ok(view.getByText(/123 Valid Street/));
+  const addressToggle = view.getByLabelText(
+    "Show business address in this email",
+  ) as HTMLInputElement;
+  assert.equal(addressToggle.checked, false);
+  testing.fireEvent.click(addressToggle);
   testing.fireEvent.click(view.getByRole("button", { name: "Save email" }));
   await testing.waitFor(() =>
-    assert.ok(view.getByText("Saved to flow", { exact: true })),
+    assert.ok(view.getByText("Email saved", { exact: true })),
   );
   const result = saved as {
-    steps: { content: { footerTitle: string; footerText: string } }[];
+    steps: {
+      content: {
+        footerTitle: string;
+        footerText: string;
+        showPostalAddress: boolean;
+      };
+    }[];
   };
+  assert.equal(result.steps[0].content.showPostalAddress, true);
   assert.equal(result.steps[0].content.footerTitle, "Thank you, partners");
   assert.equal(
     result.steps[0].content.footerText,

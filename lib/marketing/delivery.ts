@@ -68,7 +68,7 @@ export function emailBody(
       footerTitle(m.content),
       m.content.footerText,
       organizationName,
-      address,
+      m.content.showPostalAddress === true ? address : "",
       m.content.footerUnsubscribeText,
       "Unsubscribe: " + m.unsubscribe,
     ]

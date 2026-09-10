@@ -1,4 +1,4 @@
-import { email, phone, content, defaultContent } from "./rules";
+import { email, phone, content, defaultContent, Content } from "./rules";
 export type StockConfig = {
   collectionId: string;
   threshold: number;
@@ -10,6 +10,7 @@ export type StockConfig = {
   smsConsentConfirmed: boolean;
   emailSubject: string;
   emailBody: string;
+  emailContent?: Content;
   smsBody: string;
 };
 export const defaultStockConfig: StockConfig = {
@@ -79,6 +80,7 @@ export function validateStock(value: unknown, ready = false): StockConfig {
     emailEnabled: s.emailEnabled === true,
     smsEnabled: s.smsEnabled === true,
     smsConsentConfirmed: s.smsConsentConfirmed === true,
+    emailContent: s.emailContent ? content(s.emailContent) : undefined,
     emailSubject: copy(s.emailSubject, 200, "Email subject"),
     emailBody: copy(s.emailBody, 5000, "Email message"),
     smsBody: copy(s.smsBody, 1000, "Text message"),
@@ -124,6 +126,7 @@ export function stockMessageContent(
 ) {
   return content({
     ...defaultContent,
+    ...(channel === "EMAIL" ? s.emailContent : {}),
     heading: "Low stock alert",
     preview: "Internal inventory alert",
     body: stockCopy(channel === "EMAIL" ? s.emailBody : s.smsBody, values),

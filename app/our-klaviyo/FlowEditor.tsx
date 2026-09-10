@@ -45,7 +45,7 @@ type Resource = {
   data: Record<string, unknown>;
 };
 type Target = FlowTarget;
-type Value = string | number | undefined;
+type Value = Content[keyof Content];
 const startingHtml = (c: Content) =>
   c.bodyHtml !== undefined
     ? c.bodyHtml

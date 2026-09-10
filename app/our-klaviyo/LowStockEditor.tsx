@@ -726,7 +726,13 @@ export default function LowStockEditor({
           organizationName={settings.organizationName}
           postalAddress={settings.postalAddress}
           onSubject={(value) => set("emailSubject", value)}
-          onContent={() => {}}
+          onContent={(key, value) =>
+            set("emailContent", {
+              ...defaultContent,
+              ...s.emailContent,
+              [key]: value,
+            })
+          }
           onSave={saveFlow}
           onClose={() => setPanel(null)}
           contentFields={

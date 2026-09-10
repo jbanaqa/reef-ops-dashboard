@@ -68,7 +68,11 @@ test("normalization preserves phone country codes and rejects malformed identiti
 });
 test("templates escape hostile content and reject unsafe link schemes", () => {
   const html = render(
-    { ...defaultContent, heading: '<script>alert("x")</script>' },
+    {
+      ...defaultContent,
+      showPostalAddress: true,
+      heading: '<script>alert("x")</script>',
+    },
     "https://example.com/unsubscribe",
     "123 Main Street",
   );
@@ -303,6 +307,7 @@ test("custom footer survives normalization and renders safely in both email form
     const c = content({
       ...defaultContent,
       template,
+      showPostalAddress: true,
       footerTitle: "Thanks <team>",
       footerText: "Contact our wholesale team.\nWe are here to help.",
       footerUnsubscribeText: "Change your email preferences:",
@@ -340,6 +345,7 @@ test("cleared footer copy keeps the unsubscribe link and mailing address", () =>
     content({
       ...defaultContent,
       template: "b2b-wholesale",
+      showPostalAddress: true,
       footerTitle: "",
       footerText: "",
       footerUnsubscribeText: "",
@@ -355,6 +361,7 @@ test("cleared footer copy keeps the unsubscribe link and mailing address", () =>
 import {
   defaultStockConfig,
   stockCopy,
+  stockMessageContent,
   stockQuietHours,
   validateStock,
 } from "../lib/marketing/stock-config";
@@ -408,6 +415,72 @@ test("stock config validates recipient, threshold, channels, templates and quiet
   );
   assert.equal(
     stockQuietHours("America/Los_Angeles", new Date("2026-12-09T19:00:00Z")),
+    false,
+  );
+});
+
+test("address visibility defaults off and round trips across every template and email format", () => {
+  for (const template of [
+    "standard",
+    "b2b-wholesale",
+    "cart-recovery",
+  ] as const) {
+    for (const showPostalAddress of [undefined, false, true]) {
+      const c = content(
+        JSON.parse(
+          JSON.stringify({ ...defaultContent, template, showPostalAddress }),
+        ),
+      );
+      assert.equal(c.showPostalAddress, showPostalAddress === true);
+      const message = emailBody(
+        {
+          id: "address-test",
+          to: "test@example.com",
+          channel: "EMAIL",
+          subject: "Test",
+          content: c,
+          unsubscribe: "https://example.com/unsubscribe",
+        },
+        "123 Valid Street",
+        "Company",
+      );
+      for (const output of [message.html, message.text]) {
+        assert.equal(
+          output.includes("123 Valid Street"),
+          showPostalAddress === true,
+        );
+        assert.match(output, /Unsubscribe/);
+        assert.match(output, /Company/);
+      }
+    }
+  }
+});
+
+test("stock emails preserve shared footer settings without changing stock tokens", () => {
+  const saved = validateStock({
+    ...defaultStockConfig,
+    emailContent: {
+      ...defaultContent,
+      showPostalAddress: true,
+      footerText: "Staff only",
+    },
+  });
+  const c = stockMessageContent(saved, "EMAIL", {
+    ProductTitle: "Test coral",
+    VariantTitle: "Small",
+    InventoryQuantity: "4",
+    ProductURL: "https://example.com/product",
+  });
+  assert.equal(c.showPostalAddress, true);
+  assert.equal(c.footerText, "Staff only");
+  assert.match(c.body, /Test coral/);
+  assert.equal(
+    stockMessageContent(saved, "SMS_TRANSACTIONAL", {
+      ProductTitle: "Test coral",
+      VariantTitle: "Small",
+      InventoryQuantity: "4",
+      ProductURL: "https://example.com/product",
+    }).showPostalAddress,
     false,
   );
 });

@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import EmailDesigner from "./EmailDesigner";
 import FlowsWorkspace from "./FlowsWorkspace";
 import "./flows.css";
 import "./stock.css";
@@ -10,6 +11,7 @@ import "./settings.css";
 import "./audiences.css";
 import {
   Content,
+  render,
   defaultContent,
   defaultMarketingSettings,
   MarketingSettings,
@@ -104,12 +106,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     audience: { openedDays: 365 },
   });
   const [at, setAt] = useState(""),
-    [preview, setPreview] = useState(""),
-    [mobile, setMobile] = useState(false),
+    [editingEmail, setEditingEmail] = useState(false),
     [audienceCount, setAudienceCount] = useState<number | null>(null);
-  const [testEmail, setTestEmail] = useState("");
-  const [resource, setResource] = useState<Resource | null>(null),
-    [resourceText, setResourceText] = useState("");
+  const [resource, setResource] = useState<Resource | null>(null);
   const load = useCallback(async () => {
     const r = await fetch("/api/marketing", { cache: "no-store" });
     const d = await r.json();
@@ -157,8 +156,70 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     setCampaign((c) => ({ ...c, id: r.id }));
     return r.id;
   };
+  const editingContent = resource
+    ? (resource.data as unknown as Content)
+    : campaign.content;
+  let emailHtml = "",
+    emailPreviewError = "";
+  if (editingEmail || resource) {
+    try {
+      emailHtml = render(
+        editingContent,
+        "#unsubscribe",
+        data?.settings.postalAddress || "",
+        undefined,
+        data?.settings.organizationName,
+      );
+    } catch (e) {
+      emailPreviewError =
+        e instanceof Error ? e.message : "Check the email content.";
+    }
+  }
   return (
     <section className="marketing">
+      {(editingEmail || resource) && (
+        <EmailDesigner
+          title={resource ? resource.name : campaign.name || "Campaign email"}
+          backLabel={resource ? "Back to templates" : "Back to campaign"}
+          editProducts
+          subjectEditable={!resource}
+          subject={resource ? "Template preview" : campaign.subject}
+          content={editingContent}
+          html={emailHtml}
+          previewError={emailPreviewError}
+          busy={busy}
+          status={error || notice || "Save email to keep your changes."}
+          organizationName={
+            data?.settings.organizationName || "Corals Anonymous"
+          }
+          postalAddress={data?.settings.postalAddress || ""}
+          onSubject={(subject) => {
+            if (!resource) setCampaign((c) => ({ ...c, subject }));
+          }}
+          onContent={(key, value) =>
+            resource
+              ? setResource((r) =>
+                  r ? { ...r, data: { ...r.data, [key]: value } } : r,
+                )
+              : update(key, value)
+          }
+          onClose={() => {
+            setEditingEmail(false);
+            setResource(null);
+          }}
+          onSave={async () =>
+            !!(await run(async () => {
+              if (resource)
+                await action({ action: "save-resource", ...resource });
+              else await save();
+              return true;
+            }, "Email saved"))
+          }
+          onTest={async (to, subject, content) => {
+            await action({ action: "test-email", to, subject, content });
+          }}
+        />
+      )}
       <header className="mk-header">
         <div>
           <p className="mk-eyebrow">CORALS ANONYMOUS / OUR KLAVIYO</p>
@@ -390,83 +451,8 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       ))}
                   </select>
                 </label>
-                {(
-                  [
-                    ["preview", "Preview text"],
-                    ["heading", "Heading"],
-                    ["hero", "Hero image URL"],
-                    ["button", "Button label"],
-                    ["url", "Button destination"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label key={key}>
-                    {label}
-                    <input
-                      value={campaign.content[key] || ""}
-                      onChange={(e) => update(key, e.target.value)}
-                    />
-                  </label>
-                ))}
-                <label>
-                  {campaign.content.bodyHtml ? "Message HTML" : "Message"}
-                  <textarea
-                    rows={6}
-                    value={campaign.content.bodyHtml || campaign.content.body}
-                    onChange={(e) =>
-                      update(
-                        campaign.content.bodyHtml ? "bodyHtml" : "body",
-                        e.target.value,
-                      )
-                    }
-                  />
-                </label>
-                <h3>Product cards</h3>
-                {(campaign.content.products || []).map((p, i) => (
-                  <fieldset key={i}>
-                    <legend>Product {i + 1}</legend>
-                    {(["title", "url", "image", "price"] as const).map(
-                      (key) => (
-                        <label key={key}>
-                          {title(key)}
-                          <input
-                            value={p[key] || ""}
-                            onChange={(e) =>
-                              update(
-                                "products",
-                                campaign.content.products!.map((v, n) =>
-                                  n === i ? { ...v, [key]: e.target.value } : v,
-                                ),
-                              )
-                            }
-                          />
-                        </label>
-                      ),
-                    )}
-                    <button
-                      onClick={() =>
-                        update(
-                          "products",
-                          campaign.content.products!.filter((_, n) => n !== i),
-                        )
-                      }
-                    >
-                      Remove product
-                    </button>
-                  </fieldset>
-                ))}
-                <button
-                  onClick={() =>
-                    update("products", [
-                      ...(campaign.content.products || []),
-                      {
-                        title: "",
-                        url: "https://coralsanonymous.com",
-                        price: "",
-                      },
-                    ])
-                  }
-                >
-                  Add product
+                <button onClick={() => setEditingEmail(true)}>
+                  Edit email and preview
                 </button>
                 <div className="mk-actions">
                   <button
@@ -474,25 +460,6 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                     onClick={() => run(save, "Draft saved")}
                   >
                     Save draft
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      run(
-                        async () =>
-                          setPreview(
-                            (
-                              await action({
-                                action: "preview",
-                                content: campaign.content,
-                              })
-                            ).html,
-                          ),
-                        "Preview updated",
-                      )
-                    }
-                  >
-                    Preview email
                   </button>
                   <button
                     disabled={busy}
@@ -512,31 +479,6 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                     Save as template
                   </button>
                 </div>
-                <label>
-                  Internal test recipient
-                  <input
-                    type="email"
-                    value={testEmail}
-                    onChange={(e) => setTestEmail(e.target.value)}
-                  />
-                </label>
-                <button
-                  disabled={busy || !testEmail}
-                  onClick={() =>
-                    run(
-                      () =>
-                        action({
-                          action: "test-email",
-                          to: testEmail,
-                          subject: campaign.subject,
-                          content: campaign.content,
-                        }),
-                      "Test email sent",
-                    )
-                  }
-                >
-                  Send test email
-                </button>
                 <label>
                   Send time (your device’s local timezone)
                   <input
@@ -568,27 +510,6 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                 </button>
               </article>
               <div>
-                {preview && (
-                  <article className="mk-panel">
-                    <div className="mk-actions">
-                      <button onClick={() => setMobile(!mobile)}>
-                        {mobile ? "Desktop preview" : "Mobile preview"}
-                      </button>
-                    </div>
-                    <iframe
-                      title="Email preview"
-                      sandbox=""
-                      srcDoc={preview}
-                      style={{
-                        width: mobile ? 320 : "100%",
-                        maxWidth: "100%",
-                        height: 650,
-                        background: "white",
-                        border: 0,
-                      }}
-                    />
-                  </article>
-                )}
                 <article className="mk-panel">
                   <h2>Campaigns</h2>
                   {!data.campaigns.length && (
@@ -687,7 +608,6 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       <button
                         onClick={() => {
                           setResource(r);
-                          setResourceText(JSON.stringify(r.data, null, 2));
                         }}
                       >
                         Review and edit
@@ -695,36 +615,6 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                     </article>
                   ))}
               </div>
-              {resource && (
-                <article className="mk-panel">
-                  <h2>{resource.name}</h2>
-                  <p>
-                    Edit reusable content fields. Campaign drafts keep their own
-                    copy.
-                  </p>
-                  <textarea
-                    aria-label="Configuration"
-                    className="mk-code"
-                    rows={22}
-                    value={resourceText}
-                    onChange={(e) => setResourceText(e.target.value)}
-                  />
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      run(() =>
-                        action({
-                          action: "save-resource",
-                          ...resource,
-                          data: JSON.parse(resourceText),
-                        }),
-                      )
-                    }
-                  >
-                    Save configuration
-                  </button>
-                </article>
-              )}
             </>
           )}
           {tab === "forms" && (

@@ -133,7 +133,13 @@ export default function EmailDesigner({
   previewSubject,
   previewCaption,
   recoveryLink,
+  editProducts = false,
+  subjectEditable = true,
+  backLabel = "Back to flow",
 }: {
+  backLabel?: string;
+  editProducts?: boolean;
+  subjectEditable?: boolean;
   recoveryLink?: boolean;
   contentFields?: React.ReactNode;
   previewSubject?: string;
@@ -148,7 +154,7 @@ export default function EmailDesigner({
   busy: boolean;
   status: string;
   onSubject: (value: string) => void;
-  onContent: (key: keyof Content, value: string | number | undefined) => void;
+  onContent: (key: keyof Content, value: Content[keyof Content]) => void;
   onSave: () => Promise<boolean>;
   onClose: () => void;
   onTest?: (
@@ -192,10 +198,7 @@ export default function EmailDesigner({
     !!content.bodyHtml?.trim() &&
     (/<h1\b/i.test(content.bodyHtml) ||
       /first_name\s*\|\s*default/i.test(content.bodyHtml));
-  function changeContent(
-    key: keyof Content,
-    value: string | number | undefined,
-  ) {
+  function changeContent(key: keyof Content, value: Content[keyof Content]) {
     setNotice("");
     onContent(key, value);
   }
@@ -205,8 +208,8 @@ export default function EmailDesigner({
     try {
       setNotice(
         (await onSave())
-          ? "Saved to flow"
-          : "Save failed. Your draft is still here; check the flow settings and try again.",
+          ? "Email saved"
+          : "Save failed. Your draft is still here; check the settings and try again.",
       );
     } catch {
       setNotice("Save failed. Your draft is still here. Please try again.");
@@ -229,9 +232,9 @@ export default function EmailDesigner({
           type="button"
           className="mk-back-button"
           onClick={onClose}
-          aria-label="Back to flow"
+          aria-label={backLabel}
         >
-          ← <span>Back to flow</span>
+          ← <span>{backLabel}</span>
         </button>
         <div className="mk-designer-title">
           <span>EMAIL EDITOR</span>
@@ -239,7 +242,7 @@ export default function EmailDesigner({
         </div>
         <div className="mk-designer-header-actions">
           <span className="mk-draft-badge">
-            {working || busy ? "Working…" : "Flow draft"}
+            {working || busy ? "Working…" : "Email draft"}
           </span>
           <button
             className="mk-primary"
@@ -257,7 +260,7 @@ export default function EmailDesigner({
             {(["content", "artwork", "footer", "test"] as const)
               .filter((tab) =>
                 contentFields
-                  ? tab === "content"
+                  ? tab === "content" || tab === "footer"
                   : tab !== "artwork" ||
                     content.template === "b2b-wholesale" ||
                     content.template === "cart-recovery",
@@ -287,8 +290,9 @@ export default function EmailDesigner({
                     <h3>Inbox details</h3>
                     <p>The first thing your customer sees.</p>
                     <label>
-                      Subject
+                      {subjectEditable ? "Subject" : "Preview subject"}
                       <input
+                        readOnly={!subjectEditable}
                         value={subject}
                         onChange={(e) => {
                           setNotice("");
@@ -327,6 +331,18 @@ export default function EmailDesigner({
                       onChange={(value) => changeContent("bodyHtml", value)}
                     />
                   </section>
+                  {content.template !== "b2b-wholesale" && (
+                    <label>
+                      Hero image URL
+                      <input
+                        type="url"
+                        value={content.hero || ""}
+                        onChange={(e) =>
+                          changeContent("hero", e.target.value || undefined)
+                        }
+                      />
+                    </label>
+                  )}
                   <section className="mk-editor-section">
                     <h3>Call to action</h3>
                     <p>The button at the end of your message.</p>
@@ -358,6 +374,61 @@ export default function EmailDesigner({
                       />
                     </label>
                   </section>
+                  {editProducts && (
+                    <section className="mk-editor-section">
+                      {" "}
+                      <h3>Product cards</h3>
+                      {(content.products || []).map((p, i) => (
+                        <fieldset key={i}>
+                          <legend>Product {i + 1}</legend>
+                          {(["title", "url", "image", "price"] as const).map(
+                            (key) => (
+                              <label key={key}>
+                                {key}
+                                <input
+                                  value={p[key] || ""}
+                                  onChange={(e) =>
+                                    changeContent(
+                                      "products",
+                                      content.products!.map((v, n) =>
+                                        n === i
+                                          ? { ...v, [key]: e.target.value }
+                                          : v,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </label>
+                            ),
+                          )}
+                          <button
+                            onClick={() =>
+                              changeContent(
+                                "products",
+                                content.products!.filter((_, n) => n !== i),
+                              )
+                            }
+                          >
+                            Remove product
+                          </button>
+                        </fieldset>
+                      ))}
+                      <button
+                        onClick={() =>
+                          changeContent("products", [
+                            ...(content.products || []),
+                            {
+                              title: "",
+                              url: "https://coralsanonymous.com",
+                              price: "",
+                            },
+                          ])
+                        }
+                      >
+                        Add product
+                      </button>
+                    </section>
+                  )}
                 </>
               ))}
             {panel === "artwork" && (
@@ -442,6 +513,25 @@ export default function EmailDesigner({
                   be changed in Artwork.
                 </small>
                 <h3 style={{ marginTop: 24 }}>Sender details</h3>
+                <label
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <input
+                    style={{ width: "auto", margin: 0 }}
+                    type="checkbox"
+                    checked={content.showPostalAddress === true}
+                    onChange={(e) =>
+                      changeContent("showPostalAddress", e.target.checked)
+                    }
+                  />{" "}
+                  Show business address in this email
+                </label>
+                {!content.showPostalAddress && (
+                  <small>
+                    Turn this on before sending customer marketing emails. A
+                    valid postal address is required.
+                  </small>
+                )}
                 <p>
                   {organizationName}
                   <br />

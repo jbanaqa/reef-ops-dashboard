@@ -38,7 +38,14 @@ const { chromium } = require("playwright");
       headless: true,
       ...(process.env.MARKETING_TEST_BROWSER
         ? { executablePath: process.env.MARKETING_TEST_BROWSER }
-        : process.platform === "win32" ? { executablePath: path.join(process.env.ProgramFiles || "C:/Program Files", "Google/Chrome/Application/chrome.exe") } : { channel: "chrome" }),
+        : process.platform === "win32"
+          ? {
+              executablePath: path.join(
+                process.env.ProgramFiles || "C:/Program Files",
+                "Google/Chrome/Application/chrome.exe",
+              ),
+            }
+          : { channel: "chrome" }),
     });
     const page = await browser.newPage({
       viewport: { width: 1440, height: 1000 },
@@ -106,7 +113,9 @@ const { chromium } = require("playwright");
         ?.contentDocument?.body.textContent.includes("long-unbroken-content"),
     );
     assert.equal((await dimensions()).scroll, 320);
-    await page.getByLabel("Message HTML", { exact: true }).fill("<p>Original copy</p>");
+    await page
+      .getByLabel("Message HTML", { exact: true })
+      .fill("<p>Original copy</p>");
     await page.getByText("Visual editor", { exact: true }).click();
     await page
       .getByRole("textbox", { name: "Message", exact: true })
@@ -121,16 +130,27 @@ const { chromium } = require("playwright");
       /<(b|strong)>My wholesale email/,
     );
     await page.getByText("Visual editor", { exact: true }).click();
-    await page.getByRole("textbox", { name: "Message", exact: true }).press("ControlOrMeta+A");
+    await page
+      .getByRole("textbox", { name: "Message", exact: true })
+      .press("ControlOrMeta+A");
     await page.getByRole("button", { name: "Link", exact: true }).click();
-    await page.getByLabel("Link URL", { exact: true }).fill("javascript:alert(1)");
+    await page
+      .getByLabel("Link URL", { exact: true })
+      .fill("javascript:alert(1)");
     await page.getByRole("button", { name: "Apply link", exact: true }).click();
     await page.getByText("Enter a full HTTPS link.", { exact: true }).waitFor();
-    await page.getByLabel("Link URL", { exact: true }).fill("https://example.com/wholesale");
+    await page
+      .getByLabel("Link URL", { exact: true })
+      .fill("https://example.com/wholesale");
     await page.getByRole("button", { name: "Apply link", exact: true }).click();
     await page.getByText("Edit HTML", { exact: true }).click();
-    assert.match(await page.getByLabel("Message HTML", { exact: true }).inputValue(), /href="https:\/\/example.com\/wholesale"/);
-    console.log("PASS: custom HTML reflows; visual formatting and safe links update HTML");
+    assert.match(
+      await page.getByLabel("Message HTML", { exact: true }).inputValue(),
+      /href="https:\/\/example.com\/wholesale"/,
+    );
+    console.log(
+      "PASS: custom HTML reflows; visual formatting and safe links update HTML",
+    );
     await page
       .getByLabel("Subject", { exact: true })
       .fill("Recovered wholesale draft");
@@ -168,7 +188,7 @@ const { chromium } = require("playwright");
     await page.getByText(/Save failed. Your draft is still here/).waitFor();
     await page.evaluate(() => localStorage.removeItem("fixture.failSave"));
     await page.getByRole("button", { name: "Save email", exact: true }).click();
-    await page.getByText("Saved to flow", { exact: true }).waitFor();
+    await page.getByText("Email saved", { exact: true }).waitFor();
     assert.equal(
       await page.evaluate(
         () =>
@@ -181,9 +201,15 @@ const { chromium } = require("playwright");
       "PASS: draft reload, artwork recovery, save failure feedback, successful save",
     );
     await page.getByRole("button", { name: "Send test", exact: true }).click();
-    await page.getByLabel("Internal test recipient", { exact: true }).fill("tester@example.com");
-    await page.getByRole("button", { name: "Send test email", exact: true }).click();
-    await page.getByText("Test email sent. Check your inbox.", { exact: true }).waitFor();
+    await page
+      .getByLabel("Internal test recipient", { exact: true })
+      .fill("tester@example.com");
+    await page
+      .getByRole("button", { name: "Send test email", exact: true })
+      .click();
+    await page
+      .getByText("Test email sent. Check your inbox.", { exact: true })
+      .waitFor();
     await page.getByRole("button", { name: "Artwork", exact: true }).click();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: path.join(output, "narrow-editor.png") });

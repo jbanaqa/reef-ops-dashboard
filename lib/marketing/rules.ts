@@ -21,6 +21,7 @@ export type Content = {
   footerImage?: string;
   footerScale?: number;
   footerTitle?: string;
+  showPostalAddress?: boolean;
   footerText?: string;
   footerUnsubscribeText?: string;
   /** @deprecated Older saved flows may still contain these pixel values. */ logoWidth?: number;
@@ -243,6 +244,7 @@ export function content(value: unknown): Content {
       : Math.min(2.5, Math.max(0.25, Math.round(fallback * 10) / 10));
   };
   return {
+    showPostalAddress: c.showPostalAddress === true,
     heading: c.heading.slice(0, 200),
     body: c.body,
     bodyHtml:
@@ -358,6 +360,7 @@ export function render(
   organizationName = "Corals Anonymous",
 ) {
   c = content(c);
+  address = c.showPostalAddress ? address : "";
   const e = escapeHtml;
   if (c.couponCode && c.template !== "cart-recovery") {
     const line = "Your 10% discount code: " + c.couponCode;
