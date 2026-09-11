@@ -382,6 +382,40 @@ export async function runMarketing(onlyMessageId?: string) {
             reason =
               "Legacy cart reminder replaced; a new checkout is required";
           if (cartRun) {
+            const observedAt = cartRun.observedAt
+              ? new Date(cartRun.observedAt)
+              : null;
+            const staleDue =
+              observedAt &&
+              m.dueAt.getTime() < observedAt.getTime() - 3 * DAY &&
+              m.triggerAt &&
+              observedAt > m.triggerAt;
+            if (staleDue) {
+              const smsMinutes = cartRun.config.cart?.testEmail
+                ? 0
+                : cartRun.config.smsMinutes ?? 30;
+              const firstMinutes = smsMinutes + cartRun.config.steps[0].minutes;
+              const minutes =
+                m.flowCondition === "cart-v1:sms"
+                  ? smsMinutes
+                  : m.flowCondition === "cart-v1:first"
+                    ? firstMinutes
+                    : firstMinutes + (cartRun.config.branchMinutes ?? 1440);
+              await tx.marketingMessage.update({
+                where: { id: m.id },
+                data: {
+                  status: "PENDING",
+                  triggerAt: observedAt,
+                  dueAt: new Date(+observedAt + minutes * 60000),
+                  attemptedAt: null,
+                  sentAt: null,
+                  providerId: null,
+                  attempts: 0,
+                  error: null,
+                },
+              });
+              return null;
+            }
             if (m.channel !== "EMAIL")
               m.content = JSON.parse(
                 JSON.stringify({ ...(m.content as Content), url: cartRun.url }),
