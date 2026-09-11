@@ -207,6 +207,15 @@ export async function clearCartTestHistory(profileId: string) {
       select: { id: true, key: true },
     });
     const removable: string[] = [];
+    const testRuns: string[] = [];
+    const runs = await tx.marketingResource.findMany({
+      where: { shop: shop(), kind: "CART_RUN" },
+      select: { key: true, data: true },
+    });
+    for (const run of runs) {
+      const testEmail = (run.data as { testEmail?: string } | null)?.testEmail;
+      if (testEmail === profile.email) testRuns.push(run.key);
+    }
     for (const m of messages) {
       const run = await tx.marketingResource.findUnique({
         where: {
@@ -220,14 +229,26 @@ export async function clearCartTestHistory(profileId: string) {
       });
       const testEmail = (run?.data as { config?: { cart?: { testEmail?: string } } } | null)
         ?.config?.cart?.testEmail;
-      if (testEmail === profile.email) removable.push(m.id);
+      if (testEmail === profile.email) {
+        removable.push(m.id);
+        if (!testRuns.includes(cartRunKey(m.key)))
+          testRuns.push(cartRunKey(m.key));
+      }
     }
-    if (!removable.length) return 0;
+    if (removable.length) {
+      await tx.marketingResource.deleteMany({
+        where: { shop: shop(), kind: "CART_WAIT", key: { in: removable } },
+      });
+    }
+    const result = removable.length
+      ? await tx.marketingMessage.deleteMany({
+          where: { id: { in: removable }, profileId, shop: shop() },
+        })
+      : { count: 0 };
+    // Clearing test history starts a new test cycle on the next checkout event.
+    // Sent message rows remain for audit, but their old run envelope is removed.
     await tx.marketingResource.deleteMany({
-      where: { shop: shop(), kind: "CART_WAIT", key: { in: removable } },
-    });
-    const result = await tx.marketingMessage.deleteMany({
-      where: { id: { in: removable }, profileId, shop: shop() },
+      where: { shop: shop(), kind: "CART_RUN", key: { in: testRuns } },
     });
     return result.count;
   });
