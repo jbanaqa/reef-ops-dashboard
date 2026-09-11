@@ -165,23 +165,37 @@ export async function enrollCart(
         (config.branchMinutes ?? 1440),
     },
   ];
-  for (const row of rows)
-    await tx.marketingMessage.create({
-      data: {
-        shop: shop(),
-        key: base + ":" + row.id,
-        profileId,
-        flowKey: "abandoned-cart",
-        flowCondition: "cart-v1:" + row.id,
-        channel: row.channel,
-        subject: row.subject,
-        content: json(
-          content({ ...row.c, url, products: [], couponCode: undefined }),
-        ),
-        triggerAt: at,
-        dueAt: new Date(+at + row.minutes * 60000),
-      },
-    });
+  for (const row of rows) {
+    const data = {
+      shop: shop(),
+      key: base + ":" + row.id,
+      profileId,
+      flowKey: "abandoned-cart",
+      flowCondition: "cart-v1:" + row.id,
+      channel: row.channel,
+      subject: row.subject,
+      content: json(
+        content({ ...row.c, url, products: [], couponCode: undefined }),
+      ),
+      triggerAt: at,
+      dueAt: new Date(+at + row.minutes * 60000),
+    };
+    if (config.cart?.testEmail) {
+      await tx.marketingMessage.upsert({
+        where: { key: data.key },
+        create: data,
+        update: {
+          ...data,
+          status: "PENDING",
+          attemptedAt: null,
+          sentAt: null,
+          providerId: null,
+          attempts: 0,
+          error: null,
+        },
+      });
+    } else await tx.marketingMessage.create({ data });
+  }
 }
 
 export async function loadCart(key: string): Promise<CartRun> {
