@@ -51,6 +51,11 @@ export async function enrollCart(
     const stale =
       !saved.observedAt ||
       observedAt.getTime() - new Date(saved.observedAt).getTime() > 3 * DAY;
+    const pending = await tx.marketingMessage.findMany({
+      where: { key: { startsWith: base + ":" }, status: "PENDING" },
+      select: { dueAt: true },
+    });
+    const overdue = pending.some((message) => message.dueAt <= new Date());
     if (newer)
       await tx.marketingResource.update({
         where: { id: existing.id },
@@ -63,7 +68,7 @@ export async function enrollCart(
           }),
         },
       });
-    if (newer && stale) {
+    if (newer && (stale || overdue)) {
       const smsMinutes =
         config.cart?.testEmail !== undefined
           ? 0
