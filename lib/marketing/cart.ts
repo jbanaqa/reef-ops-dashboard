@@ -55,7 +55,9 @@ export async function enrollCart(
       where: { key: { startsWith: base + ":" }, status: "PENDING" },
       select: { dueAt: true },
     });
-    const overdue = pending.some((message) => message.dueAt <= new Date());
+    const overdue = pending.some(
+      (message) => message.dueAt.getTime() < observedAt.getTime() - 3 * DAY,
+    );
     if (newer)
       await tx.marketingResource.update({
         where: { id: existing.id },
