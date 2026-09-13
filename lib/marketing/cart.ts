@@ -26,14 +26,21 @@ export async function enrollCart(
   lines?: CartLine[],
   observedAt = at,
 ) {
-  const base =
+  const rootBase =
     "cart-v1:" +
     crypto
       .createHash("sha256")
       .update(shop() + ":" + profileId + ":" + checkout)
       .digest("hex");
-  const existing = await tx.marketingResource.findUnique({
-    where: { shop_kind_key: { shop: shop(), kind: "CART_RUN", key: base } },
+  let base = rootBase;
+  let triggerAt = at;
+  const existing = await tx.marketingResource.findFirst({
+    where: {
+      shop: shop(),
+      kind: "CART_RUN",
+      OR: [{ key: rootBase }, { key: { startsWith: rootBase + ":attempt-" } }],
+    },
+    orderBy: { updatedAt: "desc" },
   });
   const ids = [
     ...new Set(
@@ -44,7 +51,9 @@ export async function enrollCart(
         .filter((id) => /^\d+$/.test(id)),
     ),
   ].slice(0, 100);
-  // Refresh checkout items without restarting timers or replacing saved copy.
+  // Refresh an active attempt without restarting its timers. Shopify can reuse
+  // a checkout token after a customer returns days later, so stale activity
+  // creates a new attempt and leaves the completed attempt in history.
   if (existing) {
     const saved = existing.data as unknown as CartRun;
     const newer = !saved.observedAt || observedAt > new Date(saved.observedAt);
@@ -52,13 +61,14 @@ export async function enrollCart(
       !saved.observedAt ||
       observedAt.getTime() - new Date(saved.observedAt).getTime() > 3 * DAY;
     const pending = await tx.marketingMessage.findMany({
-      where: { key: { startsWith: base + ":" }, status: "PENDING" },
-      select: { dueAt: true, flowCondition: true },
+      where: { key: { startsWith: existing.key + ":" }, status: "PENDING" },
+      select: { dueAt: true },
     });
     const overdue = pending.some(
       (message) => message.dueAt.getTime() < observedAt.getTime() - 3 * DAY,
     );
-    if (newer)
+    if (!newer) return;
+    if (lines && !lines.length) {
       await tx.marketingResource.update({
         where: { id: existing.id },
         data: {
@@ -70,50 +80,41 @@ export async function enrollCart(
           }),
         },
       });
-    if (newer && (stale || overdue)) {
-      // Shopify can revive a checkout that was originally created weeks ago.
-      // A replay is a new flow entry, so its waits must start from the fresh
-      // webhook activity rather than the checkout's original created_at.
-      const restartAt = observedAt;
-      const smsMinutes = pending.some(
-        (message) => message.flowCondition === "cart-v1:sms",
-      )
-        ? config.smsMinutes ?? 30
-        : 0;
-      const firstMinutes = smsMinutes + config.steps[0].minutes;
-      const finalMinutes = firstMinutes + (config.branchMinutes ?? 1440);
-      for (const [condition, minutes] of [
-        ["cart-v1:sms", smsMinutes],
-        ["cart-v1:first", firstMinutes],
-        ["cart-v1:final", finalMinutes],
-      ] as const)
-        await tx.marketingMessage.updateMany({
-          where: {
-            key: { startsWith: base + ":" },
-            flowCondition: condition,
-            OR: [
-              { status: "PENDING" },
-              { status: "CANCELLED", error: "Checkout expired" },
-            ],
-          },
-          data: {
-            status: "PENDING",
-            triggerAt: restartAt,
-            dueAt: new Date(+restartAt + minutes * 60000),
-            attemptedAt: null,
-            sentAt: null,
-            providerId: null,
-            attempts: 0,
-            error: null,
-          },
-        });
-    }
-    if (newer && lines && !lines.length)
       await tx.marketingMessage.updateMany({
-        where: { key: { startsWith: base + ":" }, status: "PENDING" },
+        where: {
+          key: { startsWith: existing.key + ":" },
+          status: "PENDING",
+        },
         data: { status: "CANCELLED", error: "Checkout is empty" },
       });
-    return;
+      return;
+    }
+    if (!stale && !overdue) {
+      await tx.marketingResource.update({
+        where: { id: existing.id },
+        data: {
+          data: json({
+            ...saved,
+            url,
+            ...(lines !== undefined ? { productIds: ids } : {}),
+            observedAt: observedAt.toISOString(),
+          }),
+        },
+      });
+      return;
+    }
+    await tx.marketingMessage.updateMany({
+      where: {
+        key: { startsWith: existing.key + ":" },
+        status: "PENDING",
+      },
+      data: {
+        status: "CANCELLED",
+        error: "Superseded by new checkout activity",
+      },
+    });
+    base = rootBase + ":attempt-" + observedAt.getTime();
+    triggerAt = observedAt;
   }
   if (lines && !lines.length) return;
   const smsConsent = await tx.marketingConsent.findUnique({
@@ -122,7 +123,7 @@ export async function enrollCart(
   const profile = await tx.marketingProfile.findUniqueOrThrow({
     where: { id: profileId },
   });
-  if (profile.lastOrderAt && profile.lastOrderAt >= at) return;
+  if (profile.lastOrderAt && profile.lastOrderAt >= triggerAt) return;
   if (
     config.cart?.testEmail !== undefined &&
     profile.email !== config.cart.testEmail
@@ -189,8 +190,8 @@ export async function enrollCart(
       content: json(
         content({ ...row.c, url, products: [], couponCode: undefined }),
       ),
-      triggerAt: at,
-      dueAt: new Date(+at + row.minutes * 60000),
+      triggerAt,
+      dueAt: new Date(+triggerAt + row.minutes * 60000),
     };
     if (config.cart?.testEmail) {
       await tx.marketingMessage.upsert({

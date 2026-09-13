@@ -165,7 +165,7 @@ Exact feed ranking is not claimed to match Klaviyo's proprietary algorithm.
 ### Enrollment, waits, and branches
 
 - `CartConfig` is version 1, with productCount and optional testEmail.
-- Identified, trusted Shopify checkouts enroll once per checkout. Different checkouts can re-enter; repeated updates do not duplicate enrollment or restart the clock.
+- Identified, trusted Shopify checkouts enroll once per active checkout attempt. Different checkout tokens can re-enter immediately. If Shopify reuses the same token, activity within three days updates the active attempt without restarting it; activity after more than three days creates a new attempt while preserving the completed attempt in history.
 - Anonymous/unidentified observations alone cannot enroll a customer.
 - The triggering/recent checkout must be within the three-day window.
 - Actual checkout URL and product information are carried in a durable CART_RUN resource.

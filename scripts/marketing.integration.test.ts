@@ -1408,6 +1408,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
   const {
     cartCoupon,
     cartDependency,
+    cartRunKey,
     enrollCart,
     loadCart,
     rankedProducts,
@@ -1799,6 +1800,10 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
         checkoutCreatedAt,
       ),
     );
+    await prisma.marketingMessage.updateMany({
+      where: { profileId: revived.id, status: "PENDING" },
+      data: { status: "SENT", sentAt: checkoutCreatedAt },
+    });
     const checkoutUpdatedAt = new Date();
     await ingest.ingestShopify("checkouts/update", "revived-update", {
       token: "revived-token",
@@ -1818,6 +1823,19 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       orderBy: { dueAt: "asc" },
     });
     assert.equal(revivedMessages.length, 2);
+    const completedAttempt = await prisma.marketingMessage.findMany({
+      where: {
+        profileId: revived.id,
+        key: { startsWith: "cart-v1:" },
+        status: "SENT",
+      },
+    });
+    assert.equal(completedAttempt.length, 2);
+    assert.notEqual(
+      cartRunKey(completedAttempt[0].key),
+      cartRunKey(revivedMessages[0].key),
+      "a revived checkout preserves the completed run and creates a new attempt",
+    );
     assert.equal(
       revivedMessages[0].triggerAt?.toISOString(),
       checkoutUpdatedAt.toISOString(),
@@ -1829,6 +1847,26 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
           (+checkoutUpdatedAt + f.steps[0].minutes * 60000),
       ) < 1000,
       `a revived checkout must not preserve its original schedule: ${revivedMessages[0].flowCondition} due ${revivedMessages[0].dueAt.toISOString()}, expected ${new Date(+checkoutUpdatedAt + f.steps[0].minutes * 60000).toISOString()}`,
+    );
+    await ingest.ingestShopify(
+      "checkouts/update",
+      "revived-update-duplicate",
+      {
+        token: "revived-token",
+        email: "revived-checkout@example.com",
+        created_at: checkoutCreatedAt.toISOString(),
+        updated_at: checkoutUpdatedAt.toISOString(),
+        abandoned_checkout_url:
+          "https://coralsanonymous.com/checkouts/revived-token",
+        line_items: [{ product_id: "1", quantity: 1 }],
+      },
+    );
+    assert.equal(
+      await prisma.marketingMessage.count({
+        where: { profileId: revived.id, key: { startsWith: "cart-v1:" } },
+      }),
+      4,
+      "duplicate activity cannot create another checkout attempt",
     );
   } finally {
     globalThis.fetch = savedFetch;
