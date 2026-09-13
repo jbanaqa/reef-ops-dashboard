@@ -785,9 +785,10 @@ export default function CollectionStrategyPanel({
         ))}
       </div>
 
-      <div className="rotation-weight-presets">
+      <details className="rotation-weight-presets cr-presets">
+        <summary>Reusable weight presets{weightPresets.length ? ` (${weightPresets.length})` : ""}</summary>
         <div className="rotation-weight-presets-heading">
-          <strong>Saved custom orientations</strong>
+          <strong>Save a custom ranking mix</strong>
           <span>
             Save the weights above under a name to reuse them later, on this
             collection or several at once from the automation panel.
@@ -819,7 +820,7 @@ export default function CollectionStrategyPanel({
           </div>
         ) : (
           <p className="rotation-weight-presets-empty">
-            No saved orientations yet.
+            No saved presets yet.
           </p>
         )}
 
@@ -830,10 +831,11 @@ export default function CollectionStrategyPanel({
         <div className="rotation-weight-preset-save">
           <input
             type="text"
+            aria-label="Preset name"
             className="form-input"
             value={presetName}
             onChange={(event) => setPresetName(event.target.value)}
-            placeholder="Name this orientation (e.g. Aggressive clearance)"
+            placeholder="Preset name, e.g. Clearance"
             maxLength={60}
             disabled={settings.strategy !== "CUSTOM"}
           />
@@ -856,12 +858,13 @@ export default function CollectionStrategyPanel({
             preset.
           </p>
         ) : null}
-      </div>
+      </details>
 
       <div className="rotation-data-bar">
         <div>
           <strong>Data window</strong>
           <select
+            aria-label="Analytics data window"
             className="form-select"
             value={settings.analyticsLookbackDays}
             onChange={(event) =>
@@ -914,7 +917,7 @@ export default function CollectionStrategyPanel({
         </button>
         <button
           type="button"
-          className="button"
+          className="button button-primary"
           disabled={Boolean(busy) || weightTotal !== 100}
           onClick={() => void buildPreview()}
         >

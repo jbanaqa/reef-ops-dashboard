@@ -168,6 +168,7 @@ async function readResponse<T>(
 }
 
 export default function CollectionRotationManager() {
+  const [workspace, setWorkspace] = useState("collections");
   const [
     collections,
     setCollections,
@@ -1698,13 +1699,39 @@ export default function CollectionRotationManager() {
   }
 
   return (
-  <>
+  <div className="rotation-workspace">
+    <div className="cr-overview" aria-label="Collection overview">
+      <div><span>Collections</span><strong>{isLoadingCollections ? "—" : collections.length}</strong><small>Synced from Shopify</small></div>
+      <div><span>Automatic rotation</span><strong>{isLoadingCollections ? "—" : collections.filter(c => c.isEnabled).length}</strong><small>Collections in the automatic set</small></div>
+      <div><span>Favorites</span><strong>{collections.filter(c => c.isStarred).length}</strong><small>Star collections for quick selection</small></div>
+    </div>
+    <nav className="cr-navigation" aria-label="Collection rotation views">
+      {[
+        ["collections", "Collections", "Select, rotate & review history"],
+        ["strategy", "Strategy & preview", "Tune ranking before applying"],
+        ["automation", "Automatic rotation", "Manage the scheduled collection set"],
+      ].map(([key, title, description]) => (
+        <button key={key} type="button" aria-current={workspace === key ? "page" : undefined} onClick={() => setWorkspace(key)}>
+          <strong>{title}</strong><span>{description}</span>
+        </button>
+      ))}
+    </nav>
+    <details className="cr-guide">
+      <summary>How collection rotation works</summary>
+      <div className="cr-guide-grid">
+        <p><strong>Choose your collections</strong>Select the collections you want to reorder. Use Fixed positions to keep specific products at the top or bottom.</p>
+        <p><strong>Review the ranking</strong>Open Strategy & preview to choose a ranking method, adjust weights, and inspect the proposed order.</p>
+        <p><strong>Apply or automate</strong>Rotate selected collections now, or include them in Automatic rotation. Use each collection’s History and Undo to review changes.</p>
+      </div>
+    </details>
+    <div hidden={workspace !== "automation"}>
     <CollectionAutomationPanel
       onCollectionsChanged={() => {
         void loadCollections();
       }}
     />
-
+    </div>
+    <div hidden={workspace !== "strategy"}>
     <CollectionStrategyPanel
       collections={collections}
       onPreviewSeedChange={(collectionId, seed) =>
@@ -1713,19 +1740,18 @@ export default function CollectionRotationManager() {
         )
       }
     />
-
+      <div className="cr-next-action"><p>Ready to apply the order? Save your strategy, then select the collection to rotate.</p><button type="button" className="button button-secondary" onClick={() => setWorkspace("collections")}>Go to collections →</button></div>
+    </div>
+    <div hidden={workspace !== "collections"}>
     <section className="card card-padded">
         <div className="rotation-section-heading">
           <div>
             <h3 className="card-title">
-              Choose collections
+              Your collections
             </h3>
 
             <p className="card-description">
-              Shuffle full collections or
-              configure exact products to
-              remain in controlled top
-              positions.
+              Select collections to rotate now. Fixed positions, recent runs, and undo are available on each row.
             </p>
           </div>
 
@@ -1923,7 +1949,7 @@ export default function CollectionRotationManager() {
 
                 <th>Collection</th>
                 <th>Products</th>
-                <th>Top control</th>
+                <th>Position rules</th>
                 <th>Sort</th>
                 <th>Last shuffled</th>
                 <th>Status</th>
@@ -1935,6 +1961,12 @@ export default function CollectionRotationManager() {
             </thead>
 
             <tbody>
+              {visibleCollections.length === 0 && (
+                <tr><td colSpan={9} className="cr-empty" role="status">
+                  <strong>{isLoadingCollections ? "Loading your collections…" : errorMessage ? "Collections could not be loaded" : "No collections match this view"}</strong>
+                  <p>{isLoadingCollections ? "Fetching collection details from Shopify." : errorMessage ? "Review the error above, then refresh collections to try again." : "Try another search or choose All collections."}</p>
+                </td></tr>
+              )}
               {visibleCollections.map(
                 (collection) => {
                   const isSelected =
@@ -1960,6 +1992,7 @@ export default function CollectionRotationManager() {
                       <td className="rotation-check-column">
                         <input
                           type="checkbox"
+                          aria-label={`Select ${collection.title}`}
                           className="rotation-checkbox"
                           checked={isSelected}
                           onChange={() =>
@@ -1982,6 +2015,8 @@ export default function CollectionRotationManager() {
                               ? "rotation-star-button-active"
                               : ""
                           }`}
+                          aria-label={`${collection.isStarred ? "Unstar" : "Star"} ${collection.title}`}
+                          aria-pressed={collection.isStarred}
                           onClick={() =>
                             void toggleStar(
                               collection
@@ -2096,7 +2131,7 @@ export default function CollectionRotationManager() {
                               isBusy
                             }
                           >
-                            Manage Top
+                            Fixed positions
                           </button>
 
                           <button
@@ -2139,7 +2174,9 @@ export default function CollectionRotationManager() {
           </table>
         </div>
 
-        <div className="action-row">
+        <div className="action-row cr-apply-bar">
+          <div><strong>{selectedCollectionIds.length} collections selected</strong><p>Applies the saved strategy and fixed positions to Shopify.</p></div>
+          <button type="button" className="button button-secondary" onClick={() => setWorkspace("strategy")}>Review strategy & preview</button>
           <button
             type="button"
             className="button button-primary"
@@ -2154,7 +2191,7 @@ export default function CollectionRotationManager() {
           >
             {isShufflingBatch
               ? "Shuffling Collections..."
-              : `Shuffle Selected (${selectedCollectionIds.length})`}
+              : `Rotate selected (${selectedCollectionIds.length})`}
           </button>
         </div>
       </section>
@@ -2238,7 +2275,7 @@ export default function CollectionRotationManager() {
           </div>
         </section>
       ) : null}
-
+    </div>
       {controlEditor ? (
         <div
           className="rotation-control-overlay"
@@ -2669,6 +2706,6 @@ export default function CollectionRotationManager() {
           </section>
         </div>
       ) : null}
-    </>
+    </div>
   );
 }

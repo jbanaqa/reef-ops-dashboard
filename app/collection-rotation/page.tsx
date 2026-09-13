@@ -1,4 +1,5 @@
 import CollectionRotationManager from "./CollectionRotationManager";
+import "./rotation-workspace.css";
 
 export default function CollectionRotationPage() {
   return (
@@ -13,7 +14,7 @@ export default function CollectionRotationPage() {
         </h2>
 
         <p className="page-description">
-          Rank Shopify collections with a transparent mix of recent performance, exposure opportunity, product freshness, and exploration. Preview every strategy before it changes the shared storefront order.
+          Keep your storefront fresh. Choose what to feature, preview the product order, and manage automatic rotation.
         </p>
       </section>
 

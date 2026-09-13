@@ -854,8 +854,8 @@ export default function CollectionAutomationPanel({
           }
         >
           {isManaging
-            ? "Close Automatic Set"
-            : "Manage Automatic Set"}
+            ? "Hide collection settings"
+            : "Choose automatic collections"}
         </button>
 
         <button
@@ -879,14 +879,13 @@ export default function CollectionAutomationPanel({
               </h3>
 
               <p>
-                Enabled collections will be
-                shuffled by Railway at every
-                scheduled boundary.
+                Enabled collections rotate at each scheduled run using their saved strategy and fixed positions.
               </p>
             </div>
 
             <input
               type="search"
+              aria-label="Search automatic collections"
               className="form-input rotation-automation-search"
               value={searchTerm}
               onChange={(event) =>
@@ -1171,9 +1170,7 @@ export default function CollectionAutomationPanel({
       ) : null}
 
       <p className="rotation-automation-note">
-        Manual shuffles remain available
-        below and do not reset or delay
-        this countdown.
+        You can also rotate collections from the Collections view. Manual rotations do not reset or delay the automatic schedule.
       </p>
     </section>
   );
