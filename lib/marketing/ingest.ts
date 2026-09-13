@@ -391,7 +391,7 @@ export async function ingestShopify(
         "abandoned-cart",
         profile.id,
         String(p.token || p.id),
-        date(p.created_at || at.toISOString()),
+        at,
         { url: p.abandoned_checkout_url, lines: p.line_items, observedAt: at },
       );
     }

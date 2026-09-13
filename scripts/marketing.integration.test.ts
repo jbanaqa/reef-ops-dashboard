@@ -1405,9 +1405,13 @@ test("stock checks require login, previews never enroll, and Shopify failures do
 test("cart v1 uses sequential waits, both purchase-history branches, real coupons and duplicate protection", async () => {
   const { cartDraft } = await import("../lib/marketing/cart-config");
   const { validateFlow } = await import("../lib/marketing/flow-config");
-  const { cartCoupon, cartDependency, loadCart, rankedProducts } = await import(
-    "../lib/marketing/cart"
-  );
+  const {
+    cartCoupon,
+    cartDependency,
+    enrollCart,
+    loadCart,
+    rankedProducts,
+  } = await import("../lib/marketing/cart");
   const savedFetch = globalThis.fetch;
   let latestOrder: string | null = null,
     couponCreates = 0;
@@ -1765,6 +1769,66 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
         ]),
       ),
       ["1", "2", "4", "3"],
+    );
+
+    const revived = await store.atomic(async (tx) => {
+      const profile = await store.identify(tx, {
+        email: "revived-checkout@example.com",
+      });
+      await store.consent(
+        tx,
+        profile.id,
+        "EMAIL",
+        "SUBSCRIBED",
+        "test",
+        new Date(),
+      );
+      return profile;
+    });
+    profiles.push(revived.id);
+    const checkoutCreatedAt = new Date(Date.now() - 60 * 86400000);
+    await store.atomic((tx) =>
+      enrollCart(
+        tx,
+        revived.id,
+        "revived-token",
+        checkoutCreatedAt,
+        f,
+        "https://coralsanonymous.com/checkouts/revived-token",
+        [{ product_id: "1", quantity: 1 }],
+        checkoutCreatedAt,
+      ),
+    );
+    const checkoutUpdatedAt = new Date();
+    await ingest.ingestShopify("checkouts/update", "revived-update", {
+      token: "revived-token",
+      email: "revived-checkout@example.com",
+      created_at: checkoutCreatedAt.toISOString(),
+      updated_at: checkoutUpdatedAt.toISOString(),
+      abandoned_checkout_url:
+        "https://coralsanonymous.com/checkouts/revived-token",
+      line_items: [{ product_id: "1", quantity: 1 }],
+    });
+    const revivedMessages = await prisma.marketingMessage.findMany({
+      where: {
+        profileId: revived.id,
+        key: { startsWith: "cart-v1:" },
+        status: "PENDING",
+      },
+      orderBy: { dueAt: "asc" },
+    });
+    assert.equal(revivedMessages.length, 2);
+    assert.equal(
+      revivedMessages[0].triggerAt?.toISOString(),
+      checkoutUpdatedAt.toISOString(),
+      "a revived checkout starts a fresh flow at its latest activity",
+    );
+    assert.ok(
+      Math.abs(
+        +revivedMessages[0].dueAt -
+          (+checkoutUpdatedAt + f.steps[0].minutes * 60000),
+      ) < 1000,
+      `a revived checkout must not preserve its original schedule: ${revivedMessages[0].flowCondition} due ${revivedMessages[0].dueAt.toISOString()}, expected ${new Date(+checkoutUpdatedAt + f.steps[0].minutes * 60000).toISOString()}`,
     );
   } finally {
     globalThis.fetch = savedFetch;

@@ -53,7 +53,7 @@ export async function enrollCart(
       observedAt.getTime() - new Date(saved.observedAt).getTime() > 3 * DAY;
     const pending = await tx.marketingMessage.findMany({
       where: { key: { startsWith: base + ":" }, status: "PENDING" },
-      select: { dueAt: true },
+      select: { dueAt: true, flowCondition: true },
     });
     const overdue = pending.some(
       (message) => message.dueAt.getTime() < observedAt.getTime() - 3 * DAY,
@@ -71,10 +71,15 @@ export async function enrollCart(
         },
       });
     if (newer && (stale || overdue)) {
-      const smsMinutes =
-        config.cart?.testEmail !== undefined
-          ? 0
-          : config.smsMinutes ?? 30;
+      // Shopify can revive a checkout that was originally created weeks ago.
+      // A replay is a new flow entry, so its waits must start from the fresh
+      // webhook activity rather than the checkout's original created_at.
+      const restartAt = observedAt;
+      const smsMinutes = pending.some(
+        (message) => message.flowCondition === "cart-v1:sms",
+      )
+        ? config.smsMinutes ?? 30
+        : 0;
       const firstMinutes = smsMinutes + config.steps[0].minutes;
       const finalMinutes = firstMinutes + (config.branchMinutes ?? 1440);
       for (const [condition, minutes] of [
@@ -93,8 +98,8 @@ export async function enrollCart(
           },
           data: {
             status: "PENDING",
-            triggerAt: at,
-            dueAt: new Date(+at + minutes * 60000),
+            triggerAt: restartAt,
+            dueAt: new Date(+restartAt + minutes * 60000),
             attemptedAt: null,
             sentAt: null,
             providerId: null,

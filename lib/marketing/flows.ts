@@ -40,7 +40,14 @@ export async function enroll(
     const recent = await tx.marketingEvent.findFirst({
       where: {
         shop: shop(),
-        type: { in: ["CHECKOUT_STARTED_TRUSTED", "HISTORY_CHECKOUT"] },
+        type: {
+          in: [
+            "CHECKOUT_STARTED_TRUSTED",
+            "HISTORY_CHECKOUT",
+            "checkouts/create",
+            "checkouts/update",
+          ],
+        },
         occurredAt: { gte: new Date(Date.now() - 3 * DAY), lte: new Date() },
         OR: [
           { profileId },
