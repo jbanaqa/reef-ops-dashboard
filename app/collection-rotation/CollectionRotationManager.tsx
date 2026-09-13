@@ -147,7 +147,7 @@ export default function CollectionRotationManager() {
 
   const [searchTerm, setSearchTerm] = useState("");
 
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const [filterMode, setFilterMode] = useState<FilterMode>("starred");
 
   const [sortMode, setSortMode] = useState<SortMode>("count-desc");
 
