@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   STRATEGY_LABELS,
@@ -90,10 +90,14 @@ const SCORE_FACTOR_COPY: Record<
   "performance" | "exposure" | "freshness" | "exploration",
   string
 > = {
-  performance: "Units sold and revenue vs. the rest of this collection — built entirely from Shopify Reports data, no page-view tracking required.",
-  exposure: "How little (or how much) prime real estate this product has gotten in recent rotations.",
-  freshness: "How recently this product was added — fades out over about a month.",
-  exploration: "A small, reproducible random nudge so the order isn't fully locked in.",
+  performance:
+    "Units sold and revenue vs. the rest of this collection — built entirely from Shopify Reports data, no page-view tracking required.",
+  exposure:
+    "How little (or how much) prime real estate this product has gotten in recent rotations.",
+  freshness:
+    "How recently this product was added — fades out over about a month.",
+  exploration:
+    "A small, reproducible random nudge so the order isn't fully locked in.",
 };
 
 function formatCurrency(value: number) {
@@ -277,9 +281,11 @@ function ScoreBreakdown({
       <div className="rotation-score-detail-section">
         <h5>The math</h5>
         <p className="rotation-score-formula">
-          ({factors
+          (
+          {factors
             .map((factor) => `${factor.value} × ${factor.weight}`)
-            .join(" + ")}) ÷ 100 = <strong>{score.score}</strong>
+            .join(" + ")}
+          ) ÷ 100 = <strong>{score.score}</strong>
         </p>
       </div>
     </div>
@@ -290,7 +296,7 @@ function ScoreBreakdown({
 // module the server uses to score products), so the picker and the actual
 // scoring engine can never drift out of sync with each other.
 function presetWeights(
-  strategy: Exclude<Strategy, "CUSTOM">
+  strategy: Exclude<Strategy, "CUSTOM">,
 ): Omit<Settings, "strategy" | "analyticsLookbackDays"> {
   const preset = STRATEGY_PRESETS[strategy];
 
@@ -311,8 +317,7 @@ const STRATEGY_COPY: Record<Strategy, string> = {
     "Gives buried and newer products more opportunity without ignoring performance.",
   RANDOM:
     "Keeps the original fully random behavior. Controlled positions still stay fixed.",
-  CUSTOM:
-    "Use your own weights. The four values must add up to 100.",
+  CUSTOM: "Use your own weights. The four values must add up to 100.",
 };
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -326,12 +331,13 @@ async function readJson<T>(response: Response): Promise<T> {
 export default function CollectionStrategyPanel({
   collections,
   onPreviewSeedChange,
+  requestedCollectionId,
+  active = true,
 }: {
   collections: CollectionOption[];
-  onPreviewSeedChange?: (
-    collectionId: string,
-    seed: string | null
-  ) => void;
+  requestedCollectionId?: string;
+  active?: boolean;
+  onPreviewSeedChange?: (collectionId: string, seed: string | null) => void;
 }) {
   const orderedCollections = useMemo(
     () =>
@@ -339,9 +345,9 @@ export default function CollectionStrategyPanel({
         (first, second) =>
           Number(second.isStarred) - Number(first.isStarred) ||
           Number(second.isEnabled) - Number(first.isEnabled) ||
-          first.title.localeCompare(second.title)
+          first.title.localeCompare(second.title),
       ),
-    [collections]
+    [collections],
   );
   const [collectionId, setCollectionId] = useState("");
   const [settings, setSettings] = useState<Settings>({
@@ -350,9 +356,6 @@ export default function CollectionStrategyPanel({
     ...presetWeights("BALANCED"),
   });
   const [scores, setScores] = useState<PreviewScore[]>([]);
-  const [expandedProductId, setExpandedProductId] = useState<
-    string | null
-  >(null);
   const [previewMeta, setPreviewMeta] = useState<{
     seed: string;
     confidence: string;
@@ -386,7 +389,7 @@ export default function CollectionStrategyPanel({
   const loadWeightPresets = () => {
     fetch("/api/collection-rotation/weight-presets", { cache: "no-store" })
       .then((response) =>
-        readJson<{ ok: true; presets: WeightPreset[] }>(response)
+        readJson<{ ok: true; presets: WeightPreset[] }>(response),
       )
       .then((data) => setWeightPresets(data.presets))
       .catch(() => {
@@ -396,8 +399,8 @@ export default function CollectionStrategyPanel({
   };
 
   useEffect(() => {
-    loadWeightPresets();
-  }, []);
+    if (active) loadWeightPresets();
+  }, [active]);
 
   function applyWeightPreset(preset: WeightPreset) {
     setSettings((current) => ({
@@ -410,7 +413,7 @@ export default function CollectionStrategyPanel({
     }));
     setScores([]);
     setPreviewMeta(null);
-    setExpandedProductId(null);
+
     if (activeCollectionId) onPreviewSeedChange?.(activeCollectionId, null);
   }
 
@@ -431,14 +434,14 @@ export default function CollectionStrategyPanel({
             freshnessWeight: settings.freshnessWeight,
             explorationWeight: settings.explorationWeight,
           }),
-        })
+        }),
       );
       setWeightPresets((current) => {
         const withoutExisting = current.filter(
-          (preset) => preset.id !== data.preset.id
+          (preset) => preset.id !== data.preset.id,
         );
         return [...withoutExisting, data.preset].sort((first, second) =>
-          first.name.localeCompare(second.name)
+          first.name.localeCompare(second.name),
         );
       });
       setPresetName("");
@@ -446,7 +449,7 @@ export default function CollectionStrategyPanel({
       setPresetsError(
         saveError instanceof Error
           ? saveError.message
-          : "Could not save this orientation."
+          : "Could not save this orientation.",
       );
     }
   }
@@ -455,28 +458,28 @@ export default function CollectionStrategyPanel({
     setPresetsError("");
     const previous = weightPresets;
     setWeightPresets((current) =>
-      current.filter((item) => item.id !== preset.id)
+      current.filter((item) => item.id !== preset.id),
     );
 
     try {
       await readJson(
         await fetch(
           `/api/collection-rotation/weight-presets?id=${encodeURIComponent(preset.id)}`,
-          { method: "DELETE" }
-        )
+          { method: "DELETE" },
+        ),
       );
     } catch (deleteError) {
       setWeightPresets(previous);
       setPresetsError(
         deleteError instanceof Error
           ? deleteError.message
-          : "Could not delete this orientation."
+          : "Could not delete this orientation.",
       );
     }
   }
 
   const activeCollectionId =
-    collectionId || orderedCollections[0]?.id || "";
+    requestedCollectionId || collectionId || orderedCollections[0]?.id || "";
 
   useEffect(() => {
     if (!activeCollectionId) return;
@@ -491,7 +494,7 @@ export default function CollectionStrategyPanel({
         setBusy("settings");
         setScores([]);
         setPreviewMeta(null);
-        setExpandedProductId(null);
+
         setViewAllProducts(false);
         setProductSearch("");
       }
@@ -500,16 +503,16 @@ export default function CollectionStrategyPanel({
     Promise.all([
       fetch(
         `/api/collection-rotation/strategy?collectionId=${encodeURIComponent(activeCollectionId)}`,
-        { cache: "no-store" }
+        { cache: "no-store" },
       ).then((response) =>
-        readJson<{ ok: true; settings: Settings }>(response)
+        readJson<{ ok: true; settings: Settings }>(response),
       ),
       fetch("/api/collection-rotation/analytics", { cache: "no-store" }).then(
         (response) =>
           readJson<{
             ok: true;
             availability: { shopifyReports: boolean; ga4: boolean };
-          }>(response)
+          }>(response),
       ),
     ])
       .then(([strategyData, analyticsData]) => {
@@ -522,7 +525,7 @@ export default function CollectionStrategyPanel({
           setError(
             loadError instanceof Error
               ? loadError.message
-              : "Could not load strategy."
+              : "Could not load strategy.",
           );
         }
       })
@@ -546,18 +549,18 @@ export default function CollectionStrategyPanel({
   const filteredAllScores =
     viewAllProducts && normalizedProductSearch
       ? scores.filter((score) =>
-          score.title.toLowerCase().includes(normalizedProductSearch)
+          score.title.toLowerCase().includes(normalizedProductSearch),
         )
       : scores;
   const totalProductPages = Math.max(
     1,
-    Math.ceil(filteredAllScores.length / PRODUCTS_PER_PAGE)
+    Math.ceil(filteredAllScores.length / PRODUCTS_PER_PAGE),
   );
   const safeProductPage = Math.min(productPage, totalProductPages - 1);
   const displayedScores = viewAllProducts
     ? filteredAllScores.slice(
         safeProductPage * PRODUCTS_PER_PAGE,
-        safeProductPage * PRODUCTS_PER_PAGE + PRODUCTS_PER_PAGE
+        safeProductPage * PRODUCTS_PER_PAGE + PRODUCTS_PER_PAGE,
       )
     : scores.slice(0, 12);
 
@@ -576,7 +579,7 @@ export default function CollectionStrategyPanel({
     }));
     setScores([]);
     setPreviewMeta(null);
-    setExpandedProductId(null);
+
     // The scoring configuration just changed, so any earlier preview seed
     // was computed against settings that no longer apply.
     if (activeCollectionId) onPreviewSeedChange?.(activeCollectionId, null);
@@ -590,7 +593,7 @@ export default function CollectionStrategyPanel({
     }));
     setScores([]);
     setPreviewMeta(null);
-    setExpandedProductId(null);
+
     if (activeCollectionId) onPreviewSeedChange?.(activeCollectionId, null);
   }
 
@@ -605,8 +608,11 @@ export default function CollectionStrategyPanel({
         await fetch("/api/collection-rotation/strategy", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ collectionId: activeCollectionId, ...settings }),
-        })
+          body: JSON.stringify({
+            collectionId: activeCollectionId,
+            ...settings,
+          }),
+        }),
       );
       setMessage("Strategy saved. Scheduled and manual rotations now use it.");
       return true;
@@ -614,7 +620,7 @@ export default function CollectionStrategyPanel({
       setError(
         saveError instanceof Error
           ? saveError.message
-          : "Could not save strategy."
+          : "Could not save strategy.",
       );
       return false;
     } finally {
@@ -646,21 +652,21 @@ export default function CollectionStrategyPanel({
       }>(
         await fetch(
           `/api/collection-rotation/preview?collectionId=${encodeURIComponent(activeCollectionId)}`,
-          { cache: "no-store" }
-        )
+          { cache: "no-store" },
+        ),
       );
       setScores(data.preview.scores);
       setPreviewMeta(data.preview);
-      setExpandedProductId(null);
+
       onPreviewSeedChange?.(activeCollectionId, data.preview.seed);
       setMessage(
-        "Preview ready. Nothing has been changed in Shopify yet — shuffling this collection now, without changing anything above first, will apply exactly this order."
+        "Preview ready. Nothing has been changed in Shopify yet — shuffling this collection now, without changing anything above first, will apply exactly this order.",
       );
     } catch (previewError) {
       setError(
         previewError instanceof Error
           ? previewError.message
-          : "Could not build preview."
+          : "Could not build preview.",
       );
     } finally {
       setBusy("");
@@ -673,10 +679,7 @@ export default function CollectionStrategyPanel({
     setMessage("");
 
     try {
-      const sources = [
-        "SHOPIFY_REPORTS",
-        ...(availability.ga4 ? ["GA4"] : []),
-      ];
+      const sources = ["SHOPIFY_REPORTS", ...(availability.ga4 ? ["GA4"] : [])];
       const data = await readJson<{
         ok: true;
         results: Array<{ source: string; rowCount: number }>;
@@ -688,16 +691,16 @@ export default function CollectionStrategyPanel({
             sources,
             lookbackDays: settings.analyticsLookbackDays,
           }),
-        })
+        }),
       );
       setMessage(
         `Analytics refreshed: ${data.results
           .map((result) => `${result.source} ${result.rowCount} products`)
-          .join(" · ")}.`
+          .join(" · ")}.`,
       );
       setScores([]);
       setPreviewMeta(null);
-      setExpandedProductId(null);
+
       // The data behind any earlier preview just changed, so that seed no
       // longer reflects what a fresh preview would produce.
       if (activeCollectionId) onPreviewSeedChange?.(activeCollectionId, null);
@@ -705,7 +708,7 @@ export default function CollectionStrategyPanel({
       setError(
         syncError instanceof Error
           ? syncError.message
-          : "Analytics sync failed."
+          : "Analytics sync failed.",
       );
     } finally {
       setBusy("");
@@ -716,32 +719,47 @@ export default function CollectionStrategyPanel({
     <section className="card card-padded rotation-strategy">
       <div className="rotation-section-heading">
         <div>
-          <p className="page-header-eyebrow">Ranking engine</p>
-          <h3 className="card-title">Choose how products rotate</h3>
+          <p className="page-header-eyebrow">Arrange your collection</p>
+          <h3 className="card-title">Choose what leads</h3>
           <p className="card-description">
-            Preview a weighted order before changing Shopify. Fixed top
-            positions always override the score.
+            Choose a ranking mix, then preview the order before applying it.
+            Fixed top and bottom positions take priority.
           </p>
         </div>
-        <label className="rotation-strategy-collection">
-          <span className="form-label">Collection to tune</span>
-          <select
-            className="form-select"
-            value={activeCollectionId}
-            onChange={(event) => setCollectionId(event.target.value)}
-          >
-            {orderedCollections.map((collection) => (
-              <option key={collection.id} value={collection.id}>
-                {collection.title} ({collection.productsCount})
-              </option>
-            ))}
-          </select>
-        </label>
+        {requestedCollectionId ? (
+          <div className="cr-editing-collection">
+            <small>EDITING</small>
+            <strong>
+              {collections.find((c) => c.id === activeCollectionId)?.title}
+            </strong>
+          </div>
+        ) : (
+          <label className="rotation-strategy-collection">
+            <span className="form-label">Collection to tune</span>
+            <select
+              className="form-select"
+              value={activeCollectionId}
+              onChange={(event) => setCollectionId(event.target.value)}
+            >
+              {orderedCollections.map((collection) => (
+                <option key={collection.id} value={collection.id}>
+                  {collection.title} ({collection.productsCount})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       <div className="rotation-strategy-grid">
         {(
-          ["BALANCED", "PERFORMANCE", "DISCOVERY", "RANDOM", "CUSTOM"] as Strategy[]
+          [
+            "BALANCED",
+            "PERFORMANCE",
+            "DISCOVERY",
+            "RANDOM",
+            "CUSTOM",
+          ] as Strategy[]
         ).map((strategy) => (
           <button
             key={strategy}
@@ -749,6 +767,7 @@ export default function CollectionStrategyPanel({
             className={`rotation-strategy-option ${
               settings.strategy === strategy ? "is-active" : ""
             }`}
+            aria-pressed={settings.strategy === strategy}
             onClick={() => chooseStrategy(strategy)}
           >
             <strong>{STRATEGY_LABELS[strategy]}</strong>
@@ -768,6 +787,17 @@ export default function CollectionStrategyPanel({
         ).map(([field, label]) => (
           <label key={field}>
             <span className="form-label">{label}</span>
+            <input
+              aria-label={label + " weight slider"}
+              type="range"
+              min="0"
+              max="100"
+              value={settings[field]}
+              disabled={settings.strategy !== "CUSTOM"}
+              onChange={(event) =>
+                updateWeight(field, Number(event.target.value))
+              }
+            />
             <span className="rotation-weight-input">
               <input
                 type="number"
@@ -786,7 +816,10 @@ export default function CollectionStrategyPanel({
       </div>
 
       <details className="rotation-weight-presets cr-presets">
-        <summary>Reusable weight presets{weightPresets.length ? ` (${weightPresets.length})` : ""}</summary>
+        <summary>
+          Reusable weight presets
+          {weightPresets.length ? ` (${weightPresets.length})` : ""}
+        </summary>
         <div className="rotation-weight-presets-heading">
           <strong>Save a custom ranking mix</strong>
           <span>
@@ -819,9 +852,7 @@ export default function CollectionStrategyPanel({
             ))}
           </div>
         ) : (
-          <p className="rotation-weight-presets-empty">
-            No saved presets yet.
-          </p>
+          <p className="rotation-weight-presets-empty">No saved presets yet.</p>
         )}
 
         {presetsError ? (
@@ -854,8 +885,7 @@ export default function CollectionStrategyPanel({
         </div>
         {settings.strategy !== "CUSTOM" ? (
           <p className="rotation-weight-presets-empty">
-            Switch to Custom above to save the current weights as a new
-            preset.
+            Switch to Custom above to save the current weights as a new preset.
           </p>
         ) : null}
       </details>
@@ -940,14 +970,15 @@ export default function CollectionStrategyPanel({
                   : "These are the products customers see first in collection grids and featured sliders."}
               </p>
             </div>
-            <span className={`rotation-confidence is-${previewMeta?.confidence.toLowerCase()}`}>
+            <span
+              className={`rotation-confidence is-${previewMeta?.confidence.toLowerCase()}`}
+            >
               {previewMeta?.confidence} data confidence
             </span>
           </div>
 
           {previewMeta &&
-          (previewMeta.outOfStockCount > 0 ||
-            previewMeta.archivedCount > 0) ? (
+          (previewMeta.outOfStockCount > 0 || previewMeta.archivedCount > 0) ? (
             <p className="rotation-score-detail-note rotation-out-of-stock-note rotation-score-oos-summary">
               {[
                 previewMeta.outOfStockCount > 0
@@ -959,8 +990,8 @@ export default function CollectionStrategyPanel({
               ]
                 .filter(Boolean)
                 .join(" and ")}{" "}
-              excluded from scoring — Shopify wouldn&apos;t show or sell them
-              in a top slot anyway, so they&apos;re left out of the ranking
+              excluded from scoring — Shopify wouldn&apos;t show or sell them in
+              a top slot anyway, so they&apos;re left out of the ranking
               entirely and moved to the end of the collection instead.
             </p>
           ) : null}
@@ -987,78 +1018,60 @@ export default function CollectionStrategyPanel({
                 type="search"
                 className="form-input rotation-score-search"
                 value={productSearch}
+                aria-label="Search preview products"
                 onChange={(event) => setProductSearch(event.target.value)}
                 placeholder="Search by product title"
               />
             ) : null}
           </div>
 
-          <div className="rotation-score-table-wrap">
-            <table className="rotation-score-table">
-              <thead>
-                <tr>
-                  <th>{viewAllProducts ? "Rank" : "Move"}</th>
-                  <th>Product</th>
-                  <th>Score</th>
-                  <th>Performance</th>
-                  <th>Exposure</th>
-                  <th>Freshness</th>
-                  <th>Data</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedScores.map((score) => {
-                  const isExpanded = expandedProductId === score.productId;
-                  return (
-                    <Fragment key={score.productId}>
-                      <tr
-                        className={`rotation-score-row${isExpanded ? " is-expanded" : ""}`}
-                        onClick={() =>
-                          setExpandedProductId((current) =>
-                            current === score.productId ? null : score.productId
-                          )
-                        }
-                      >
-                        <td>
-                          {viewAllProducts
-                            ? score.proposedPosition
-                            : `${score.previousPosition} → ${score.proposedPosition}`}
-                        </td>
-                        <td>
-                          <span className="rotation-score-toggle">
-                            {isExpanded ? "▾" : "▸"}
-                          </span>
-                          {score.title}
-                        </td>
-                        <td><strong>{score.score}</strong></td>
-                        <td>{score.performance}</td>
-                        <td>{score.exposure}</td>
-                        <td>{score.freshness}</td>
-                        <td>
-                          {score.metrics.sources.length > 0
-                            ? score.metrics.sources.join(", ")
-                            : "Cold start"}
-                        </td>
-                      </tr>
-                      {isExpanded ? (
-                        <tr className="rotation-score-detail-row">
-                          <td colSpan={7}>
-                            <ScoreBreakdown score={score} weights={settings} />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-                {viewAllProducts && displayedScores.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="rotation-score-empty-cell">
-                      No products match &ldquo;{productSearch}&rdquo;.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
+          <div className="cr-ranked-products">
+            {displayedScores.map((score) => (
+              <div key={score.productId} className="cr-ranked-product">
+                <div className="cr-ranked-main">
+                  <span className="cr-rank-number">
+                    {score.proposedPosition}
+                  </span>
+                  <div>
+                    <h4>{score.title}</h4>
+                    <p>
+                      Previously #{score.previousPosition} <span>→</span>{" "}
+                      Proposed #{score.proposedPosition}
+                    </p>
+                  </div>
+                  <strong className="cr-score-value">
+                    {score.score}
+                    <small>overall score</small>
+                  </strong>
+                </div>
+                <div className="cr-score-factors">
+                  <span>
+                    Performance <strong>{score.performance}</strong>
+                  </span>
+                  <span>
+                    Exposure <strong>{score.exposure}</strong>
+                  </span>
+                  <span>
+                    Freshness <strong>{score.freshness}</strong>
+                  </span>
+                  <span>
+                    Exploration <strong>{score.exploration}</strong>
+                  </span>
+                </div>
+                <details>
+                  <summary>
+                    Why this position? ·{" "}
+                    {score.metrics.sources.length
+                      ? score.metrics.sources.join(", ")
+                      : "No analytics data"}
+                  </summary>
+                  <ScoreBreakdown score={score} weights={settings} />
+                </details>
+              </div>
+            ))}
+            {displayedScores.length === 0 && (
+              <p>No products match this search.</p>
+            )}
           </div>
 
           {viewAllProducts ? (
@@ -1086,7 +1099,7 @@ export default function CollectionStrategyPanel({
                 disabled={safeProductPage >= totalProductPages - 1}
                 onClick={() =>
                   setProductPage((current) =>
-                    Math.min(totalProductPages - 1, current + 1)
+                    Math.min(totalProductPages - 1, current + 1),
                   )
                 }
               >
@@ -1096,13 +1109,13 @@ export default function CollectionStrategyPanel({
           ) : null}
 
           <p className="rotation-score-note">
-            Exposure looks at the last 3 days of rotations for this
-            collection ({previewMeta?.runHistoryCount ?? 0} saved rotation
+            Exposure looks at the last 3 days of rotations for this collection (
+            {previewMeta?.runHistoryCount ?? 0} saved rotation
             {previewMeta?.runHistoryCount === 1 ? "" : "s"} in that window) -
-            recent history, not a lifetime average, so it keeps reflecting
-            who's been under-exposed lately. It measures position
-            opportunity across the collection, with extra importance on the
-            first 12—not page views.
+            recent history, not a lifetime average, so it keeps reflecting who's
+            been under-exposed lately. It measures position opportunity across
+            the collection, with extra importance on the first 12—not page
+            views.
           </p>
         </div>
       ) : null}

@@ -1,29 +1,30 @@
-# Collection rotation interface
+# Collection rotation redesign
 
-## Design rationale
+Updated September 13, 2026. This replaces the initial three-view reorganization.
 
-The interface separates three tasks that previously competed on one long page:
+## User workflow
 
-- **Collections:** find and select collections, edit fixed positions, rotate, review history, and undo.
-- **Strategy & preview:** choose a ranking method, tune weights, reuse presets, and inspect the proposed order before applying it.
-- **Automatic rotation:** inspect the schedule and manage its collection set.
+The home screen is a collection library. Each card shows product count, favorite status, automation membership, current ranking strategy, fixed-position counts, last run and error, and direct edit/preview, history and undo actions.
 
-Shopify Polaris resource-list guidance informed the search/filter/sort grouping: https://polaris-site-prod-kit.shopify.prod.shopifyapps.com/components/selection-and-input/index-filters
+Select cards to apply one strategy to the selection or rotate using each collection's saved settings. The bulk editor identifies all target collections, offers built-in strategies and custom weights, loads reusable presets, validates the 100% total, and can save a reusable mix without navigating elsewhere. It reports partial failures without hiding which collections failed.
 
-Algolia merchandising guidance informed the separation of rules and preview from application: https://www.algolia.com/doc/guides/managing-results/rules/merchandising-and-promoting
+Editing a collection opens a focused drawer locked to that collection. The ranked preview shows proposed/previous positions, factors and expandable explanations. Top-12/all-products views and search/pagination remain. Schedule management has its own drawer containing only schedule and membership controls.
 
-Overview counts, progressive disclosure for help and reusable presets, explicit fixed-position labels, and a persistent desktop selection action bar reduce the amount users must interpret at once. Styles are scoped to this workspace and use the existing theme variables. Narrow screens keep table overflow inside its container.
+## References
 
-## Behavior boundaries
+- Shopify select-then-act bulk workflow: https://help.shopify.com/en/manual/shopify-admin/productivity-tools/bulk-actions
+- Algolia collection-focused merchandising: https://www.algolia.com/doc/integration/shopify/going-further/merchandising-tool
 
-The existing components stay mounted when switching views, preserving search, selections, strategy drafts, and preview seeds. Existing action handlers, requests, confirmation prompts, ranking logic, scheduling, history, and undo remain unchanged. No API, database, or scheduler files were modified.
+## Behavior preserved
 
-## Verification — September 13, 2026
+No API, database, scoring, scheduler, shuffle or undo implementation changed. Bulk assignment uses the existing strategy/bulk endpoint. The existing confirmation for rotations and undo remains. Assigning a strategy saves settings without rotating products. Preview seeds are cleared after bulk assignment so stale previews cannot be applied. The collection editor remains mounted when dismissed, retaining its draft and preview. Presets refresh when reopened.
 
-- `npm run build:check` passed, including TypeScript and production compilation.
-- Local browser checks covered all three views, search retention across view changes, disabled rotate action without selections, empty/error state, light/dark rendering, and a 390px viewport without document horizontal overflow.
-- The local environment did not return collection data. Populated collection rows, live previews, and mutation outcomes were not exercised. No live rotation, save, or schedule change was triggered during verification.
+Native dialogs provide focus containment, Escape dismissal and focus restoration. The library selection remains in place underneath drawers. Styles are scoped to collection rotation and use the existing light/dark theme.
 
-## Review on the deployed site
+## Verification
 
-Verify populated collection rows and fixed-position/history dialogs. Select a collection, change views, and confirm selection remains. Confirm the preview and automation management controls are reachable. Applying a rotation still changes Shopify and should only be done when intended.
+- Production build and TypeScript pass via npm run build:check.
+- Isolated populated fixture: node scripts/collection-rotation.preview.cjs (http://127.0.0.1:3019). All fetches are intercepted; the fixture cannot send API requests to production.
+- Browser checks: selecting Torch Corals and New Arrivals, direct bulk entry, invalid totals disabling Apply, saved-preset weights sent to exactly those two targets, success feedback, collection-specific editor context, ranked preview rendering and automation membership visibility without bulk-ranking controls.
+- Tested at 390px and 1440px: no document or custom-editor horizontal overflow. Populated library reviewed visually in light theme; production dark theme uses the same existing variables.
+- Live merchandising actions were not run. Fixture verification covers UI wiring, not Shopify mutation outcomes.
