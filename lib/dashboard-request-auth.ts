@@ -6,6 +6,7 @@ function equal(left: string, right: string) {
 }
 
 export function isDashboardRequestAuthorized(request: Request) {
+  if (process.env.DASHBOARD_AUTH_DISABLED === "true") return true;
   const expectedUser = process.env.DASHBOARD_USERNAME;
   const expectedPassword = process.env.DASHBOARD_PASSWORD;
   const authorization = request.headers.get("authorization");

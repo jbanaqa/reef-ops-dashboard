@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export function proxy(request: NextRequest) {
+  if (process.env.DASHBOARD_AUTH_DISABLED === "true")
+    return NextResponse.next();
   const username = process.env.DASHBOARD_USERNAME;
   const password = process.env.DASHBOARD_PASSWORD;
 
