@@ -1216,7 +1216,7 @@ export default function CollectionRotationManager() {
       </RotationDrawer>
       <RotationDrawer
         open={workspace === "bulk"}
-        title="Apply a strategy"
+        title="Set the same strategy"
         onClose={() => setWorkspace("")}
       >
         {workspace === "bulk" && (
@@ -1522,23 +1522,27 @@ export default function CollectionRotationManager() {
             <strong>{selectedCollectionIds.length} collections selected</strong>
             <p>
               {selectedCollectionIds.length
-                ? "Set a shared strategy, or rotate using each collection’s saved settings."
-                : "Select collection cards to apply strategies or rotate in bulk."}
+                ? selectedCollectionIds.length > 1
+                  ? "Rotate with each collection’s saved strategy, or intentionally give all selected collections the same strategy."
+                  : "This collection will rotate using the strategy and fixed positions shown on its card."
+                : "Select collection cards to rotate them using their saved strategies."}
             </p>
           </div>
-          <button
-            type="button"
-            className="button button-secondary"
-            disabled={isBusy || !selectedCollectionIds.length}
-            onClick={() => {
-              setBulkTargets(
-                collections.filter((c) => selectedIdSet.has(c.id)),
-              );
-              setWorkspace("bulk");
-            }}
-          >
-            Apply strategy
-          </button>
+          {selectedCollectionIds.length > 1 ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={isBusy}
+              onClick={() => {
+                setBulkTargets(
+                  collections.filter((c) => selectedIdSet.has(c.id)),
+                );
+                setWorkspace("bulk");
+              }}
+            >
+              Set same strategy
+            </button>
+          ) : null}
           <button
             type="button"
             className="button button-primary"
@@ -1547,7 +1551,7 @@ export default function CollectionRotationManager() {
           >
             {isShufflingBatch
               ? "Shuffling Collections..."
-              : `Rotate selected (${selectedCollectionIds.length})`}
+              : `Rotate with saved ${selectedCollectionIds.length === 1 ? "strategy" : "strategies"} (${selectedCollectionIds.length})`}
           </button>
         </div>
       </section>

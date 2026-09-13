@@ -298,9 +298,7 @@ export default function BulkStrategyEditor({
           }
           onClick={() => void apply()}
         >
-          {busy
-            ? "Saving…"
-            : `Apply strategy to ${targets.length} collection${targets.length === 1 ? "" : "s"}`}
+          {busy ? "Saving…" : `Save to ${targets.length} collections`}
         </button>
       </footer>
     </div>

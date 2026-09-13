@@ -6,7 +6,7 @@ Updated September 13, 2026. This replaces the initial three-view reorganization.
 
 The home screen is a collection library. Each card shows product count, favorite status, automation membership, current ranking strategy, fixed-position counts, last run and error, and direct edit/preview, history and undo actions.
 
-Select cards to apply one strategy to the selection or rotate using each collection's saved settings. The bulk editor identifies all target collections, offers built-in strategies and custom weights, loads reusable presets, validates the 100% total, and can save a reusable mix without navigating elsewhere. It reports partial failures without hiding which collections failed.
+Select one card to rotate it using its saved strategy. Strategy editing for one collection lives only on that collection's card. When two or more cards are selected, **Set same strategy** becomes available as an explicit bulk assignment action. The bulk editor identifies all target collections, offers built-in strategies and custom weights, loads reusable presets, validates the 100% total, and can save a reusable mix without navigating elsewhere. It reports partial failures without hiding which collections failed.
 
 Editing a collection opens a focused drawer locked to that collection. The ranked preview shows proposed/previous positions, factors and expandable explanations. Top-12/all-products views and search/pagination remain. Schedule management has its own drawer containing only schedule and membership controls.
 
