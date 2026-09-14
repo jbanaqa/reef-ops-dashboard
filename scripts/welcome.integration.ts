@@ -22,6 +22,12 @@ export function registerWelcomeTests(
       await import("../lib/marketing/welcome");
     const { enroll } = await import("../lib/marketing/flows");
     const { uniqueDiscount } = await import("../lib/marketing/discounts");
+    const { contactDetails } = await import("../lib/marketing/audiences");
+    const {
+      cancelTestMessage,
+      clearUnsentTestMessages,
+      sendTestMessageNow,
+    } = await import("../lib/marketing/message-test");
     const shop = store.shop(),
       fetchBefore = globalThis.fetch,
       couponEnv = process.env.MARKETING_WELCOME_COUPON;
@@ -333,6 +339,80 @@ export function registerWelcomeTests(
         Date.parse(recovered.endsAt),
         start + 84 * DAY,
         "lost response cannot extend the deadline",
+      );
+
+      time(75);
+      const testAddress = "welcome-actions@example.com";
+      await prisma.marketingResource.update({
+        where: flowWhere,
+        data: {
+          data: store.json({
+            ...config,
+            welcome: {
+              ...defaultWelcome,
+              testEmail: testAddress,
+              bypassRecentEmailSuppression: true,
+            },
+          }),
+        },
+      });
+      await signup(testAddress);
+      const actionProfile = await profile(testAddress);
+      let actionDetails = await contactDetails(actionProfile.id);
+      assert.equal(
+        actionDetails!.messages.filter((item) => item.testScoped).length,
+        4,
+        "all Welcome emails use the shared test-message controls",
+      );
+      const initial = await message(actionProfile.id, 0);
+      assert.equal(
+        actionDetails!.messages.find((item) => item.id === initial.id)!
+          .testActions?.canSendNow,
+        true,
+      );
+      const deliveriesBeforeActions = deliveries.length;
+      assert.equal(
+        (await sendTestMessageNow(actionProfile.id, initial.id)).status,
+        "SENT",
+      );
+      const firstReminder = await message(actionProfile.id, 1);
+      actionDetails = await contactDetails(actionProfile.id);
+      assert.equal(
+        actionDetails!.messages.find((item) => item.id === firstReminder.id)!
+          .testActions?.canSendNow,
+        true,
+      );
+      assert.equal(
+        (await sendTestMessageNow(actionProfile.id, firstReminder.id)).status,
+        "SENT",
+        "the Welcome test-account bypass permits consecutive test sends",
+      );
+      assert.equal(deliveries.length, deliveriesBeforeActions + 2);
+      const finalReminder = await message(actionProfile.id, 2);
+      await cancelTestMessage(actionProfile.id, finalReminder.id);
+      assert.equal((await message(actionProfile.id, 2)).status, "CANCELLED");
+      assert.equal(
+        await clearUnsentTestMessages(actionProfile.id),
+        2,
+        "cleanup removes cancelled and pending Welcome test messages",
+      );
+      assert.equal(
+        await prisma.marketingMessage.count({
+          where: { profileId: actionProfile.id, flowKey: "welcome" },
+        }),
+        2,
+      );
+      assert.ok(
+        await prisma.marketingResource.findUnique({
+          where: {
+            shop_kind_key: {
+              shop,
+              kind: "WELCOME_RUN",
+              key: actionProfile.id,
+            },
+          },
+        }),
+        "cleanup preserves Welcome's one-entry record",
       );
 
       time(80);

@@ -106,7 +106,7 @@ const { chromium } = require("playwright");
       const url = new URL(req.url());
       if (req.method() === "POST") {
         const body = req.postDataJSON();
-        if (body.action === "send-cart-test-now") {
+        if (body.action === "send-test-message-now") {
           assert.equal(body.profileId, "0");
           assert.equal(body.messageId, "test-first");
           earlySends++;
@@ -186,7 +186,14 @@ const { chromium } = require("playwright");
                       sentAt: earlySends ? "2026-09-10T12:00:00Z" : null,
                       error: null,
                       ...(!earlySends
-                        ? { testSend: { canSendNow: true, reason: null } }
+                        ? {
+                            testScoped: true,
+                            testActions: {
+                              canSendNow: true,
+                              reason: null,
+                              canCancel: true,
+                            },
+                          }
                         : {}),
                     },
                     {
@@ -199,11 +206,31 @@ const { chromium } = require("playwright");
                       dueAt: "2026-09-12T12:00:00Z",
                       sentAt: null,
                       error: null,
-                      testSend: {
+                      testScoped: true,
+                      testActions: {
                         canSendNow: !!earlySends,
                         reason: earlySends
                           ? null
                           : "Finish the first email step before testing this follow-up.",
+                        canCancel: true,
+                      },
+                    },
+                    {
+                      id: "welcome-social",
+                      subject: "Welcome social test",
+                      status: "PENDING",
+                      channel: "EMAIL",
+                      flowKey: "welcome",
+                      createdAt: "2026-09-10T12:00:00Z",
+                      dueAt: "2026-09-25T21:00:00Z",
+                      sentAt: null,
+                      error: null,
+                      testScoped: true,
+                      testActions: {
+                        canSendNow: false,
+                        reason:
+                          "Finish the previous email step before testing this one.",
+                        canCancel: true,
                       },
                     },
                   ]
@@ -419,6 +446,31 @@ const { chromium } = require("playwright");
         exact: true,
       }),
     });
+    const welcomeCard = page.locator(".aw-message").filter({
+      has: page.getByRole("heading", {
+        name: "Welcome social test",
+        exact: true,
+      }),
+    });
+    await page
+      .getByText(
+        "Test controls · Send a selected email to this account now or cancel it. Only its schedule is bypassed; the flow’s consent, purchase, coupon and suppression settings still apply.",
+        { exact: true },
+      )
+      .waitFor();
+    await welcomeCard.getByText("Welcome · EMAIL", { exact: true }).waitFor();
+    assert.equal(
+      await welcomeCard
+        .getByRole("button", { name: "Send this step now", exact: true })
+        .isDisabled(),
+      true,
+    );
+    assert.equal(
+      await welcomeCard
+        .getByRole("button", { name: "Cancel scheduled message", exact: true })
+        .count(),
+      1,
+    );
     assert.equal(
       await firstCard
         .getByRole("button", { name: "Send this step now", exact: true })

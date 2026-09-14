@@ -552,3 +552,28 @@ Still needed before real cutover:
 ### Welcome diagram correction — September 13, 2026
 
 The Welcome implementation was committed and pushed as `240e90b`. The user then requested a functional branching diagram instead of the linear timeline. Welcome now displays separate lifetime-purchase decisions before each reminder, with a No-orders email path and a Has-ordered skip path. Both rejoin before the next scheduled check and ultimately the social email. This represents the worker's independent send-time checks; it does not change enrollment or delivery behavior. Email nodes open their own editors; wait, decision, skip and offer-rule nodes open Welcome settings. Coupon expiration is shown separately as an offer rule rather than an execution step. The browser suite verifies branch placement, decision settings, all four email editors, saved schedule changes, and 320/390px layouts. TypeScript and changed-source ESLint pass. No production flow settings, popup installation, or customer sends were changed.
+
+### Signup preview setup — September 14, 2026
+
+User created Shopify theme `162826256610` (Copy of Sunrise) and authorized popup installation in that unpublished copy. Added the following before `</body>` in its `layout/theme.liquid` through Shopify's code editor. User completed Shopify's additional verification; File Saved appeared, and the external script tag was verified in the rendered draft preview. Existing theme had 26 errors/34 warnings before this edit; afterward 26 errors/35 warnings (external asset). Live theme was not edited or published. Klaviyo popup remains present in the copy as well as live.
+
+```liquid
+{% comment %}Reef Ops popup test: unpublished theme only.{% endcomment %}
+{% if theme.id == 162826256610 and theme.role != "main" %}
+<script defer src="https://reef-ops-dashboard-production.up.railway.app/reef-marketing.js" data-endpoint="https://reef-ops-dashboard-production.up.railway.app/api/marketing/storefront" data-known-customer="{% if customer %}true{% else %}false{% endif %}"></script>
+{% endif %}
+```
+
+Configured Railway service variables `MARKETING_STOREFRONT_ORIGIN=https://coralsanonymous.com` and `MARKETING_FORM_ENABLED=true`, triggering deployment `52287762-87a9-4d19-b4b0-a23f0996f2f9`; also saved global operations.formEnabled=true via the existing API, preserving all other preferences. Original storefrontOrigin was empty, explaining Origin denied. Verify deployment success before testing. Preview opened via Shopify editor on `https://coralsanonymous.com/` with Draft/Copy of Sunrise preview bar, matching the configured origin (the editor iframe itself uses myshopify.com and will not match). Do not use a shopifypreview.com share URL without verifying origin compatibility.
+
+At initial setup inspection, the saved Welcome flow was disabled and unreviewed with testEmail `jadenbanawa@gmail.com`; that profile had no Welcome history. The user later reviewed and enabled the restricted flow, submitted the draft Reef Ops popup, and the profile entered `Mailable Subscribers`. Four Welcome messages were scheduled and the initial email was accepted by the provider after the user ran **Process events now**. The remaining messages retained their day 3, day 10, and day 15 schedules. This validated the popup-to-consent-to-enrollment-to-delivery path without publishing the copied theme.
+
+Deployment 52287762-87a9-4d19-b4b0-a23f0996f2f9 succeeded. Storefront config POST from https://coralsanonymous.com returned HTTP 200 with singleOptIn=true and couponDays=14, confirming the origin and form deployment gates. The external asset must remain publicly accessible.
+
+### Shared profile message controls — September 14, 2026
+
+The Audiences profile **Messages** tab now uses one message-action model for restricted test flows. `lib/marketing/message-test.ts` replaces the cart-only module and owns action discovery, early-send validation, cancellation, cleanup, delivery readiness, and audit recording. Cart and Welcome provide only their flow-specific eligibility checks. The UI calls the same `send-test-message-now`, `cancel-test-message`, and `clear-unsent-test-messages` actions for either flow; old cart action names remain API aliases for compatibility.
+
+Welcome settings now offer the same optional 16-hour suppression bypass as cart when a specific test address is set. Early sends bypass only the selected message's schedule. The worker still checks flow status, test audience, consent/suppression, prior-step state, purchase state, coupon validity, unresolved Shopify events, and provider readiness. Welcome reminders cannot be accelerated before the offer email is sent, and the cleanup action preserves the Welcome one-entry record.
+
+Verification passed: TypeScript, changed-source ESLint, Audiences browser coverage at desktop/390/320 widths, and all 65 marketing tests. The integration suite accelerates two consecutive Welcome emails, verifies suppression bypass, cancellation, cleanup, and preservation of the one-entry record. A production build attempt was stopped after Turbopack reported a corrupt local `.next` cache; it was not rerun because the build process was destabilizing the user's PC. Two ignored cache backups (`.next-corrupt-20260914/` and `.next-corrupt-local/`) remain local and must not be committed.

@@ -33,10 +33,10 @@ import { audienceDirectory, contactDetails } from "@/lib/marketing/audiences";
 import { runMarketing } from "@/lib/marketing/worker";
 import { importProfiles } from "@/lib/marketing/ingest";
 import {
-  cancelCartTestMessage,
-  clearCartTestHistory,
-  sendCartTestNow,
-} from "@/lib/marketing/cart-test";
+  cancelTestMessage,
+  clearUnsentTestMessages,
+  sendTestMessageNow,
+} from "@/lib/marketing/message-test";
 import { validateFlow } from "@/lib/marketing/flow-config";
 import { shopifyGraphql } from "@/lib/shopify";
 
@@ -455,22 +455,31 @@ export async function POST(request: Request) {
         at: snapshot.observedAt.toISOString(),
       });
     }
-    if (b.action === "send-cart-test-now") {
+    if (
+      b.action === "send-test-message-now" ||
+      b.action === "send-cart-test-now"
+    ) {
       if (typeof b.profileId !== "string" || typeof b.messageId !== "string")
         throw new Error("Choose a test message.");
-      return Response.json(await sendCartTestNow(b.profileId, b.messageId));
+      return Response.json(await sendTestMessageNow(b.profileId, b.messageId));
     }
-    if (b.action === "cancel-cart-test-message") {
+    if (
+      b.action === "cancel-test-message" ||
+      b.action === "cancel-cart-test-message"
+    ) {
       if (typeof b.profileId !== "string" || typeof b.messageId !== "string")
         throw new Error("Choose a test message.");
-      await cancelCartTestMessage(b.profileId, b.messageId);
+      await cancelTestMessage(b.profileId, b.messageId);
       return Response.json({ ok: true });
     }
-    if (b.action === "clear-cart-test-history") {
+    if (
+      b.action === "clear-unsent-test-messages" ||
+      b.action === "clear-cart-test-history"
+    ) {
       if (typeof b.profileId !== "string")
         throw new Error("Choose a contact first.");
       return Response.json({
-        cleared: await clearCartTestHistory(b.profileId),
+        cleared: await clearUnsentTestMessages(b.profileId),
       });
     }
     if (b.action === "run-delivery") {

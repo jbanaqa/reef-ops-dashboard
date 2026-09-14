@@ -107,7 +107,13 @@ export default function WelcomeSettings({
             onChange({
               ...flow,
               reviewed: false,
-              welcome: { ...w, testEmail: e.target.checked ? "" : undefined },
+              welcome: {
+                ...w,
+                testEmail: e.target.checked ? "" : undefined,
+                bypassRecentEmailSuppression: e.target.checked
+                  ? w.bypassRecentEmailSuppression
+                  : undefined,
+              },
             });
           }}
         />
@@ -125,10 +131,37 @@ export default function WelcomeSettings({
               onChange({
                 ...flow,
                 reviewed: false,
-                welcome: { ...w, testEmail: e.target.value },
+                welcome: {
+                  ...w,
+                  testEmail: e.target.value,
+                  ...(!e.target.value.trim()
+                    ? { bypassRecentEmailSuppression: undefined }
+                    : {}),
+                },
               });
             }}
           />
+        </label>
+      )}
+      {w.testEmail !== undefined && (
+        <label className="mk-check">
+          <input
+            type="checkbox"
+            checked={w.bypassRecentEmailSuppression === true}
+            disabled={!w.testEmail.trim()}
+            onChange={(e) => {
+              onAudienceChange();
+              onChange({
+                ...flow,
+                reviewed: false,
+                welcome: {
+                  ...w,
+                  bypassRecentEmailSuppression: e.target.checked,
+                },
+              });
+            }}
+          />
+          Bypass 16-hour email suppression for this test account
         </label>
       )}
       <p>

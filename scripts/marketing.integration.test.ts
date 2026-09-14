@@ -2696,11 +2696,11 @@ test("send this test step now advances only the selected email and keeps deliver
     assert.ok(first.dueAt > new Date());
     const details = await contactDetails(p.id);
     assert.equal(
-      details!.messages.find((m) => m.id === first.id)!.testSend?.canSendNow,
+      details!.messages.find((m) => m.id === first.id)!.testActions?.canSendNow,
       true,
     );
     assert.equal(
-      details!.messages.find((m) => m.id === last.id)!.testSend?.canSendNow,
+      details!.messages.find((m) => m.id === last.id)!.testActions?.canSendNow,
       false,
     );
     assert.equal((await api.POST(request(first.id, p.id, false))).status, 401);

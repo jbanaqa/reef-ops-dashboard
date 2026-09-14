@@ -27,6 +27,7 @@ import {
   type StockConfig,
 } from "./stock-config";
 import { validateFlow } from "./flow-config";
+import type { WelcomeConfig } from "./welcome-config";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
 import {
   loadWelcome,
@@ -288,6 +289,7 @@ export async function runMarketing(onlyMessageId?: string) {
       });
       if (!m || m.status !== "PENDING" || m.dueAt > new Date()) return null;
       let stockSettings: StockConfig | null = null;
+      let liveWelcomeConfig: WelcomeConfig | undefined;
       const isStock = m.flowKey === "low-stock";
       const verification = m.flowKey === "email-confirmation",
         consent = m.profile.consents.find((c) => c.channel === m.channel);
@@ -408,6 +410,7 @@ export async function runMarketing(onlyMessageId?: string) {
             "Legacy welcome replaced; existing subscribers are not re-enrolled";
         if (welcomeRun && f) {
           const live = validateFlow("welcome", f.data);
+          liveWelcomeConfig = live.welcome;
           reason ||= welcomeAudienceBlock(live, welcomeRun, m.profile.email);
           const index = m.flowStep!;
           if (
@@ -604,9 +607,12 @@ export async function runMarketing(onlyMessageId?: string) {
       if ((cartRun || welcomeRun) && !deferred) {
         const bypassRecentEmailSuppression =
           m.channel === "EMAIL" &&
-          cartRun?.config.cart?.bypassRecentEmailSuppression === true &&
-          !!cartRun?.config.cart.testEmail &&
-          cartRun.config.cart.testEmail === m.profile.email;
+          ((cartRun?.config.cart?.bypassRecentEmailSuppression === true &&
+            !!cartRun?.config.cart.testEmail &&
+            cartRun.config.cart.testEmail === m.profile.email) ||
+            (welcomeRun?.testEmail === m.profile.email &&
+              liveWelcomeConfig?.testEmail === m.profile.email &&
+              liveWelcomeConfig.bypassRecentEmailSuppression === true));
         if (!bypassRecentEmailSuppression) {
           // Reserve against concurrent claims as well as already sent messages.
           const recent = await tx.marketingMessage.findFirst({

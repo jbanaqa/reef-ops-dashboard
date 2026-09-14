@@ -7,6 +7,7 @@ export type WelcomeConfig = {
   socialHour: number;
   fallbackTimezone: string;
   testEmail?: string;
+  bypassRecentEmailSuppression?: boolean;
 };
 export const welcomeLabels = [
   "Welcome · 10% off",
@@ -96,12 +97,20 @@ export function validateWelcome(value: unknown): WelcomeConfig {
   } catch {
     throw new Error("Choose a valid fallback timezone.");
   }
+  const testEmail = w.testEmail !== undefined ? email(w.testEmail) : undefined;
+  if (w.bypassRecentEmailSuppression === true && !testEmail)
+    throw new Error(
+      "Recent-email bypass requires a specific Welcome test email.",
+    );
   return {
     version: 1,
     couponDays: w.couponDays,
     socialHour: w.socialHour,
     fallbackTimezone: w.fallbackTimezone,
-    ...(w.testEmail !== undefined ? { testEmail: email(w.testEmail) } : {}),
+    ...(testEmail !== undefined ? { testEmail } : {}),
+    ...(w.bypassRecentEmailSuppression === true
+      ? { bypassRecentEmailSuppression: true }
+      : {}),
   };
 }
 /** Only replace untouched scaffold copy; saved copy and artwork survive an upgrade. */

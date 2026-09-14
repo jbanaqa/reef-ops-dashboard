@@ -1,5 +1,5 @@
 import { flowProgress } from "./flow-progress";
-import { cartTestSendState } from "./cart-test";
+import { messageTestState } from "./message-test";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/app/generated/prisma/client";
 import { audienceWhere, shop } from "./store";
@@ -136,10 +136,12 @@ export async function contactDetails(id: string) {
         take: 100,
         select: {
           id: true,
+          profileId: true,
           subject: true,
           status: true,
           channel: true,
           flowKey: true,
+          flowStep: true,
           key: true,
           attempts: true,
           flowCondition: true,
@@ -200,12 +202,25 @@ export async function contactDetails(id: string) {
       activeMessages.length > 500 || profile.messages.length === 100,
     messages: await Promise.all(
       profile.messages.map(async (m) => {
-        const testSend = await cartTestSendState(prisma, m, profile.email);
-        const { key, attempts, flowCondition, ...publicMessage } = m;
+        const test = await messageTestState(prisma, m, profile.email);
+        const {
+          key,
+          attempts,
+          flowCondition,
+          profileId,
+          flowStep,
+          ...publicMessage
+        } = m;
         void key;
         void attempts;
         void flowCondition;
-        return { ...publicMessage, ...(testSend ? { testSend } : {}) };
+        void profileId;
+        void flowStep;
+        return {
+          ...publicMessage,
+          ...(test.testScoped ? { testScoped: true } : {}),
+          ...(test.testActions ? { testActions: test.testActions } : {}),
+        };
       }),
     ),
     events: profile.events.map((event) => {

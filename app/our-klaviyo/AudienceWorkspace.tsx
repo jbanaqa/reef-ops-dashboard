@@ -26,7 +26,12 @@ type Contact = {
 };
 type Group = { id?: string; key: string; name: string; data: Segment };
 type Message = {
-  testSend?: { canSendNow: boolean; reason: string | null };
+  testScoped?: boolean;
+  testActions?: {
+    canSendNow: boolean;
+    reason: string | null;
+    canCancel: boolean;
+  };
   id: string;
   subject: string;
   status: string;
@@ -195,6 +200,7 @@ function eventLabel(e: Activity) {
     ORDER: "Order recorded",
     DELIVERED: "Email delivered",
     CART_TEST_SEND_REQUESTED: "Early delivery requested for a test email",
+    MESSAGE_TEST_SEND_REQUESTED: "Early delivery requested for a test email",
     BOUNCED: "Email bounced",
     COMPLAINED: "Spam complaint received",
     UNSUBSCRIBED: "Unsubscribed",
@@ -281,7 +287,7 @@ function ContactPanel({
     setNotice("");
     try {
       const result = await post<{ status: string; message: string }>({
-        action: "send-cart-test-now",
+        action: "send-test-message-now",
         profileId: id,
         messageId,
       });
@@ -305,7 +311,7 @@ function ContactPanel({
     setNotice("");
     try {
       await post({
-        action: "cancel-cart-test-message",
+        action: "cancel-test-message",
         profileId: id,
         messageId,
       });
@@ -322,7 +328,7 @@ function ContactPanel({
   async function clearTestHistory() {
     if (
       !window.confirm(
-        "Clear unsent abandoned-cart test messages for this account? Sent history will remain.",
+        "Clear unsent test messages for this account across all restricted flows? Sent history will remain.",
       )
     )
       return;
@@ -331,7 +337,7 @@ function ContactPanel({
     setNotice("");
     try {
       const result = await post<{ cleared: number }>({
-        action: "clear-cart-test-history",
+        action: "clear-unsent-test-messages",
         profileId: id,
       });
       setNoticeSuccess(true);
@@ -603,20 +609,24 @@ function ContactPanel({
             <section className="aw-detail-section">
               <div className="aw-split">
                 <h3>Message history</h3>
-                <button
-                  type="button"
-                  className="button-secondary"
-                  disabled={busy || loading}
-                  onClick={clearTestHistory}
-                >
-                  Clear unsent test history
-                </button>
+                {contact.messages.some(
+                  (m) => m.testScoped && m.status !== "SENT",
+                ) && (
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    disabled={busy || loading}
+                    onClick={clearTestHistory}
+                  >
+                    Clear unsent test messages
+                  </button>
+                )}
               </div>
-              {contact.messages.some((m) => m.testSend) && (
+              {contact.messages.some((m) => m.testActions) && (
                 <p className="aw-hint">
-                  Restricted cart test · Send a selected email to this account
-                  now. Only its wait is bypassed; consent, purchase and
-                  recent-email checks still apply.
+                  Test controls · Send a selected email to this account now or
+                  cancel it. Only its schedule is bypassed; the flow’s consent,
+                  purchase, coupon and suppression settings still apply.
                 </p>
               )}
               {!sendingEnabled && (
@@ -664,7 +674,7 @@ function ContactPanel({
                           ? "Scheduled for " + date(m.dueAt)
                           : "Created " + date(m.createdAt)}
                     </p>
-                    {m.testSend && (
+                    {m.testActions && (
                       <div className="aw-test-send">
                         <button
                           type="button"
@@ -672,7 +682,7 @@ function ContactPanel({
                             busy ||
                             loading ||
                             !sendingEnabled ||
-                            !m.testSend.canSendNow
+                            !m.testActions.canSendNow
                           }
                           onClick={() => sendStepNow(m.id)}
                         >
@@ -680,15 +690,19 @@ function ContactPanel({
                             ? "Checking and sending…"
                             : "Send this step now"}
                         </button>
-                        {m.testSend.reason && <p>{m.testSend.reason}</p>}
-                        <button
-                          type="button"
-                          className="button-secondary"
-                          disabled={busy || loading}
-                          onClick={() => cancelTestMessage(m.id)}
-                        >
-                          Cancel pending test
-                        </button>
+                        {m.testActions.reason && (
+                          <p>{m.testActions.reason}</p>
+                        )}
+                        {m.testActions.canCancel && (
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            disabled={busy || loading}
+                            onClick={() => cancelTestMessage(m.id)}
+                          >
+                            Cancel scheduled message
+                          </button>
+                        )}
                       </div>
                     )}
                     {m.error && (
