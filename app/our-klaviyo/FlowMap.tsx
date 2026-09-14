@@ -62,7 +62,7 @@ export function flowNodes(resource: Resource): Node[] {
               ? "After the offer expires. Purchasers also reach this step."
               : i === 2
                 ? (s.minutes - f.steps[1].minutes) / 1440 +
-                  " days after the first reminder."
+                  " days after the first reminder's scheduled time."
                 : "After the welcome offer starts.",
           target: { kind: "info", section: "welcome-settings" },
         });
@@ -70,9 +70,9 @@ export function flowNodes(resource: Resource): Node[] {
         nodes.push({
           id: "welcome-purchase:" + i,
           kind: "condition",
-          label: "Still has no orders?",
+          label: "Has the customer ever ordered?",
           detail:
-            "Yes: send this reminder. Purchased: skip the discount reminders and continue to the social email.",
+            "Lifetime purchase history is checked before this reminder. An unavailable check waits and retries.",
           target: { kind: "info", section: "welcome-settings" },
         });
       nodes.push({
@@ -162,6 +162,10 @@ export function FlowMap({
   onNodeClick?: (node: Node) => void;
 }) {
   const nodes = suppliedNodes || flowNodes(resource);
+  if (!suppliedNodes && resource.key === "welcome" && resource.data.welcome)
+    return (
+      <WelcomeMap resource={resource} nodes={nodes} onNodeClick={onNodeClick} />
+    );
   if (
     !suppliedNodes &&
     resource.key === "abandoned-cart" &&
@@ -198,6 +202,110 @@ export function FlowMap({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function WelcomeMap({
+  resource,
+  nodes,
+  onNodeClick,
+}: {
+  resource: Resource;
+  nodes: Node[];
+  onNodeClick?: (node: Node) => void;
+}) {
+  const draw = (n: Node) => {
+    const body = (
+      <>
+        <span className="mk-flow-icon">{icon[n.kind]}</span>
+        <div>
+          <strong>{n.label}</strong>
+          {n.detail && <small>{n.detail}</small>}
+        </div>
+      </>
+    );
+    return onNodeClick ? (
+      <button
+        type="button"
+        className={"mk-flow-node mk-flow-" + n.kind}
+        data-node-id={n.id}
+        onClick={() => onNodeClick(n)}
+      >
+        {body}
+      </button>
+    ) : (
+      <div className={"mk-flow-node mk-flow-" + n.kind} data-node-id={n.id}>
+        {body}
+      </div>
+    );
+  };
+  const node = (id: string) => draw(nodes.find((n) => n.id === id)!);
+  const line = (
+    <span className="mk-cart-connector" aria-hidden="true">
+      ↓
+    </span>
+  );
+  return (
+    <div
+      className="mk-cart-map mk-welcome-map"
+      aria-label={resource.name + " automation map"}
+    >
+      {node("trigger")}
+      {line}
+      {node("welcome-email:0")}
+      {line}
+      <p className="mk-welcome-note">
+        Discount reminders require the welcome email to have been sent and the
+        code to remain valid. Consent and recent-email checks apply to every
+        email; a skipped email does not guarantee a later send.
+      </p>
+      {[1, 2].map((i) => (
+        <section
+          className="mk-welcome-stage"
+          key={i}
+          aria-label={
+            i === 1 ? "First reminder decision" : "Final reminder decision"
+          }
+        >
+          {node("welcome-wait:" + i)}
+          {line}
+          {node("welcome-purchase:" + i)}
+          <div className="mk-cart-fork mk-welcome-fork">
+            <div aria-label="No orders path">
+              <span className="mk-cart-path">No · never ordered</span>
+              {node("welcome-email:" + i)}
+            </div>
+            <div aria-label="Has ordered path">
+              <span className="mk-cart-path">Yes · has ordered</span>
+              {draw({
+                id: "welcome-skip:" + i,
+                kind: "end",
+                label: "Skip this reminder",
+                detail:
+                  i === 1
+                    ? "Continue to the next scheduled check. Purchase history will be checked again."
+                    : "Continue to the social email schedule.",
+                target: { kind: "info", section: "welcome-settings" },
+              })}
+            </div>
+          </div>
+          <span className="mk-welcome-merge">Both paths continue</span>
+          {line}
+        </section>
+      ))}
+      {node("welcome-wait:3")}
+      {line}
+      {node("welcome-email:3")}
+      {line}
+      {node("end")}
+      <aside
+        className="mk-welcome-offer"
+        aria-label="Offer expiration settings"
+      >
+        <span>Offer rule · applies across the flow</span>
+        {node("welcome-expiry")}
+      </aside>
     </div>
   );
 }

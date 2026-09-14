@@ -636,6 +636,16 @@ const { chromium } = require("playwright");
     await page.getByRole("button", { name: "Open Welcome Series 08.2025", exact: true }).click();
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByText("Day 10", { exact: true }).waitFor();
+    const welcomeMap = page.locator(".mk-welcome-map");
+    assert.equal(await welcomeMap.locator(".mk-welcome-fork").count(), 2);
+    for (const stage of ["First reminder decision", "Final reminder decision"]) {
+      const decision = welcomeMap.getByRole("region", { name: stage, exact: true });
+      assert.equal(await decision.locator('[aria-label="No orders path"] .mk-flow-email').count(), 1);
+      assert.equal(await decision.locator('[aria-label="Has ordered path"] .mk-flow-email').count(), 0);
+      await decision.getByRole("button", { name: /Has the customer ever ordered/ }).click();
+      await page.getByRole("heading", { name: "Welcome settings", exact: true }).waitFor();
+      await page.keyboard.press("Escape");
+    }
     await page.screenshot({ path: path.join(output, "welcome-flow-desktop.png"), fullPage: true });
     await page.getByText("Day 3", { exact: true }).click();
     await page.getByLabel("First reminder · day", { exact: true }).fill("4");
@@ -643,7 +653,7 @@ const { chromium } = require("playwright");
     await page.getByRole("button", { name: "Save flow", exact: true }).click();
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("savedFlow")).data.steps[1].minutes), 4 * 1440);
     for (const [index, name] of ["Welcome · 10% off", "First reminder", "Final reminder", "Follow us on social media"].entries()) {
-      await page.locator(".mk-flow-map").getByRole("button", { name: new RegExp(name) }).click();
+      await welcomeMap.getByRole("button", { name: new RegExp(name) }).click();
       const frame = page.frameLocator('iframe[title="Email preview"]');
       if (index < 3) await frame.getByText("WELCOME10-PREVIEW", { exact: true }).waitFor();
       else await frame.getByText("INSTAGRAM", { exact: true }).waitFor();
@@ -659,6 +669,7 @@ const { chromium } = require("playwright");
     for (const width of [390, 320]) {
       await page.setViewportSize({ width, height: 900 });
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Welcome map fits " + width);
+      await page.screenshot({ path: path.join(output, "welcome-flow-" + width + ".png"), fullPage: true });
       await page.getByText("Day 4", { exact: true }).click();
       assert.ok(await page.evaluate(() => document.querySelector("dialog").scrollWidth <= innerWidth), "Welcome settings fit " + width);
       await page.screenshot({ path: path.join(output, "welcome-settings-" + width + ".png") });
