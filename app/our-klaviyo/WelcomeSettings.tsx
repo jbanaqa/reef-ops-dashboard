@@ -162,7 +162,7 @@ export default function WelcomeSettings({
               });
             }}
           />
-          Bypass 16-hour email suppression for this test account
+          Allow rapid test emails without 16-hour spacing
         </label>
       )}
       <p>

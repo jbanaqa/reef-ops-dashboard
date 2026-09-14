@@ -137,6 +137,32 @@ test("B2B tag event hydrates consent, preserves omitted tags, and sends once", a
     where: { id: profile.id },
   });
   assert.deepEqual(profile.tags, ["b2b"]);
+  const prior = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "b2b-recent-email",
+      profileId: profile.id,
+      channel: "EMAIL",
+      subject: "Recent email",
+      content: defaultContent,
+      status: "UNKNOWN",
+      dueAt: new Date(),
+    },
+  });
+  await worker.runMarketing();
+  const b2b = await prisma.marketingMessage.findFirstOrThrow({
+    where: { profileId: profile.id, flowKey: "b2b-welcome" },
+  });
+  assert.equal(b2b.status, "PENDING");
+  assert.match(b2b.error || "", /delivery is being checked/);
+  await prisma.marketingMessage.update({
+    where: { id: prior.id },
+    data: { status: "SENT", sentAt: new Date() },
+  });
+  await prisma.marketingMessage.update({
+    where: { id: b2b.id },
+    data: { dueAt: new Date() },
+  });
   await worker.runMarketing();
   assert.equal(sent.length, 1);
   assert.match(String(sent[0].html), /Jane/);
@@ -160,6 +186,7 @@ test("B2B tag event hydrates consent, preserves omitted tags, and sends once", a
 });
 
 test("Shopify delivery-date order tag schedules one upsell notice", async () => {
+  const sentBefore = sent.length;
   const { deliveryUpsellDraft, deliveryDateFromTags, deliveryUpsellDueAt } =
     await import("../lib/marketing/delivery-upsell-config");
   const { validateFlow } = await import("../lib/marketing/flow-config");
@@ -238,11 +265,12 @@ test("Shopify delivery-date order tag schedules one upsell notice", async () => 
     data: { dueAt: new Date() },
   });
   await worker.runMarketing(message.id);
-  const skipped = await prisma.marketingMessage.findUniqueOrThrow({
+  const delivered = await prisma.marketingMessage.findUniqueOrThrow({
     where: { id: message.id },
   });
-  assert.equal(skipped.status, "CANCELLED");
-  assert.match(skipped.error || "", /recently received email \(16 hours\)/);
+  assert.equal(delivered.status, "SENT");
+  assert.equal(sent.length, sentBefore + 1);
+  sent.splice(sentBefore, 1);
 });
 
 test("tag removal cancels an unsent B2B welcome", async () => {
@@ -1787,7 +1815,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       "CANCELLED",
     );
 
-    // A different checkout can re-enter immediately, but Smart Sending still skips a repeat email.
+    // A different checkout can re-enter immediately; recent email now postpones rather than loses it.
     latestOrder = null;
     await ingest.ingestShopify("checkouts/create", "cart-reentry", {
       token: "cart-second-checkout",
@@ -1800,14 +1828,16 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       4,
     );
     await worker.runMarketing();
-    const skipped = await prisma.marketingMessage.findFirstOrThrow({
+    const spaced = await prisma.marketingMessage.findFirstOrThrow({
       where: {
         profileId: p.id,
         flowCondition: "cart-v1:first",
-        status: "CANCELLED",
+        status: "PENDING",
       },
+      orderBy: { triggerAt: "desc" },
     });
-    assert.match(skipped.error || "", /recently received/);
+    assert.match(spaced.error || "", /16-hour email spacing/);
+    assert.ok(spaced.dueAt > new Date());
 
     const p4 = await make("cart1004");
     await store.atomic((tx) =>
@@ -1819,11 +1849,12 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       }),
     );
     await worker.runMarketing();
-    const externalSkip = await prisma.marketingMessage.findFirstOrThrow({
+    const externalWait = await prisma.marketingMessage.findFirstOrThrow({
       where: { profileId: p4.id, flowCondition: "cart-v1:first" },
     });
-    assert.equal(externalSkip.status, "CANCELLED");
-    assert.match(externalSkip.error || "", /Klaviyo/);
+    assert.equal(externalWait.status, "PENDING");
+    assert.match(externalWait.error || "", /16-hour email spacing/);
+    assert.ok(externalWait.dueAt > new Date());
 
     // A lost mutation response does not create a second discount on retry.
     const fetchBeforeLoss = globalThis.fetch;
@@ -2827,8 +2858,8 @@ test("send this test step now advances only the selected email and keeps deliver
     const followup = await api.POST(request(last.id));
     assert.equal(
       (await followup.json()).status,
-      "CANCELLED",
-      "16-hour Smart Sending is retained",
+      "PENDING",
+      "16-hour spacing postpones rather than cancels the follow-up",
     );
     assert.equal(sent.length, before + 1);
 

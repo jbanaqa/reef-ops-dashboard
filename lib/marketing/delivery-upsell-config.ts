@@ -7,7 +7,6 @@ export type DeliveryUpsellConfig = {
   sendHour: number;
   timezone: string;
   testEmail?: string;
-  bypassRecentEmailSuppression?: boolean;
 };
 
 export const defaultDeliveryUpsell: DeliveryUpsellConfig = {
@@ -65,9 +64,6 @@ export function validateDeliveryUpsell(value: unknown): DeliveryUpsellConfig {
     sendHour: d.sendHour!,
     timezone,
     ...(testEmail ? { testEmail } : {}),
-    ...(testEmail && d.bypassRecentEmailSuppression === true
-      ? { bypassRecentEmailSuppression: true }
-      : {}),
   };
 }
 

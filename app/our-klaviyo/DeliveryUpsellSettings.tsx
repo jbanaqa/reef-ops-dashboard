@@ -67,7 +67,6 @@ export default function DeliveryUpsellSettings({
             update(
               {
                 testEmail: e.target.checked ? "" : undefined,
-                bypassRecentEmailSuppression: false,
               },
               true,
             )
@@ -85,25 +84,19 @@ export default function DeliveryUpsellSettings({
               placeholder="you@example.com"
               onChange={(e) =>
                 update(
-                  { testEmail: e.target.value, bypassRecentEmailSuppression: false },
+                  { testEmail: e.target.value },
                   true,
                 )
               }
             />
           </label>
-          <label className="mk-check">
-            <input
-              type="checkbox"
-              checked={delivery.bypassRecentEmailSuppression === true}
-              disabled={!delivery.testEmail.trim()}
-              onChange={(e) =>
-                update({ bypassRecentEmailSuppression: e.target.checked }, true)
-              }
-            />
-            Bypass 16-hour email suppression for this test account
-          </label>
         </>
       )}
+      <p>
+        Delivery notices are deadline-sensitive, so recent marketing email does
+        not postpone or cancel them. Consent, suppression, purchase-event, and
+        provider safety checks still apply.
+      </p>
     </div>
   );
 }

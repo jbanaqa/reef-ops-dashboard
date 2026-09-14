@@ -303,6 +303,7 @@ export async function runMarketing(onlyMessageId?: string) {
           ? "Not eligible for this channel"
           : null;
       let deferred: string | null = null;
+      let deferredUntil: Date | null = null;
       if (m.channel === "EMAIL" ? !m.profile.email : !m.profile.phone)
         reason = "Recipient address missing";
       if (verification) {
@@ -631,19 +632,55 @@ export async function runMarketing(onlyMessageId?: string) {
           }
         }
       }
-      if ((cartRun || welcomeRun || liveDeliveryConfig) && !deferred) {
-        const bypassRecentEmailSuppression =
+      if (
+        (cartRun ||
+          welcomeRun ||
+          liveDeliveryConfig ||
+          m.flowKey === "b2b-welcome") &&
+        !deferred
+      ) {
+        const intentBypassesRecentEmailSuppression =
+          m.channel === "EMAIL" &&
+          (m.flowKey === "delivery-upsell" ||
+            m.flowKey === "b2b-welcome" ||
+            (m.flowKey === "welcome" && m.flowStep === 0));
+        const testBypassesRecentEmailSuppression =
           m.channel === "EMAIL" &&
           ((cartRun?.config.cart?.bypassRecentEmailSuppression === true &&
             !!cartRun?.config.cart.testEmail &&
             cartRun.config.cart.testEmail === m.profile.email) ||
             (welcomeRun?.testEmail === m.profile.email &&
               liveWelcomeConfig?.testEmail === m.profile.email &&
-              liveWelcomeConfig.bypassRecentEmailSuppression === true) ||
-            (liveDeliveryConfig?.testEmail === m.profile.email &&
-              liveDeliveryConfig.bypassRecentEmailSuppression === true));
-        if (!bypassRecentEmailSuppression) {
-          // Reserve against concurrent claims as well as already sent messages.
+              liveWelcomeConfig.bypassRecentEmailSuppression === true));
+        // In-flight and uncertain outcomes remain hard holds against duplicates,
+        // including messages whose user intent exempts them from ordinary spacing.
+        const reservation = await tx.marketingMessage.findFirst({
+          where: {
+            shop: shop(),
+            profileId: m.profileId,
+            id: { not: m.id },
+            channel:
+              m.channel === "EMAIL"
+                ? "EMAIL"
+                : { in: ["SMS_MARKETING", "SMS_TRANSACTIONAL"] },
+            AND: [
+              {
+                OR: [
+                  { flowKey: null },
+                  { flowKey: { not: "email-confirmation" } },
+                ],
+              },
+            ],
+            status: { in: ["SENDING", "UNKNOWN"] },
+          },
+        });
+        if (reservation) deferred = "Another message delivery is being checked";
+        if (
+          !reservation &&
+          !intentBypassesRecentEmailSuppression &&
+          !testBypassesRecentEmailSuppression
+        ) {
+          const windowHours = m.channel === "EMAIL" ? 16 : 24;
           const recent = await tx.marketingMessage.findFirst({
             where: {
               shop: shop(),
@@ -661,18 +698,12 @@ export async function runMarketing(onlyMessageId?: string) {
                   ],
                 },
               ],
-              OR: [
-                {
-                  status: "SENT",
-                  sentAt: {
-                    gte: new Date(
-                      Date.now() - (m.channel === "EMAIL" ? 16 : 24) * 3600000,
-                    ),
-                  },
-                },
-                { status: { in: ["SENDING", "UNKNOWN"] } },
-              ],
+              status: "SENT",
+              sentAt: {
+                gte: new Date(Date.now() - windowHours * 3600000),
+              },
             },
+            orderBy: { sentAt: "desc" },
           });
           const externalEmail =
             m.channel === "EMAIL"
@@ -694,34 +725,29 @@ export async function runMarketing(onlyMessageId?: string) {
                       },
                     ],
                   },
+                  orderBy: { occurredAt: "desc" },
                 })
               : null;
-          if (externalEmail)
-            reason =
-              "Skipped: recently received email through Klaviyo (16 hours)";
-          if (recent) {
-            if (recent.status === "SENT")
-              reason =
-                "Skipped: recently received " +
-                (m.channel === "EMAIL"
-                  ? "email (16 hours)"
-                  : "text (24 hours)");
-            else deferred = "Another message delivery is being checked";
-          }
-          if (reason) {
-            await tx.marketingMessage.update({
-              where: { id: m.id },
-              data: { status: "CANCELLED", error: reason },
-            });
-            await advanceCart(tx, m);
-            return null;
+          if (recent?.sentAt || externalEmail?.occurredAt) {
+            const latest = Math.max(
+              recent?.sentAt?.getTime() || 0,
+              externalEmail?.occurredAt.getTime() || 0,
+            );
+            deferred =
+              m.channel === "EMAIL"
+                ? "Waiting for 16-hour email spacing"
+                : "Waiting for 24-hour text spacing";
+            deferredUntil = new Date(latest + windowHours * 3600000 + 1000);
           }
         }
       }
       if (deferred) {
         await tx.marketingMessage.update({
           where: { id: m.id },
-          data: { dueAt: new Date(Date.now() + 900000), error: deferred },
+          data: {
+            dueAt: deferredUntil || new Date(Date.now() + 900000),
+            error: deferred,
+          },
         });
         return null;
       }

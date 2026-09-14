@@ -300,7 +300,7 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
               <p>
                 Before switching from Klaviyo, draft the equivalent flow there,
                 then refresh history here so recent Klaviyo emails count toward
-                the 16-hour limit.
+                the 16-hour spacing window.
               </p>
             </>
           )}

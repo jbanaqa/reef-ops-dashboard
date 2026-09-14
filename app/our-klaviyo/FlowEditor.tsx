@@ -566,13 +566,13 @@ function FlowEditorState({
                     }));
                   }}
                 />
-                Bypass 16-hour email suppression for this test account
+                Allow rapid test emails without 16-hour spacing
               </label>
             </>
           )}
           <p>
             {flow.cart.testEmail !== undefined
-              ? "Only this account can enter or receive this flow. Tests send email only; SMS is skipped. Consent, purchase checks and delays still apply. The optional bypass affects only this specific test account and only the 16-hour email suppression. Start a fresh checkout after saving and enabling the restricted flow."
+              ? "Only this account can enter or receive this flow. Tests send email only; SMS is skipped. Consent, purchase checks and delays still apply. The optional bypass affects only this specific test account and only the 16-hour email spacing. Start a fresh checkout after saving and enabling the restricted flow."
               : "When enabled without this restriction, this flow can send to all eligible customers."}
           </p>
           <p>

@@ -643,10 +643,17 @@ export function registerWelcomeTests(
       const recent = await profile("welcome-recent@example.com");
       await prisma.marketingMessage.create({ data: { shop, key: "welcome-recent-campaign", profileId: recent.id, channel: "EMAIL", subject: "Earlier campaign", content: store.json(welcomeSteps[0].content), dueAt: new Date(), sentAt: new Date(), status: "SENT" } });
       await run(recent.id, 0);
-      assert.equal((await message(recent.id, 0)).status, "CANCELLED");
-      assert.match((await message(recent.id, 0)).error!, /16 hours/);
-      time(113); await run(recent.id, 1);
-      assert.equal((await message(recent.id, 1)).status, "CANCELLED", "never remind someone to use an offer that was not sent");
+      assert.equal((await message(recent.id, 0)).status, "SENT", "signup response bypasses recent-email spacing");
+      time(113);
+      await store.atomic((tx) => store.record(tx, { key: "welcome-recent-before-reminder", type: "EXTERNAL_EMAIL_SENT", profileId: recent.id, occurredAt: new Date() }));
+      await run(recent.id, 1);
+      const postponedReminder = await message(recent.id, 1);
+      assert.equal(postponedReminder.status, "PENDING");
+      assert.match(postponedReminder.error!, /16-hour email spacing/);
+      assert.ok(postponedReminder.dueAt > new Date());
+      t.mock.timers.setTime(+postponedReminder.dueAt);
+      await run(recent.id, 1);
+      assert.equal((await message(recent.id, 1)).status, "SENT", "postponed reminder is reconsidered after spacing");
       assert.equal((await message(recent.id, 3)).status, "PENDING");
 
       time(120); await signup("welcome-paused@example.com"); const paused = await profile("welcome-paused@example.com");
