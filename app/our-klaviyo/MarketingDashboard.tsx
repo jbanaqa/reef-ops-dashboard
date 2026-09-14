@@ -109,6 +109,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   const [at, setAt] = useState(""),
     [editingEmail, setEditingEmail] = useState(false),
     [audienceCount, setAudienceCount] = useState<number | null>(null);
+  const [dismissalDraft, setDismissalDraft] = useState<boolean | null>(null);
   const [resource, setResource] = useState<Resource | null>(null);
   const load = useCallback(async () => {
     const r = await fetch("/api/marketing", { cache: "no-store" });
@@ -178,6 +179,8 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
         e instanceof Error ? e.message : "Check the email content.";
     }
   }
+  const savedPopupPause = data?.settings.popupDismissalDays !== 0;
+  const popupPause = dismissalDraft ?? savedPopupPause;
   return (
     <section className="marketing">
       {(editingEmail || resource) && (
@@ -622,11 +625,11 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           )}
           {tab === "forms" && (
             <article className="mk-panel">
-              <h2>Email → confirmation → optional SMS</h2>
+              <h2>Storefront email signup</h2>
               <p>
                 The storefront popup appears after 10 seconds on desktop and
-                mobile. Clicking outside dismisses it for 7 days; submitted
-                visitors and recognized profiles are suppressed.
+                mobile. Submitted visitors and recognized profiles are
+                suppressed.
               </p>
               <p>
                 The updated welcome flow uses single opt-in: agreeing to email
@@ -638,6 +641,43 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                 Form enabled: <b>{data.setup.formEnabled ? "Yes" : "No"}</b> ·
                 Discounts: <b>Managed in the welcome flow</b>
               </p>
+              <div className="mk-form-setting">
+                <label className="mk-check">
+                  <input
+                    type="checkbox"
+                    checked={popupPause}
+                    onChange={(event) =>
+                      setDismissalDraft(event.target.checked)
+                    }
+                  />
+                  Pause for 7 days after a visitor closes the popup
+                </label>
+                <p>
+                  {popupPause
+                    ? "A visitor who closes the popup will not see it again in this browser for seven days."
+                    : "Closing the popup hides it only for the current page. It can appear again after the visitor loads another page."}
+                </p>
+                <button
+                  disabled={
+                    busy ||
+                    popupPause === savedPopupPause
+                  }
+                  onClick={() =>
+                    void run(
+                      () =>
+                        action({
+                          action: "save-settings",
+                          settings: {
+                            popupDismissalDays: popupPause ? 7 : 0,
+                          },
+                        }),
+                      "Popup display setting saved.",
+                    )
+                  }
+                >
+                  {busy ? "Saving…" : "Save popup setting"}
+                </button>
+              </div>
               <p>
                 Install the storefront script and configure the permitted
                 storefront origin after testing the signup journey. Instructions

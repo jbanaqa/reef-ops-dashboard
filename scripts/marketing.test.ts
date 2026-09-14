@@ -372,6 +372,9 @@ test("marketing settings preserve database operational controls", () => {
     ingestEnabled: false,
     formEnabled: true,
   });
+  assert.equal(settings.popupDismissalDays, 7);
+  assert.equal(marketingSettings({ popupDismissalDays: 0 }).popupDismissalDays, 0);
+  assert.equal(marketingSettings({ popupDismissalDays: 31 }).popupDismissalDays, 7);
 });
 
 import { validateFlow, flowSequence } from "../lib/marketing/flow-config";

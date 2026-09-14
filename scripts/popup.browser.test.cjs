@@ -8,7 +8,7 @@ const { chromium } = require("playwright");
 (async () => {
   const script = await fs.readFile("public/reef-marketing.js");
   const artwork = await fs.readFile("public/welcome-popup-art.png");
-  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><main><h1>Storefront</h1></main><script>const realTimeout=window.setTimeout.bind(window);window.setTimeout=(fn)=>realTimeout(fn,0);const realFetch=window.fetch;window.fetch=async(url,init)=>{if(String(url).endsWith('/api')){const body=JSON.parse(init.body);return Response.json(body.action==='config'?{enabled:true,singleOptIn:true,couponDays:14}:{ok:true,completed:true,message:'Offer queued.'})}return realFetch(url,init)}</script><script src="/reef-marketing.js" data-endpoint="/api"></script></body></html>`;
+  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><main><h1>Storefront</h1></main><script>const realTimeout=window.setTimeout.bind(window);window.setTimeout=(fn)=>realTimeout(fn,0);const realFetch=window.fetch;window.fetch=async(url,init)=>{if(String(url).endsWith('/api')){const body=JSON.parse(init.body);return Response.json(body.action==='config'?{enabled:true,singleOptIn:true,couponDays:14,dismissalDays:window.testDismissalDays??7}:{ok:true,completed:true,message:'Offer queued.'})}return realFetch(url,init)}</script><script src="/reef-marketing.js" data-endpoint="/api"></script></body></html>`;
   const server = http.createServer((request, response) => {
     if (request.url === "/reef-marketing.js") {
       response.writeHead(200, { "content-type": "application/javascript" });
@@ -74,6 +74,24 @@ const { chromium } = require("playwright");
       }
       await page.close();
     }
+    const paused = await browser.newPage();
+    await paused.addInitScript(() => {
+      localStorage.setItem("reef-marketing-dismissed", String(Date.now()));
+      window.testDismissalDays = 7;
+    });
+    await paused.goto(url);
+    await paused.waitForTimeout(100);
+    assert.equal(await paused.locator("dialog.reef-signup-dialog").count(), 0);
+    await paused.close();
+
+    const repeat = await browser.newPage();
+    await repeat.addInitScript(() => {
+      localStorage.setItem("reef-marketing-dismissed", String(Date.now()));
+      window.testDismissalDays = 0;
+    });
+    await repeat.goto(url);
+    await repeat.locator("dialog.reef-signup-dialog").waitFor();
+    await repeat.close();
     console.log("Popup browser checks passed at 1280, 390, and 320 pixels.");
   } finally {
     await browser?.close();

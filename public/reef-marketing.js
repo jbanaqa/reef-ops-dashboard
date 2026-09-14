@@ -61,24 +61,29 @@
       storage.get("reef-marketing-submitted"))
   )
     return;
-  if (
-    !pending &&
-    Date.now() - Number(storage.get("reef-marketing-dismissed") || 0) <
-      7 * 86400000
-  )
-    return;
   setTimeout(
     async () => {
       let singleOptIn = false;
       let couponDays = 14;
+      let dismissalDays = 7;
       try {
         const config = await post({ action: "config" });
         if (!config.enabled) return;
         singleOptIn = config.singleOptIn === true;
         couponDays = config.couponDays || 14;
+        dismissalDays = Number.isInteger(config.dismissalDays)
+          ? Math.max(0, Math.min(30, config.dismissalDays))
+          : 7;
       } catch {
         return;
       }
+      if (
+        !pending &&
+        dismissalDays > 0 &&
+        Date.now() - Number(storage.get("reef-marketing-dismissed") || 0) <
+          dismissalDays * 86400000
+      )
+        return;
       const style = document.createElement("style");
       style.textContent = `
         .reef-signup-dialog {
