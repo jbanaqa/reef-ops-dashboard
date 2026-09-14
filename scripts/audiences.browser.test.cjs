@@ -171,6 +171,25 @@ const { chromium } = require("playwright");
                       },
                       reasons: [],
                     },
+                    {
+                      id: "previous-run",
+                      flowKey: "b2b-welcome",
+                      name: "B2B Welcome",
+                      state: "Scheduled steps completed",
+                      active: false,
+                      sentCount: 1,
+                      pendingCount: 0,
+                      skippedCount: 0,
+                      failedCount: 0,
+                      enteredAt: "2026-08-01T12:00:00Z",
+                      lastSent: {
+                        label: "Welcome email",
+                        subject: "Previous B2B email",
+                        at: "2026-08-01T12:10:00Z",
+                      },
+                      next: null,
+                      reasons: [],
+                    },
                   ]
                 : [],
               messages: testMessages
@@ -232,6 +251,18 @@ const { chromium } = require("playwright");
                           "Finish the previous email step before testing this one.",
                         canCancel: true,
                       },
+                    },
+                    {
+                      id: "cancelled-cart",
+                      subject: "Earlier cancelled cart test",
+                      status: "CANCELLED",
+                      channel: "EMAIL",
+                      flowKey: "abandoned-cart",
+                      createdAt: "2026-09-08T12:00:00Z",
+                      dueAt: "2026-09-08T12:30:00Z",
+                      sentAt: null,
+                      error: "Cancelled by staff for testing",
+                      testScoped: true,
                     },
                   ]
                 : [
@@ -309,6 +340,13 @@ const { chromium } = require("playwright");
     });
     assert.equal(await page.locator("dialog pre").count(), 0);
     await page.getByRole("button", { name: "Messages", exact: true }).click();
+    await page.getByRole("heading", { name: "Active flows", exact: true }).waitFor();
+    await page
+      .locator(".aw-drawer-body")
+      .evaluate((element) => (element.scrollTop = 0));
+    await page.screenshot({
+      path: path.join(output, "messages-dashboard.png"),
+    });
     await page.getByText("Welcome to wholesale", { exact: true }).waitFor();
     await page.getByText("Scheduled", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Activity", exact: true }).click();
@@ -434,29 +472,61 @@ const { chromium } = require("playwright");
       .getByRole("button", { name: "View Jaden Banawa", exact: true })
       .click();
     await page.getByRole("button", { name: "Messages", exact: true }).click();
-    const firstCard = page.locator(".aw-message").filter({
+    await page.getByRole("heading", { name: "Active flows", exact: true }).waitFor();
+    await page
+      .locator(".aw-drawer-body")
+      .evaluate((element) => (element.scrollTop = 0));
+    await page.screenshot({
+      path: path.join(output, "messages-test-dashboard.png"),
+    });
+    assert.equal(
+      await page
+        .getByRole("heading", { name: "Earlier cancelled cart test", exact: true })
+        .isVisible(),
+      false,
+      "older outcomes do not crowd the default upcoming view",
+    );
+    assert.equal(
+      await page.getByText("Previous B2B email", { exact: true }).isVisible(),
+      false,
+      "completed flows are collapsed by default",
+    );
+    await page.getByText("Previous flow runs", { exact: false }).click();
+    await page.getByText(/Last sent: Previous B2B email/).waitFor();
+    await page.getByText("Previous flow runs", { exact: false }).click();
+    await page
+      .getByRole("button", { name: /1 Not sent/, exact: false })
+      .click();
+    await page
+      .getByRole("heading", {
+        name: "Earlier cancelled cart test",
+        exact: true,
+      })
+      .waitFor();
+    await page
+      .getByRole("button", { name: /3 Upcoming/, exact: false })
+      .click();
+    const firstCard = page.locator(".aw-message-row").filter({
       has: page.getByRole("heading", {
         name: "First cart test",
         exact: true,
       }),
     });
-    const lastCard = page.locator(".aw-message").filter({
+    const lastCard = page.locator(".aw-message-row").filter({
       has: page.getByRole("heading", {
         name: "Follow-up cart test",
         exact: true,
       }),
     });
-    const welcomeCard = page.locator(".aw-message").filter({
+    const welcomeCard = page.locator(".aw-message-row").filter({
       has: page.getByRole("heading", {
         name: "Welcome social test",
         exact: true,
       }),
     });
+    await page.getByText("Testing tools", { exact: true }).click();
     await page
-      .getByText(
-        "Test controls · Send a selected email to this account now or cancel it. Only its schedule is bypassed; the flow’s consent, purchase, coupon and suppression settings still apply.",
-        { exact: true },
-      )
+      .getByText(/Sending now bypasses its schedule only/)
       .waitFor();
     await welcomeCard.getByText("Welcome · EMAIL", { exact: true }).waitFor();
     assert.equal(
@@ -502,6 +572,9 @@ const { chromium } = require("playwright");
         exact: true,
       })
       .waitFor();
+    await page
+      .getByRole("button", { name: /1 Sent/, exact: false })
+      .click();
     await firstCard.getByText("Sent", { exact: true }).waitFor();
     assert.equal(
       await firstCard
@@ -510,14 +583,10 @@ const { chromium } = require("playwright");
       0,
     );
     assert.equal(earlySends, 1);
-    await page
-      .getByText("Last sent: First reminder", { exact: true })
-      .waitFor();
-    await page.getByText("Next: Follow-up email", { exact: true }).waitFor();
+    await page.getByText("First reminder", { exact: true }).waitFor();
+    await page.getByText("Follow-up email", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Overview", exact: true }).click();
-    await page
-      .getByText("Last sent: First reminder", { exact: true })
-      .waitFor();
+    await page.getByText("First reminder", { exact: true }).waitFor();
     await page.screenshot({
       path: path.join(output, "flow-progress-mobile.png"),
     });

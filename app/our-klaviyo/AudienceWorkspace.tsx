@@ -172,6 +172,106 @@ const flowName: Record<string, string> = {
   "post-purchase": "After purchase",
   "low-stock": "Low stock",
 };
+type MessageFilter =
+  | "upcoming"
+  | "all"
+  | "sent"
+  | "not-sent"
+  | "attention";
+const upcomingMessageStatuses = ["PENDING", "PROCESSING", "SENDING"];
+const messageMatches = (message: Message, filter: MessageFilter) =>
+  filter === "all" ||
+  (filter === "upcoming" &&
+    upcomingMessageStatuses.includes(message.status)) ||
+  (filter === "sent" && message.status === "SENT") ||
+  (filter === "not-sent" &&
+    message.status === "CANCELLED") ||
+  (filter === "attention" &&
+    ["FAILED", "UNKNOWN"].includes(message.status));
+function FlowProgressCard({
+  flow,
+  sendingEnabled,
+  compact = false,
+}: {
+  flow: FlowProgress;
+  sendingEnabled: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <article className={"aw-flow-card" + (compact ? " compact" : "")}>
+      <div className="aw-split">
+        <div>
+          <strong>{flow.name}</strong>
+          <p>Entered {date(flow.enteredAt)}</p>
+        </div>
+        <span
+          className={
+            "aw-badge " +
+            (flow.state.includes("error") || flow.state.includes("review")
+              ? "warning"
+              : flow.active
+                ? "current"
+                : "muted")
+          }
+        >
+          {flow.state}
+        </span>
+      </div>
+      <div className="aw-flow-counts" aria-label="Message counts">
+        <span>
+          <strong>{flow.sentCount}</strong> sent
+        </span>
+        <span>
+          <strong>{flow.pendingCount}</strong> upcoming
+        </span>
+        {(flow.skippedCount > 0 || flow.failedCount > 0) && (
+          <span>
+            <strong>{flow.skippedCount + flow.failedCount}</strong> not sent
+          </span>
+        )}
+      </div>
+      {compact && flow.lastSent && (
+        <p className="aw-flow-compact-last">
+          Last sent: {flow.lastSent.subject} · {date(flow.lastSent.at)}
+        </p>
+      )}
+      {!compact && (flow.lastSent || flow.next) && (
+        <div className="aw-flow-milestones">
+          {flow.lastSent && (
+            <div>
+              <span>Last sent</span>
+              <strong>{flow.lastSent.label}</strong>
+              <p>{flow.lastSent.subject}</p>
+              <time dateTime={flow.lastSent.at}>{date(flow.lastSent.at)}</time>
+            </div>
+          )}
+          {flow.next && (
+            <div>
+              <span>Next</span>
+              <strong>{flow.next.label}</strong>
+              <p>Scheduled for {date(flow.next.at)}</p>
+              {flow.next.branchPending && (
+                <small>Content is selected at send time from recent orders.</small>
+              )}
+              {flow.next.reason && <small>{flow.next.reason}</small>}
+            </div>
+          )}
+        </div>
+      )}
+      {flow.active && !sendingEnabled && (
+        <p className="aw-hint">
+          Sending is off. Upcoming messages will wait until it resumes.
+        </p>
+      )}
+      {!compact &&
+        flow.reasons.map((reason) => (
+          <p className="aw-reason" key={reason}>
+            {reason}
+          </p>
+        ))}
+    </article>
+  );
+}
 function eventLabel(e: Activity) {
   const p = e.payload;
   if (e.type === "CONSENT") {
@@ -233,6 +333,9 @@ function ContactPanel({
   const [notice, setNotice] = useState("");
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [noticeSuccess, setNoticeSuccess] = useState(true);
+  const [messageFilter, setMessageFilter] =
+    useState<MessageFilter>("upcoming");
+  const [messageFlow, setMessageFlow] = useState("all");
   useEffect(() => {
     const controller = new AbortController();
     request<{ profile: Detail | null }>(
@@ -354,6 +457,39 @@ function ContactPanel({
       setBusy(false);
     }
   }
+  const progress = contact?.flowProgress || [];
+  const activeFlows = progress.filter((flow) => flow.active);
+  const previousFlows = progress.filter((flow) => !flow.active);
+  const messages = contact?.messages || [];
+  const messageCounts = {
+    all: messages.length,
+    upcoming: messages.filter((message) =>
+      upcomingMessageStatuses.includes(message.status),
+    ).length,
+    sent: messages.filter((message) => message.status === "SENT").length,
+    "not-sent": messages.filter((message) => message.status === "CANCELLED")
+      .length,
+    attention: messages.filter((message) =>
+      ["FAILED", "UNKNOWN"].includes(message.status),
+    ).length,
+  };
+  const messageFlows = [
+    ...new Set(messages.map((message) => message.flowKey || "campaign")),
+  ];
+  const visibleMessages = messages
+    .filter((message) => messageMatches(message, messageFilter))
+    .filter(
+      (message) =>
+        messageFlow === "all" ||
+        (message.flowKey || "campaign") === messageFlow,
+    )
+    .sort((a, b) => {
+      const aAt = a.sentAt || (a.status === "PENDING" ? a.dueAt : a.createdAt);
+      const bAt = b.sentAt || (b.status === "PENDING" ? b.dueAt : b.createdAt);
+      return messageFilter === "upcoming"
+        ? Date.parse(aAt) - Date.parse(bAt)
+        : Date.parse(bAt) - Date.parse(aAt);
+    });
   return (
     <Panel heading={contact ? title(contact) : "Contact details"} close={close}>
       {error && (
@@ -370,7 +506,11 @@ function ContactPanel({
       {loading && <p role="status">Loading contact…</p>}
       {contact && (
         <>
-          <div className="aw-identity">
+          <div
+            className={
+              "aw-identity" + (section === "overview" ? "" : " compact")
+            }
+          >
             <span className="aw-avatar">
               {title(contact).slice(0, 1).toUpperCase()}
             </span>
@@ -404,78 +544,61 @@ function ContactPanel({
           </nav>
           {(section === "overview" || section === "emails") && (
             <section className="aw-detail-section" aria-label="Flow progress">
-              <h3>Flow progress</h3>
-              {!contact.flowProgress?.length ? (
+              <div className="aw-section-heading">
+                <div>
+                  <h3>{section === "emails" ? "Active flows" : "Flow progress"}</h3>
+                  {section === "emails" && (
+                    <p>Where this customer is now and what happens next.</p>
+                  )}
+                </div>
+                {section === "emails" && activeFlows.length > 0 && (
+                  <span className="aw-count">{activeFlows.length} active</span>
+                )}
+              </div>
+              {!progress.length ? (
                 <p>No recorded flow enrollment yet.</p>
-              ) : (
-                contact.flowProgress.map((flow) => (
-                  <article className="aw-message" key={flow.id}>
-                    <div className="aw-split">
-                      <strong>{flow.name}</strong>
-                      <span
-                        className={
-                          "aw-badge " +
-                          (flow.state.includes("error") ||
-                          flow.state.includes("review")
-                            ? "warning"
-                            : "muted")
-                        }
-                      >
-                        {flow.state}
-                      </span>
-                    </div>
-                    <p>Entered {date(flow.enteredAt)}</p>
-                    <p>
-                      {flow.sentCount} sent · {flow.pendingCount} pending
-                      {flow.skippedCount > 0
-                        ? " · " + flow.skippedCount + " not sent"
-                        : ""}
-                      {flow.failedCount > 0
-                        ? " · " + flow.failedCount + " failed"
-                        : ""}
-                    </p>
-                    {flow.lastSent && (
-                      <p>
-                        <strong>Last sent: {flow.lastSent.label}</strong>
-                        <br />
-                        {flow.lastSent.subject}
-                        <br />
-                        {date(flow.lastSent.at)}
-                      </p>
-                    )}
-                    {flow.next && (
-                      <p>
-                        <strong>Next: {flow.next.label}</strong>
-                        <br />
-                        Scheduled for {date(flow.next.at)}
-                        {flow.next.branchPending && (
-                          <>
-                            <br />
-                            Reminder or discount selected at send time based on
-                            recent orders.
-                          </>
-                        )}
-                        {flow.next.reason && (
-                          <>
-                            <br />
-                            {flow.next.reason}
-                          </>
-                        )}
-                      </p>
-                    )}
-                    {flow.active && !sendingEnabled && (
-                      <p className="aw-hint">
-                        Sending is off. Pending messages will wait for sending
-                        to resume and eligibility checks to pass.
-                      </p>
-                    )}
-                    {flow.reasons.map((reason) => (
-                      <p className="aw-reason" key={reason}>
-                        {reason}
-                      </p>
-                    ))}
-                  </article>
+              ) : section === "overview" ? (
+                progress.map((flow) => (
+                  <FlowProgressCard
+                    flow={flow}
+                    sendingEnabled={sendingEnabled}
+                    key={flow.id}
+                  />
                 ))
+              ) : (
+                <>
+                  {activeFlows.length ? (
+                    activeFlows.map((flow) => (
+                      <FlowProgressCard
+                        flow={flow}
+                        sendingEnabled={sendingEnabled}
+                        key={flow.id}
+                      />
+                    ))
+                  ) : (
+                    <div className="aw-quiet-state">
+                      <strong>No active flows</strong>
+                      <p>This customer has no messages waiting to send.</p>
+                    </div>
+                  )}
+                  {previousFlows.length > 0 && (
+                    <details className="aw-history-group">
+                      <summary>
+                        Previous flow runs <span>{previousFlows.length}</span>
+                      </summary>
+                      <div>
+                        {previousFlows.map((flow) => (
+                          <FlowProgressCard
+                            compact
+                            flow={flow}
+                            sendingEnabled={sendingEnabled}
+                            key={flow.id}
+                          />
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </>
               )}
               {contact.flowProgressLimited && (
                 <p>
@@ -483,11 +606,13 @@ function ContactPanel({
                   appear in these counts.
                 </p>
               )}
-              <small>
-                Sent means the email provider accepted the message; it does not
-                confirm the customer read it. Pending steps still require
-                send-time checks.
-              </small>
+              {section === "overview" && (
+                <small>
+                  Sent means the email provider accepted the message; it does
+                  not confirm the customer read it. Upcoming steps still
+                  require send-time checks.
+                </small>
+              )}
             </section>
           )}
           {section === "overview" && (
@@ -606,28 +731,80 @@ function ContactPanel({
             </>
           )}
           {section === "emails" && (
-            <section className="aw-detail-section">
-              <div className="aw-split">
-                <h3>Message history</h3>
-                {contact.messages.some(
-                  (m) => m.testScoped && m.status !== "SENT",
-                ) && (
+            <section className="aw-detail-section aw-message-history">
+              <div className="aw-section-heading">
+                <div>
+                  <h3>Message history</h3>
+                  <p>Upcoming emails first, with older results available by status.</p>
+                </div>
+              </div>
+              <div
+                className="aw-message-summary"
+                role="group"
+                aria-label="Message status filter"
+              >
+                {(
+                  [
+                    ["upcoming", "Upcoming"],
+                    ["sent", "Sent"],
+                    ["not-sent", "Not sent"],
+                    ["attention", "Needs review"],
+                    ["all", "All"],
+                  ] as [MessageFilter, string][]
+                ).map(([value, label]) => (
                   <button
                     type="button"
-                    className="button-secondary"
-                    disabled={busy || loading}
-                    onClick={clearTestHistory}
+                    key={value}
+                    aria-pressed={messageFilter === value}
+                    onClick={() => setMessageFilter(value)}
                   >
-                    Clear unsent test messages
+                    <strong>{messageCounts[value]}</strong>
+                    <span>{label}</span>
                   </button>
-                )}
+                ))}
               </div>
-              {contact.messages.some((m) => m.testActions) && (
-                <p className="aw-hint">
-                  Test controls · Send a selected email to this account now or
-                  cancel it. Only its schedule is bypassed; the flow’s consent,
-                  purchase, coupon and suppression settings still apply.
-                </p>
+              {messageFlows.length > 1 && (
+                <label className="aw-flow-filter">
+                  Show messages from
+                  <select
+                    value={messageFlow}
+                    onChange={(event) => setMessageFlow(event.target.value)}
+                  >
+                    <option value="all">All flows</option>
+                    {messageFlows.map((key) => (
+                      <option value={key} key={key}>
+                        {key === "campaign"
+                          ? "Campaigns and signup"
+                          : flowName[key] || "Automation"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {contact.messages.some(
+                (m) =>
+                  m.testActions || (m.testScoped && m.status !== "SENT"),
+              ) && (
+                <details className="aw-test-tools">
+                  <summary>Testing tools</summary>
+                  <p>
+                    Send a selected email now or cancel it. Sending now bypasses
+                    its schedule only; consent, purchase, coupon and suppression
+                    checks still apply.
+                  </p>
+                  {contact.messages.some(
+                    (m) => m.testScoped && m.status !== "SENT",
+                  ) && (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      disabled={busy || loading}
+                      onClick={clearTestHistory}
+                    >
+                      Clear unsent test messages
+                    </button>
+                  )}
+                </details>
               )}
               {!sendingEnabled && (
                 <p className="aw-hint">
@@ -635,7 +812,7 @@ function ContactPanel({
                   until sending is enabled and all checks pass.
                 </p>
               )}
-              {contact.messages.length === 0 ? (
+              {messages.length === 0 ? (
                 <div className="aw-empty">
                   <h3>No workflow messages yet</h3>
                   <p>
@@ -643,16 +820,42 @@ function ContactPanel({
                     preview emails are not listed here.
                   </p>
                 </div>
+              ) : visibleMessages.length === 0 ? (
+                <div className="aw-quiet-state aw-filter-empty">
+                  <strong>No messages in this view</strong>
+                  <p>Choose another status or flow to see more history.</p>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => {
+                      setMessageFilter("all");
+                      setMessageFlow("all");
+                    }}
+                  >
+                    Show all messages
+                  </button>
+                </div>
               ) : (
-                contact.messages.map((m) => (
-                  <article className="aw-message" key={m.id}>
+                <div className="aw-message-list">
+                  {visibleMessages.map((m) => (
+                  <article className="aw-message-row" key={m.id}>
                     <div className="aw-split">
-                      <span className="aw-eyebrow">
-                        {m.flowKey
-                          ? flowName[m.flowKey] || "Automation"
-                          : "Campaign / signup"}{" "}
-                        · {m.channel === "EMAIL" ? "EMAIL" : "TEXT"}
-                      </span>
+                      <div className="aw-message-copy">
+                        <span className="aw-eyebrow">
+                          {m.flowKey
+                            ? flowName[m.flowKey] || "Automation"
+                            : "Campaign / signup"}{" "}
+                          · {m.channel === "EMAIL" ? "EMAIL" : "TEXT"}
+                        </span>
+                        <h4>{m.subject || "Untitled message"}</h4>
+                        <p>
+                          {m.sentAt
+                            ? "Sent " + date(m.sentAt)
+                            : m.status === "PENDING"
+                              ? "Scheduled for " + date(m.dueAt)
+                              : "Created " + date(m.createdAt)}
+                        </p>
+                      </div>
                       <span
                         className={
                           "aw-badge " +
@@ -666,14 +869,6 @@ function ContactPanel({
                         {messageStatus[m.status] || m.status}
                       </span>
                     </div>
-                    <h4>{m.subject || "Untitled message"}</h4>
-                    <p>
-                      {m.sentAt
-                        ? "Sent " + date(m.sentAt)
-                        : m.status === "PENDING"
-                          ? "Scheduled for " + date(m.dueAt)
-                          : "Created " + date(m.createdAt)}
-                    </p>
                     {m.testActions && (
                       <div className="aw-test-send">
                         <button
@@ -715,11 +910,20 @@ function ContactPanel({
                       </p>
                     )}
                   </article>
-                ))
+                  ))}
+                </div>
               )}
-              {contact.messages.length === 100 && (
+              {messages.length === 100 && (
                 <p>Showing the 100 most recent messages.</p>
               )}
+              <details className="aw-status-help">
+                <summary>How message statuses work</summary>
+                <p>
+                  Sent means the email provider accepted the message; it does
+                  not confirm that the customer opened it. Scheduled messages
+                  still pass delivery and eligibility checks at send time.
+                </p>
+              </details>
             </section>
           )}
           {section === "activity" && (
