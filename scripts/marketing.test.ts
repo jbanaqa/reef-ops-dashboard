@@ -373,8 +373,12 @@ test("marketing settings preserve database operational controls", () => {
     formEnabled: true,
   });
   assert.equal(settings.popupDismissalDays, 7);
+  assert.equal(settings.popupDelaySeconds, 10);
   assert.equal(marketingSettings({ popupDismissalDays: 0 }).popupDismissalDays, 0);
   assert.equal(marketingSettings({ popupDismissalDays: 31 }).popupDismissalDays, 7);
+  assert.equal(marketingSettings({ popupDelaySeconds: 0 }).popupDelaySeconds, 0);
+  assert.equal(marketingSettings({ popupDelaySeconds: 45 }).popupDelaySeconds, 45);
+  assert.equal(marketingSettings({ popupDelaySeconds: 301 }).popupDelaySeconds, 10);
 });
 
 import { validateFlow, flowSequence } from "../lib/marketing/flow-config";

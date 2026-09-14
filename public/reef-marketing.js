@@ -61,11 +61,11 @@
       storage.get("reef-marketing-submitted"))
   )
     return;
-  setTimeout(
-    async () => {
+  (async () => {
       let singleOptIn = false;
       let couponDays = 14;
       let dismissalDays = 7;
+      let delaySeconds = 10;
       try {
         const config = await post({ action: "config" });
         if (!config.enabled) return;
@@ -74,9 +74,15 @@
         dismissalDays = Number.isInteger(config.dismissalDays)
           ? Math.max(0, Math.min(30, config.dismissalDays))
           : 7;
+        delaySeconds = Number.isInteger(config.delaySeconds)
+          ? Math.max(0, Math.min(300, config.delaySeconds))
+          : 10;
       } catch {
         return;
       }
+      await new Promise((resolve) =>
+        setTimeout(resolve, pending ? 0 : delaySeconds * 1000),
+      );
       if (
         !pending &&
         dismissalDays > 0 &&
@@ -370,7 +376,5 @@
         waiting();
         await refresh();
       } else emailForm();
-    },
-    pending ? 0 : 10000,
-  );
+    })();
 })();

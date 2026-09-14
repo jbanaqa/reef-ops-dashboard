@@ -100,6 +100,7 @@ export async function POST(request: Request) {
         singleOptIn,
         couponDays: (welcome?.data as { welcome?: { couponDays?: number } })?.welcome?.couponDays,
         dismissalDays: settings.popupDismissalDays,
+        delaySeconds: settings.popupDelaySeconds,
         enabled:
           !!welcome?.enabled &&
           (welcome.data as { reviewed?: boolean }).reviewed === true,

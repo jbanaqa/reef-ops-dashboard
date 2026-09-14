@@ -110,6 +110,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     [editingEmail, setEditingEmail] = useState(false),
     [audienceCount, setAudienceCount] = useState<number | null>(null);
   const [dismissalDraft, setDismissalDraft] = useState<boolean | null>(null);
+  const [popupDelayDraft, setPopupDelayDraft] = useState<string | null>(null);
   const [resource, setResource] = useState<Resource | null>(null);
   const load = useCallback(async () => {
     const r = await fetch("/api/marketing", { cache: "no-store" });
@@ -181,6 +182,13 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   }
   const savedPopupPause = data?.settings.popupDismissalDays !== 0;
   const popupPause = dismissalDraft ?? savedPopupPause;
+  const savedPopupDelay = data?.settings.popupDelaySeconds ?? 10;
+  const popupDelayValue = popupDelayDraft ?? String(savedPopupDelay);
+  const popupDelaySeconds = Number(popupDelayValue);
+  const popupDelayValid =
+    Number.isInteger(popupDelaySeconds) &&
+    popupDelaySeconds >= 0 &&
+    popupDelaySeconds <= 300;
   return (
     <section className="marketing">
       {(editingEmail || resource) && (
@@ -627,9 +635,8 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
             <article className="mk-panel">
               <h2>Storefront email signup</h2>
               <p>
-                The storefront popup appears after 10 seconds on desktop and
-                mobile. Submitted visitors and recognized profiles are
-                suppressed.
+                Control when the storefront popup appears on desktop and mobile.
+                Submitted visitors and recognized profiles are suppressed.
               </p>
               <p>
                 The updated welcome flow uses single opt-in: agreeing to email
@@ -642,6 +649,21 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                 Discounts: <b>Managed in the welcome flow</b>
               </p>
               <div className="mk-form-setting">
+                <label>
+                  Time before popup appears (seconds)
+                  <input
+                    type="number"
+                    min="0"
+                    max="300"
+                    step="1"
+                    value={popupDelayValue}
+                    onChange={(event) => setPopupDelayDraft(event.target.value)}
+                  />
+                </label>
+                <p>
+                  Enter 0 to show it immediately, or up to 300 seconds. The
+                  current setting is {savedPopupDelay} seconds.
+                </p>
                 <label className="mk-check">
                   <input
                     type="checkbox"
@@ -660,7 +682,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                 <button
                   disabled={
                     busy ||
-                    popupPause === savedPopupPause
+                    !popupDelayValid ||
+                    (popupPause === savedPopupPause &&
+                      popupDelaySeconds === savedPopupDelay)
                   }
                   onClick={() =>
                     void run(
@@ -669,6 +693,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                           action: "save-settings",
                           settings: {
                             popupDismissalDays: popupPause ? 7 : 0,
+                            popupDelaySeconds,
                           },
                         }),
                       "Popup display setting saved.",

@@ -609,3 +609,7 @@ The default email mirrors the supplied Klaviyo content and uses the shared email
 ### Configurable popup dismissal pause — September 14, 2026
 
 The Forms tab now has a saved **Pause for 7 days after a visitor closes the popup** checkbox. It defaults on for existing and new installations. Turning it off stores `popupDismissalDays: 0`; the storefront still records a close for activity reporting but ignores the stored dismissal on later page loads. Closing hides the current dialog, and the popup can appear again after the eligible visitor loads another page and the normal ten-second delay passes. Submitted-browser suppression, Shopify known-customer suppression, pending signup sessions, form enablement, consent, and all Welcome behavior are unchanged. The public config response supplies the setting to `reef-marketing.js`, with a safe seven-day fallback for older or malformed responses. Browser coverage verifies both enabled and disabled dismissal behavior at desktop and narrow widths.
+
+### Configurable popup appearance delay — September 14, 2026
+
+The Forms tab also stores **Time before popup appears** as `popupDelaySeconds`, accepting whole seconds from 0 through 300 and defaulting safely to 10. The storefront loads its public configuration, waits for that saved interval, then rechecks dismissal eligibility before rendering the popup. Pending signup sessions still resume without a delay. Browser coverage verifies that the public script uses the configured millisecond interval.

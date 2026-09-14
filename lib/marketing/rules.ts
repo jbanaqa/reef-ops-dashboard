@@ -59,12 +59,14 @@ export type MarketingSettings = {
   branding: EmailBranding;
   operations: MarketingOperations;
   popupDismissalDays: number;
+  popupDelaySeconds: number;
 };
 export const defaultMarketingSettings: MarketingSettings = {
   postalAddress: "",
   organizationName: "Corals Anonymous",
   branding: {},
   popupDismissalDays: 7,
+  popupDelaySeconds: 10,
   operations: {
     sendingEnabled: false,
     migrationConfirmed: false,
@@ -83,6 +85,7 @@ export function marketingSettings(
   const saved = (v.operations || {}) as Partial<MarketingOperations>;
   const branding = (v.branding || {}) as Partial<EmailBranding>;
   const requestedDismissalDays = Number(v.popupDismissalDays ?? 7);
+  const requestedDelaySeconds = Number(v.popupDelaySeconds ?? 10);
   const brandingImage = (value: unknown) =>
     value ? imageSource(value) : undefined;
   const brandingScale = (value: unknown) => {
@@ -102,6 +105,12 @@ export function marketingSettings(
       requestedDismissalDays <= 30
         ? requestedDismissalDays
         : 7,
+    popupDelaySeconds:
+      Number.isInteger(requestedDelaySeconds) &&
+      requestedDelaySeconds >= 0 &&
+      requestedDelaySeconds <= 300
+        ? requestedDelaySeconds
+        : 10,
     branding: {
       ...(brandingImage(branding.logo)
         ? { logo: brandingImage(branding.logo) }
