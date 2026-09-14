@@ -31,7 +31,7 @@ import type { WelcomeConfig } from "./welcome-config";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
 import {
   loadWelcome,
-  welcomeHasOrdered,
+  welcomeHasOrderedSince,
   welcomeAudienceBlock,
   welcomeDependency,
   prepareWelcome,
@@ -224,8 +224,10 @@ export async function runMarketing(onlyMessageId?: string) {
             where: { id: candidate.profileId },
           });
           if (!p.email) throw new Error("Subscriber email missing");
+          const enteredAt = new Date(welcomeRun.enteredAt);
           welcomePurchased =
-            !!p.lastOrderAt || (await welcomeHasOrdered(p.email));
+            (!!p.lastOrderAt && p.lastOrderAt >= enteredAt) ||
+            (await welcomeHasOrderedSince(p.email, enteredAt));
         }
       } catch (error) {
         await prisma.marketingMessage.updateMany({
@@ -415,9 +417,12 @@ export async function runMarketing(onlyMessageId?: string) {
           const index = m.flowStep!;
           if (
             (index === 1 || index === 2) &&
-            (welcomePurchased || m.profile.lastOrderAt)
+            (welcomePurchased ||
+              (!!m.profile.lastOrderAt &&
+                m.profile.lastOrderAt >= new Date(welcomeRun.enteredAt)))
           )
-            reason = "Customer has placed an order; discount reminder skipped";
+            reason =
+              "Customer ordered after joining this flow; discount reminder skipped";
           const dependency = await welcomeDependency(tx, m.profileId, index);
           if (dependency === "wait")
             deferred = "Waiting for welcome email delivery";
@@ -792,10 +797,15 @@ export async function runMarketing(onlyMessageId?: string) {
           const state = marketingSettings(liveSettings?.data),
             gates = setup(state.operations, state.postalAddress);
           const expired = (message.content as Content).couponExpiresAt;
+          const enteredAt = new Date(welcomeRun.enteredAt);
           const purchased =
             (message.flowStep === 1 || message.flowStep === 2) &&
-            (!!latest.profile.lastOrderAt ||
-              (await welcomeHasOrdered(latest.profile.email!)));
+            ((!!latest.profile.lastOrderAt &&
+              latest.profile.lastOrderAt >= enteredAt) ||
+              (await welcomeHasOrderedSince(
+                latest.profile.email!,
+                enteredAt,
+              )));
           const block = welcomeAudienceBlock(
             validateFlow("welcome", live.data),
             welcomeRun,

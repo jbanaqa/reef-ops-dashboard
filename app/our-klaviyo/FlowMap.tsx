@@ -70,9 +70,9 @@ export function flowNodes(resource: Resource): Node[] {
         nodes.push({
           id: "welcome-purchase:" + i,
           kind: "condition",
-          label: "Has the customer ever ordered?",
+          label: "Placed an order since joining this flow?",
           detail:
-            "Lifetime purchase history is checked before this reminder. An unavailable check waits and retries.",
+            "Orders placed after this Welcome enrollment are checked before the reminder. An unavailable check waits and retries.",
           target: { kind: "info", section: "welcome-settings" },
         });
       nodes.push({
@@ -273,18 +273,18 @@ function WelcomeMap({
           {node("welcome-purchase:" + i)}
           <div className="mk-cart-fork mk-welcome-fork">
             <div aria-label="No orders path">
-              <span className="mk-cart-path">No · never ordered</span>
+              <span className="mk-cart-path">No · send reminder</span>
               {node("welcome-email:" + i)}
             </div>
             <div aria-label="Has ordered path">
-              <span className="mk-cart-path">Yes · has ordered</span>
+              <span className="mk-cart-path">Yes · skip reminder</span>
               {draw({
                 id: "welcome-skip:" + i,
                 kind: "end",
                 label: "Skip this reminder",
                 detail:
                   i === 1
-                    ? "Continue to the next scheduled check. Purchase history will be checked again."
+                    ? "Continue to the next scheduled check. Orders since enrollment will be checked again."
                     : "Continue to the social email schedule.",
                 target: { kind: "info", section: "welcome-settings" },
               })}

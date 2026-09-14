@@ -18,7 +18,7 @@ export function registerWelcomeTests(
   test("welcome: single opt-in, durable coupon, accelerated days 0/3/10/15, eligibility and retry checks", async (t) => {
     const { prisma, store, worker } = harness();
     const { POST } = await import("../app/api/marketing/storefront/route");
-    const { welcomeLocalHour, welcomeMessageKey, welcomeHasOrdered } =
+    const { welcomeLocalHour, welcomeMessageKey, welcomeHasOrderedSince } =
       await import("../lib/marketing/welcome");
     const { enroll } = await import("../lib/marketing/flows");
     const { uniqueDiscount } = await import("../lib/marketing/discounts");
@@ -52,6 +52,7 @@ export function registerWelcomeTests(
     >();
     const deliveries: { subject: string; html: string }[] = [];
     let ordered = false,
+      orderDateOverride: Date | null = null,
       failOrders = false,
       loseCouponResponse = false,
       uncertainSend = false,
@@ -69,15 +70,19 @@ export function registerWelcomeTests(
             return Response.json({
               errors: [{ message: "Temporary lookup failure" }],
             });
-          const address = JSON.parse(b.variables.query.slice(6));
+          const sinceText = String(b.variables.query).match(
+            /created_at:>=(\S+)/,
+          )?.[1];
+          const since = sinceText ? new Date(sinceText) : null;
+          const orderAt = ordered ? orderDateOverride || new Date() : null;
           return Response.json({
             data: {
-              customers: {
-                nodes: [
-                  { email: address, numberOfOrders: ordered ? "2" : "0" },
-                ],
+              orders: {
+                nodes:
+                  orderAt && since && orderAt >= since
+                    ? [{ id: "welcome-order", createdAt: orderAt.toISOString() }]
+                    : [],
               },
-              orders: { nodes: [] },
             },
           });
         }
@@ -271,9 +276,12 @@ export function registerWelcomeTests(
       time(23);
       ordered = true;
       assert.equal(
-        await welcomeHasOrdered(buyer.email!),
+        await welcomeHasOrderedSince(
+          buyer.email!,
+          new Date(start + 20 * DAY),
+        ),
         true,
-        "lifetime total catches older orders even if recent orders query is empty",
+        "an order after enrollment is detected",
       );
       await run(buyer.id, 1);
       assert.equal((await message(buyer.id, 1)).status, "CANCELLED");
@@ -281,6 +289,30 @@ export function registerWelcomeTests(
       await run(buyer.id, 2);
       assert.equal((await message(buyer.id, 2)).status, "CANCELLED");
       ordered = false;
+
+      time(32);
+      await signup("welcome-previous-buyer@example.com");
+      const previousBuyer = await profile("welcome-previous-buyer@example.com");
+      await prisma.marketingProfile.update({
+        where: { id: previousBuyer.id },
+        data: { lastOrderAt: new Date(start + 10 * DAY) },
+      });
+      await run(previousBuyer.id, 0);
+      ordered = true;
+      orderDateOverride = new Date(start + 10 * DAY);
+      time(35);
+      assert.equal(
+        await welcomeHasOrderedSince(
+          previousBuyer.email!,
+          new Date(start + 32 * DAY),
+        ),
+        false,
+        "an order before enrollment does not block this Welcome run",
+      );
+      await run(previousBuyer.id, 1);
+      assert.equal((await message(previousBuyer.id, 1)).status, "SENT");
+      ordered = false;
+      orderDateOverride = null;
 
       time(40);
       await signup("welcome-errors@example.com");

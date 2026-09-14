@@ -66,9 +66,10 @@ export default function WelcomeSettings({
         reminder is scheduled.
       </p>
       <p>
-        Both reminders require no previous orders, a successfully sent welcome
-        email, and an unexpired offer. A purchase skips the reminders; the
-        social email still follows for subscribed customers.
+        Both reminders require no order since this Welcome enrollment, a
+        successfully sent welcome email, and an unexpired offer. An order after
+        signup skips later discount reminders; earlier purchase history does
+        not. The social email still follows for subscribed customers.
       </p>
       <div className="mk-two">
         <label>

@@ -642,7 +642,7 @@ const { chromium } = require("playwright");
       const decision = welcomeMap.getByRole("region", { name: stage, exact: true });
       assert.equal(await decision.locator('[aria-label="No orders path"] .mk-flow-email').count(), 1);
       assert.equal(await decision.locator('[aria-label="Has ordered path"] .mk-flow-email').count(), 0);
-      await decision.getByRole("button", { name: /Has the customer ever ordered/ }).click();
+      await decision.getByRole("button", { name: /Placed an order since joining this flow/ }).click();
       await page.getByRole("heading", { name: "Welcome settings", exact: true }).waitFor();
       await page.keyboard.press("Escape");
     }

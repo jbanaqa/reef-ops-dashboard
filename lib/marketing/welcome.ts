@@ -144,28 +144,28 @@ export function welcomeAudienceBlock(
     return "Welcome test audience changed";
   return null;
 }
-/** Customer order totals include older orders outside Shopify's default order-query window. */
-export async function welcomeHasOrdered(email: string): Promise<boolean> {
+/** Check only purchases made after this subscriber entered the Welcome flow. */
+export async function welcomeHasOrderedSince(
+  email: string,
+  enteredAt: Date,
+): Promise<boolean> {
+  if (!Number.isFinite(+enteredAt))
+    throw new Error("Welcome enrollment time is invalid");
   const r = await shopifyGraphql<{
-    data?: {
-      customers?: { nodes: { email: string | null; numberOfOrders: string }[] };
-      orders?: { nodes: { id: string }[] };
-    };
+    data?: { orders?: { nodes: { id: string; createdAt: string }[] } };
   }>(
-    `query WelcomePurchaseCheck($query: String!) { customers(first: 10, query: $query) { nodes { email numberOfOrders } } orders(first: 1, query: $query) { nodes { id } } }`,
-    { query: "email:" + JSON.stringify(email) },
+    `query WelcomePurchaseCheck($query: String!) { orders(first: 1, sortKey: CREATED_AT, reverse: true, query: $query) { nodes { id createdAt } } }`,
+    {
+      query:
+        "email:" +
+        JSON.stringify(email) +
+        " test:false created_at:>=" +
+        enteredAt.toISOString(),
+    },
   );
-  if (!r.data?.customers || !r.data.orders)
+  if (!r.data?.orders)
     throw new Error("Purchase history could not be checked");
-  const exact = r.data.customers.nodes.filter(
-    (p) => p.email?.toLowerCase() === email.toLowerCase(),
-  );
-  if (exact.some((p) => !Number.isFinite(Number(p.numberOfOrders))))
-    throw new Error("Purchase total unavailable");
-  return (
-    r.data.orders.nodes.length > 0 ||
-    exact.some((p) => Number(p.numberOfOrders) > 0)
-  );
+  return r.data.orders.nodes.length > 0;
 }
 export async function welcomeDependency(
   tx: Tx,
