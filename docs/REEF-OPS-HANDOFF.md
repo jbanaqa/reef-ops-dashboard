@@ -360,6 +360,7 @@ Pixel source: `shopify/reef-marketing-custom-pixel.js`. Download control fills i
 - Settings → Advanced now has a staff-started, resumable Klaviyo audience backfill.
 - It requires `KLAVIYO_PRIVATE_API_KEY` with `profiles:read` and `lists:read`.
 - It imports profile identity, explicit email/SMS consent evidence, global suppressions, timezone, Klaviyo list membership, and an explicit Shopify Tags profile property when Klaviyo supplies one.
+- For email profiles, Shopify's existing phone remains authoritative; Klaviyo phone identity is used for phone-only profiles. This avoids rejecting valid email consent because Klaviyo retained an older phone number.
 - It does not infer consent from list membership or `can_receive_*`. List-specific suppression removes only that imported list membership.
 - The UI shows profile/list progress, suppressions, skipped identities, and a bounded list of row conflicts. It can pause after the current API page and resume from durable state.
 - It does not enroll historical Welcome or B2B flows, send messages, or alter Klaviyo. Shopify webhooks remain authoritative for later tag and consent changes.

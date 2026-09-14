@@ -254,6 +254,21 @@ async function importPage(
   state.suppressed += converted.filter((entry) => entry.suppressed).length;
   const rows = converted.flatMap((entry) => (entry.row ? [entry.row] : []));
   if (!rows.length) return;
+  // Keep Shopify's current phone for profiles already identified by email,
+  // while still importing phone numbers for new and phone-only profiles.
+  const existingEmails = new Set(
+    (
+      await prisma.marketingProfile.findMany({
+        where: {
+          shop: shop(),
+          email: { in: rows.flatMap((row) => (row.email ? [row.email] : [])) },
+        },
+        select: { email: true },
+      })
+    ).flatMap((profile) => (profile.email ? [profile.email] : [])),
+  );
+  for (const row of rows)
+    if (row.email && existingEmails.has(row.email)) delete row.phone;
   const results = await importProfiles(rows, false, "Klaviyo API audience backfill");
   const failures = results.filter((result) => result.status === "ERROR");
   state.errors += failures.length;

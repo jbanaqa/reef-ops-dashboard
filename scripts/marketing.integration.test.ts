@@ -202,6 +202,7 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
     id: "klaviyo-subscriber",
     attributes: {
       email: "klaviyo-subscriber@example.com",
+      phone_number: "+15555550200",
       first_name: "Kara",
       last_name: "Reefer",
       properties: { "Shopify Tags": "B2B, VIP" },
@@ -260,6 +261,15 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
     { data: [subscribed, suppressed], links: { next: null } },
   ];
 
+  await prisma.marketingProfile.create({
+    data: {
+      shop,
+      email: "klaviyo-subscriber@example.com",
+      phone: "+15555550100",
+      name: "Existing Shopify customer",
+    },
+  });
+
   assert.equal((await audienceBackfill.syncAudienceBackfill()).phase, "profiles");
   assert.equal((await audienceBackfill.syncAudienceBackfill()).phase, "memberships");
   const complete = await audienceBackfill.syncAudienceBackfill();
@@ -275,6 +285,7 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
     include: { consents: true, messages: true },
   });
   assert.deepEqual(profile.tags.sort(), ["b2b", "vip"]);
+  assert.equal(profile.phone, "+15555550100");
   assert.deepEqual(profile.lists, ["Mailable Subscribers"]);
   assert.equal(
     profile.consents.find((entry) => entry.channel === "EMAIL")?.status,
