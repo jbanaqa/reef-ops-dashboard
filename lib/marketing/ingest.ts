@@ -544,6 +544,7 @@ export async function importProfiles(
   rows: ImportRow[],
   dryRun: boolean,
   auditName = "Klaviyo migration",
+  recordConsentEvents = true,
 ) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 500)
     throw new Error("Import 1–500 rows per batch.");
@@ -593,6 +594,7 @@ export async function importProfiles(
               source || "klaviyo-import",
               timestamp ? date(timestamp) : new Date(),
               suppressed ? "Imported suppression" : undefined,
+              recordConsentEvents,
             );
           }
         }

@@ -292,6 +292,15 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
     "SUBSCRIBED",
   );
   assert.equal(profile.messages.length, 0);
+  assert.equal(
+    await prisma.marketingEvent.count({
+      where: {
+        profileId: profile.id,
+        type: "CONSENT",
+      },
+    }),
+    0,
+  );
 
   const blocked = await prisma.marketingProfile.findUniqueOrThrow({
     where: {

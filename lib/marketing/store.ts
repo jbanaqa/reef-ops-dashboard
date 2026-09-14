@@ -117,6 +117,7 @@ export async function consent(
   source: string,
   occurredAt: Date,
   reason?: string,
+  recordEvent = true,
 ) {
   if (!["SUBSCRIBED", "UNSUBSCRIBED", "NEVER_SUBSCRIBED"].includes(status))
     throw new Error("Invalid consent status.");
@@ -124,19 +125,20 @@ export async function consent(
     where: { profileId_channel: { profileId, channel } },
   });
   const suppress = status === "UNSUBSCRIBED" || !!reason;
-  await record(tx, {
-    key: `consent:${profileId}:${channel}:${source}:${occurredAt.toISOString()}:${status}:${reason || ""}`,
-    type: "CONSENT",
-    profileId,
-    occurredAt,
-    payload: {
-      channel,
-      status,
-      source,
-      reason,
-      ignored: !!current && current.occurredAt > occurredAt,
-    },
-  });
+  if (recordEvent)
+    await record(tx, {
+      key: `consent:${profileId}:${channel}:${source}:${occurredAt.toISOString()}:${status}:${reason || ""}`,
+      type: "CONSENT",
+      profileId,
+      occurredAt,
+      payload: {
+        channel,
+        status,
+        source,
+        reason,
+        ignored: !!current && current.occurredAt > occurredAt,
+      },
+    });
   // Suppressions are sticky. Neither imports nor delayed customer updates can undo them.
   if (current && current.occurredAt > occurredAt && !suppress) return;
   const data = {

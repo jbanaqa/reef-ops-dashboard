@@ -269,7 +269,14 @@ async function importPage(
   );
   for (const row of rows)
     if (row.email && existingEmails.has(row.email)) delete row.phone;
-  const results = await importProfiles(rows, false, "Klaviyo API audience backfill");
+  // The consent table already retains the imported state, source, and timestamp.
+  // Avoid a second event row per channel during this large snapshot migration.
+  const results = await importProfiles(
+    rows,
+    false,
+    "Klaviyo API audience backfill",
+    false,
+  );
   const failures = results.filter((result) => result.status === "ERROR");
   state.errors += failures.length;
   state.issues ||= [];
