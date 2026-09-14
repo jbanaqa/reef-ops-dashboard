@@ -1,0 +1,458 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import type { PrismaClient } from "../app/generated/prisma/client";
+import {
+  DAY,
+  defaultMarketingSettings,
+  type Content,
+} from "../lib/marketing/rules";
+import { welcomeSteps, defaultWelcome } from "../lib/marketing/welcome-config";
+
+export function registerWelcomeTests(
+  harness: () => {
+    prisma: PrismaClient;
+    store: typeof import("../lib/marketing/store");
+    worker: typeof import("../lib/marketing/worker");
+  },
+) {
+  test("welcome: single opt-in, durable coupon, accelerated days 0/3/10/15, eligibility and retry checks", async (t) => {
+    const { prisma, store, worker } = harness();
+    const { POST } = await import("../app/api/marketing/storefront/route");
+    const { welcomeLocalHour, welcomeMessageKey, welcomeHasOrdered } =
+      await import("../lib/marketing/welcome");
+    const { enroll } = await import("../lib/marketing/flows");
+    const { uniqueDiscount } = await import("../lib/marketing/discounts");
+    const shop = store.shop(),
+      fetchBefore = globalThis.fetch,
+      couponEnv = process.env.MARKETING_WELCOME_COUPON;
+    const flowWhere = { shop_kind_key: { shop, kind: "FLOW", key: "welcome" } };
+    const settingsWhere = {
+      shop_kind_key: { shop, kind: "SETTINGS", key: "global" },
+    };
+    const oldFlow = await prisma.marketingResource.findUniqueOrThrow({
+      where: flowWhere,
+    });
+    const oldSettings = await prisma.marketingResource.findUnique({
+      where: settingsWhere,
+    });
+    const config = {
+      reviewed: true,
+      welcome: { ...defaultWelcome },
+      steps: welcomeSteps,
+    };
+    const discounts = new Map<
+      string,
+      { id: string; title: string; input: Record<string, unknown> }
+    >();
+    const deliveries: { subject: string; html: string }[] = [];
+    let ordered = false,
+      failOrders = false,
+      loseCouponResponse = false,
+      uncertainSend = false,
+      createCount = 0;
+    let pauseAfterCoupon = false;
+    const start = Date.now();
+    t.mock.timers.enable({ apis: ["Date"], now: start });
+    const time = (days: number) => t.mock.timers.setTime(start + days * DAY);
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("/graphql.json")) {
+        const b = JSON.parse(String(init?.body));
+        if (b.query.includes("WelcomePurchaseCheck")) {
+          if (failOrders)
+            return Response.json({
+              errors: [{ message: "Temporary lookup failure" }],
+            });
+          const address = JSON.parse(b.variables.query.slice(6));
+          return Response.json({
+            data: {
+              customers: {
+                nodes: [
+                  { email: address, numberOfOrders: ordered ? "2" : "0" },
+                ],
+              },
+              orders: { nodes: [] },
+            },
+          });
+        }
+        if (b.query.includes("CartCouponLookup")) {
+          const d = discounts.get(b.variables.code);
+          return Response.json({
+            data: {
+              codeDiscountNodeByCode: d
+                ? { id: d.id, codeDiscount: { title: d.title } }
+                : null,
+            },
+          });
+        }
+        if (b.query.includes("CartCouponCreate")) {
+          const d = {
+            id: "welcome-discount-" + ++createCount,
+            title: b.variables.input.title,
+            input: b.variables.input,
+          };
+          discounts.set(b.variables.input.code, d);
+          if (pauseAfterCoupon) {
+            pauseAfterCoupon = false;
+            await prisma.marketingResource.update({ where: flowWhere, data: { enabled: false } });
+          }
+          if (loseCouponResponse) {
+            loseCouponResponse = false;
+            throw new Error("Lost response");
+          }
+          return Response.json({
+            data: {
+              discountCodeBasicCreate: {
+                codeDiscountNode: { id: d.id },
+                userErrors: [],
+              },
+            },
+          });
+        }
+      }
+      if (url === "https://api.resend.com/emails") {
+        if (uncertainSend) throw new Error("Lost delivery response");
+        deliveries.push(JSON.parse(String(init?.body)));
+        return Response.json({ id: "welcome-send-" + deliveries.length });
+      }
+      return fetchBefore(input, init);
+    };
+    const signup = async (address: string, emailConsent = true) =>
+      POST(
+        new Request("https://app.example/api/marketing/storefront", {
+          method: "POST",
+          headers: { origin: "https://store.example" },
+          body: JSON.stringify({
+            action: "signup",
+            email: address,
+            emailConsent,
+            timezone: "America/New_York",
+          }),
+        }),
+      );
+    const profile = (address: string) =>
+      prisma.marketingProfile.findUniqueOrThrow({
+        where: { shop_email: { shop, email: address } },
+      });
+    const message = (id: string, step: number) =>
+      prisma.marketingMessage.findUniqueOrThrow({
+        where: { key: welcomeMessageKey(id, step) },
+      });
+    const run = async (id: string, step: number) =>
+      worker.runMarketing((await message(id, step)).id);
+    try {
+      delete process.env.MARKETING_WELCOME_COUPON;
+      await prisma.marketingResource.update({
+        where: flowWhere,
+        data: { enabled: true, data: store.json(config) },
+      });
+      const settings = {
+        ...defaultMarketingSettings,
+        postalAddress: "123 Test Street",
+        operations: {
+          sendingEnabled: true,
+          ingestEnabled: true,
+          migrationConfirmed: true,
+          formEnabled: true,
+        },
+      };
+      await prisma.marketingResource.upsert({
+        where: settingsWhere,
+        create: {
+          ...settingsWhere.shop_kind_key,
+          name: "Test settings",
+          data: store.json(settings),
+        },
+        update: { data: store.json(settings) },
+      });
+      await prisma.marketingWebhookInbox.updateMany({
+        where: { shop, status: { not: "DONE" } },
+        data: { status: "DONE" },
+      });
+      assert.equal(
+        (await signup("no-consent-welcome@example.com", false)).status,
+        400,
+      );
+      const response = await signup("welcome-lifecycle@example.com");
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).completed, true);
+      const p = await profile("welcome-lifecycle@example.com");
+      assert.ok(p.lists.includes("Mailable Subscribers"));
+      assert.equal(
+        (p.properties as { timezone: string }).timezone,
+        "America/New_York",
+      );
+      await signup(p.email!);
+      await store.atomic((tx) =>
+        enroll(tx, "welcome", p.id, "duplicate", new Date()),
+      );
+      assert.equal(
+        await prisma.marketingMessage.count({
+          where: { profileId: p.id, flowKey: "welcome" },
+        }),
+        4,
+      );
+      assert.equal(
+        await prisma.marketingMessage.count({
+          where: { profileId: p.id, flowKey: "email-confirmation" },
+        }),
+        0,
+      );
+      await run(p.id, 0);
+      const first = await message(p.id, 0);
+      assert.equal(first.status, "SENT");
+      const code = (first.content as Content).couponCode!;
+      assert.equal(createCount, 1);
+      const allocation = discounts.get(code)!.input;
+      assert.equal(
+        Date.parse(String(allocation.endsAt)) -
+          Date.parse(String(allocation.startsAt)),
+        14 * DAY,
+      );
+      assert.equal(allocation.usageLimit, 1);
+      assert.deepEqual(allocation.combinesWith, {
+        orderDiscounts: false,
+        productDiscounts: false,
+        shippingDiscounts: false,
+      });
+      assert.match((first.content as Content).url, /\/discount\/WELCOME10-/);
+      assert.equal(+(await message(p.id, 1)).dueAt, start + 3 * DAY);
+      assert.equal(+(await message(p.id, 2)).dueAt, start + 10 * DAY);
+      time(2);
+      await run(p.id, 1);
+      assert.equal(deliveries.length, 1);
+      time(3);
+      await run(p.id, 1);
+      assert.equal((await message(p.id, 1)).status, "SENT");
+      assert.equal(
+        ((await message(p.id, 1)).content as Content).couponCode,
+        code,
+      );
+      time(9);
+      await run(p.id, 2);
+      assert.equal(deliveries.length, 2);
+      time(10);
+      await run(p.id, 2);
+      assert.equal((await message(p.id, 2)).status, "SENT");
+      assert.equal(
+        ((await message(p.id, 2)).content as Content).couponCode,
+        code,
+      );
+      assert.equal(createCount, 1);
+      assert.doesNotMatch(deliveries[2].html, /\{\{ coupon_expires \}\}/);
+      assert.equal(
+        +(await message(p.id, 3)).dueAt,
+        +welcomeLocalHour(new Date(start + 15 * DAY), "America/New_York", 17),
+      );
+      t.mock.timers.setTime(+(await message(p.id, 3)).dueAt);
+      ordered = true;
+      await run(p.id, 3);
+      assert.equal(
+        (await message(p.id, 3)).status,
+        "SENT",
+        "purchasers still receive social email",
+      );
+      assert.equal(
+        ((await message(p.id, 3)).content as Content).couponCode,
+        undefined,
+      );
+      ordered = false;
+
+      time(20);
+      await signup("welcome-purchase@example.com");
+      const buyer = await profile("welcome-purchase@example.com");
+      await run(buyer.id, 0);
+      time(23);
+      ordered = true;
+      assert.equal(
+        await welcomeHasOrdered(buyer.email!),
+        true,
+        "lifetime total catches older orders even if recent orders query is empty",
+      );
+      await run(buyer.id, 1);
+      assert.equal((await message(buyer.id, 1)).status, "CANCELLED");
+      time(30);
+      await run(buyer.id, 2);
+      assert.equal((await message(buyer.id, 2)).status, "CANCELLED");
+      ordered = false;
+
+      time(40);
+      await signup("welcome-errors@example.com");
+      const errors = await profile("welcome-errors@example.com");
+      await run(errors.id, 0);
+      time(43);
+      failOrders = true;
+      await run(errors.id, 1);
+      assert.equal((await message(errors.id, 1)).status, "PENDING");
+      assert.match(
+        (await message(errors.id, 1)).error!,
+        /Waiting for welcome checks/,
+      );
+      failOrders = false;
+      time(55);
+      await run(errors.id, 2);
+      assert.equal(
+        (await message(errors.id, 2)).status,
+        "CANCELLED",
+        "overdue reminder never advertises an expired code",
+      );
+
+      time(60);
+      await signup("welcome-unknown@example.com");
+      const unknown = await profile("welcome-unknown@example.com");
+      uncertainSend = true;
+      await run(unknown.id, 0);
+      uncertainSend = false;
+      assert.equal((await message(unknown.id, 0)).status, "UNKNOWN");
+      time(63);
+      await run(unknown.id, 1);
+      assert.equal((await message(unknown.id, 1)).status, "PENDING");
+      assert.match(
+        (await message(unknown.id, 1)).error!,
+        /Waiting for welcome email/,
+      );
+      const beforeRetry = createCount;
+      time(64);
+      await run(unknown.id, 0);
+      assert.equal(createCount, beforeRetry);
+
+      time(70);
+      const options = {
+        kind: "WELCOME_COUPON",
+        name: "Welcome10",
+        prefix: "WELCOME10-",
+        days: 14,
+      };
+      loseCouponResponse = true;
+      await assert.rejects(uniqueDiscount("welcome-lost-response", options));
+      const allocated = createCount;
+      time(71);
+      const recovered = await uniqueDiscount("welcome-lost-response", options);
+      assert.equal(createCount, allocated);
+      assert.equal(
+        Date.parse(recovered.endsAt),
+        start + 84 * DAY,
+        "lost response cannot extend the deadline",
+      );
+
+      time(80);
+      await prisma.marketingResource.update({
+        where: flowWhere,
+        data: {
+          data: store.json({
+            ...config,
+            welcome: {
+              ...defaultWelcome,
+              testEmail: "welcome-test@example.com",
+            },
+          }),
+        },
+      });
+      await signup("welcome-outsider@example.com");
+      const outsider = await profile("welcome-outsider@example.com");
+      assert.equal(
+        await prisma.marketingMessage.count({
+          where: { profileId: outsider.id },
+        }),
+        0,
+      );
+      await signup("welcome-test@example.com");
+      const tester = await profile("welcome-test@example.com");
+      await prisma.marketingResource.update({
+        where: flowWhere,
+        data: { data: store.json(config) },
+      });
+      await run(tester.id, 0);
+      assert.equal(
+        (await message(tester.id, 0)).status,
+        "CANCELLED",
+        "a test run cannot become a production run",
+      );
+
+      const suppressed = await store.atomic(async (tx) => {
+        const p = await store.identify(tx, {
+          email: "welcome-suppressed@example.com",
+        });
+        await store.consent(
+          tx,
+          p.id,
+          "EMAIL",
+          "UNSUBSCRIBED",
+          "test",
+          new Date(),
+        );
+        return p;
+      });
+      await signup(suppressed.email!);
+      assert.equal(
+        await prisma.marketingMessage.count({
+          where: { profileId: suppressed.id },
+        }),
+        0,
+      );
+      assert.equal(
+        (
+          await prisma.marketingConsent.findUniqueOrThrow({
+            where: {
+              profileId_channel: { profileId: suppressed.id, channel: "EMAIL" },
+            },
+          })
+        ).suppressed,
+        true,
+      );
+      assert.equal(
+        +welcomeLocalHour(
+          new Date("2026-11-01T05:00:00Z"),
+          "America/New_York",
+          17,
+        ),
+        Date.parse("2026-11-01T22:00:00Z"),
+        "DST fallback uses local 5 PM",
+      );
+      time(90);
+      await signup("welcome-delayed@example.com");
+      const delayed = await profile("welcome-delayed@example.com");
+      time(92); await run(delayed.id, 0);
+      assert.equal(+(await message(delayed.id, 1)).dueAt, start + 95 * DAY, "delayed first delivery moves the full sequence instead of making reminders immediately due");
+      assert.equal(Date.parse(((await message(delayed.id, 0)).content as Content).couponExpiresAt!), start + 106 * DAY);
+
+      time(110); await signup("welcome-recent@example.com");
+      const recent = await profile("welcome-recent@example.com");
+      await prisma.marketingMessage.create({ data: { shop, key: "welcome-recent-campaign", profileId: recent.id, channel: "EMAIL", subject: "Earlier campaign", content: store.json(welcomeSteps[0].content), dueAt: new Date(), sentAt: new Date(), status: "SENT" } });
+      await run(recent.id, 0);
+      assert.equal((await message(recent.id, 0)).status, "CANCELLED");
+      assert.match((await message(recent.id, 0)).error!, /16 hours/);
+      time(113); await run(recent.id, 1);
+      assert.equal((await message(recent.id, 1)).status, "CANCELLED", "never remind someone to use an offer that was not sent");
+      assert.equal((await message(recent.id, 3)).status, "PENDING");
+
+      time(120); await signup("welcome-paused@example.com"); const paused = await profile("welcome-paused@example.com");
+      const beforePause = deliveries.length;
+      pauseAfterCoupon = true; await run(paused.id, 0);
+      assert.equal(deliveries.length, beforePause);
+      assert.equal((await message(paused.id, 0)).status, "PENDING");
+      const prepared = (await message(paused.id, 0)).content as Content;
+      await prisma.marketingResource.update({ where: flowWhere, data: { enabled: true, data: store.json({ ...config, steps: config.steps.map((s, i) => i === 0 ? { ...s, subject: "Changed after preparation" } : s) }) } });
+      time(121); await run(paused.id, 0);
+      assert.equal((await message(paused.id, 0)).status, "SENT");
+      assert.equal((await message(paused.id, 0)).subject, config.steps[0].subject, "prepared retry preserves its original subject");
+      assert.equal(((await message(paused.id, 0)).content as Content).couponCode, prepared.couponCode);
+      assert.equal(((await message(paused.id, 0)).content as Content).couponExpiresAt, prepared.couponExpiresAt);
+    } finally {
+      t.mock.timers.reset();
+      globalThis.fetch = fetchBefore;
+      if (couponEnv === undefined) delete process.env.MARKETING_WELCOME_COUPON;
+      else process.env.MARKETING_WELCOME_COUPON = couponEnv;
+      await prisma.marketingResource.update({
+        where: flowWhere,
+        data: { enabled: oldFlow.enabled, data: store.json(oldFlow.data) },
+      });
+      if (oldSettings)
+        await prisma.marketingResource.update({
+          where: settingsWhere,
+          data: { data: store.json(oldSettings.data) },
+        });
+      else await prisma.marketingResource.delete({ where: settingsWhere });
+    }
+  });
+}

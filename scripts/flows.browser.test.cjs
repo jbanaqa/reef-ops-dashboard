@@ -129,7 +129,7 @@ const { chromium } = require("playwright");
       "Preserved B2B subject",
     );
     await page.getByRole("button", { name: "Save email", exact: true }).click();
-    await page.getByText("Saved to flow", { exact: true }).waitFor();
+    await page.getByText("Email saved", { exact: true }).waitFor();
     assert.equal(
       await page.evaluate(
         () =>
@@ -369,7 +369,7 @@ const { chromium } = require("playwright");
       .waitFor();
     await openNode(/Low stock email/);
     await page.getByRole("button", { name: "Save email", exact: true }).click();
-    await page.getByText("Saved to flow", { exact: true }).waitFor();
+    await page.getByText("Email saved", { exact: true }).waitFor();
     await closePanel();
     const savedStock = await page.evaluate(
       () => JSON.parse(localStorage.getItem("savedFlow")).data.stock,
@@ -631,6 +631,39 @@ const { chromium } = require("playwright");
       false,
     );
 
+    await page.getByRole("button", { name: "← All flows", exact: true }).click();
+    await page.getByLabel("Find a workflow", { exact: true }).fill("Welcome Series");
+    await page.getByRole("button", { name: "Open Welcome Series 08.2025", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByText("Day 10", { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, "welcome-flow-desktop.png"), fullPage: true });
+    await page.getByText("Day 3", { exact: true }).click();
+    await page.getByLabel("First reminder · day", { exact: true }).fill("4");
+    await page.getByRole("button", { name: "Close editor", exact: true }).click();
+    await page.getByRole("button", { name: "Save flow", exact: true }).click();
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("savedFlow")).data.steps[1].minutes), 4 * 1440);
+    for (const [index, name] of ["Welcome · 10% off", "First reminder", "Final reminder", "Follow us on social media"].entries()) {
+      await page.locator(".mk-flow-map").getByRole("button", { name: new RegExp(name) }).click();
+      const frame = page.frameLocator('iframe[title="Email preview"]');
+      if (index < 3) await frame.getByText("WELCOME10-PREVIEW", { exact: true }).waitFor();
+      else await frame.getByText("INSTAGRAM", { exact: true }).waitFor();
+      await page.getByRole("region", { name: "Live email preview", exact: true }).screenshot({ path: path.join(output, "welcome-email-" + index + ".png") });
+      await page.getByRole("button", { name: "Mobile", exact: true }).click();
+      await page.getByLabel("Mobile preview width", { exact: true }).selectOption("320");
+      assert.ok(await page.evaluate(() => {
+        const f = document.querySelector('iframe[title="Email preview"]');
+        return f.contentDocument.documentElement.scrollWidth <= f.clientWidth + 1;
+      }), "Welcome email fits mobile: " + index);
+      await page.getByLabel("Back to flow", { exact: true }).click();
+    }
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Welcome map fits " + width);
+      await page.getByText("Day 4", { exact: true }).click();
+      assert.ok(await page.evaluate(() => document.querySelector("dialog").scrollWidth <= innerWidth), "Welcome settings fit " + width);
+      await page.screenshot({ path: path.join(output, "welcome-settings-" + width + ".png") });
+      await page.keyboard.press("Escape");
+    }
     assert.deepEqual(errors, []);
     console.log(
       "PASS: flow search/status/sort, real message counts, branch-aware step counts, focused navigation, keyboard focus restoration, preserved email drafts and saves, mobile 320/390",

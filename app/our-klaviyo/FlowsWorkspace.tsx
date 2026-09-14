@@ -24,7 +24,7 @@ const descriptions: Record<
     symbol: "B2B",
   },
   welcome: {
-    trigger: "Email signup confirmed",
+    trigger: "Joins Mailable Subscribers",
     description:
       "Introduce new subscribers to your store and first-order offer.",
     symbol: "Hi",

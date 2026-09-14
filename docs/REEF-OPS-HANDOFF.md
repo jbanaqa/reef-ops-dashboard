@@ -519,3 +519,32 @@ These screenshots show partial templates, not complete exported HTML or all unde
 - Initial paused-by-default descriptions do not prove current live saved settings are paused.
 
 If source and docs disagree, inspect carefully and document the actual behavior before changing anything. Keep this handoff updated after material changes so the next continuation does not repeat completed work.
+
+## 20. Welcome series implementation — September 13, 2026
+
+The user approved replacing the Klaviyo popup with the Reef Ops popup, single opt-in, and no SMS step. They deliberately chose an automatic sequence instead of the screenshots' Manual message. The screenshots' “zero orders in the last one week” was a lookback condition, **not** a seven-day wait; the new explicit seven-day gap is intentional.
+
+Implemented in the working tree, with no production configuration changes or customer sends:
+- Welcome email immediately after a new signup joins `Mailable Subscribers`.
+- Reminder on day 3; final reminder on day 10. Both require no lifetime orders, consent, and a successfully sent initial welcome.
+- One unique `WELCOME10-` Shopify code per profile, reused by all three offer messages. 10% of the entire order, no minimum, no combinations, one redemption. This is an order-wide discount, as in the supplied coupon configuration; shipping-product exclusions in cart recommendations do not change discount eligibility.
+- Coupon activates during the initial email's preparation and expires 14 × 24 hours later. Deadlines persist before the Shopify call and never extend on a lost response/retry. Email copy shows the actual expiry date, not a hardcoded “seven days.” Preparation precedes provider acceptance, so a delayed retry can shorten the remaining offer lifetime.
+- Initial successful delivery anchors later scheduled messages to the persisted offer activation. A late initial send does not make the day-3 reminder immediately due.
+- Social email on/after day 15 at 17:00 recipient-local time; default fallback America/Los_Angeles. A purchase skips discount reminders but does not cancel social. If that day's clock time has passed, it waits for the next occurrence. Timezone is captured by the popup and DST is handled.
+- No re-entry, including legacy welcome message history and repeated form submissions. A durable WELCOME_RUN also prevents re-entry after history cleanup. Imports do not enroll. Existing Mailable Subscribers are not replayed by installation or deployment.
+- Welcome Smart Sending uses existing local/provider-acceptance history and imported Klaviyo receipts (16 hours), plus in-progress/uncertain delivery reservations. If the first email is skipped/failed, coupon reminders are skipped; social can still proceed. If the first email is UNKNOWN/PENDING, later steps wait.
+- Live purchase checks combine local order history with Shopify customer lifetime order totals and recent orders, avoiding a seven-day or 60-day-only eligibility check. Failures defer the reminder. Initial welcome is sent to new list subscribers; lifetime-order conditions apply to the two reminders.
+- Test-email restriction in Welcome settings snapshots the test audience in each run. Removing/changing the restriction cannot convert existing test runs into unrestricted runs. Review/enable are cleared in the editor when changing the test audience.
+- Existing saved copy/artwork survives the versioned draft upgrade, field by field. New steps use the supplied Klaviyo copy/layout where visible. Every email still uses EmailDesigner, Content/render(), and the shared worker/provider. Shared branding continues to apply. Hero uploads now use the same inline attachment handling as logos/footers.
+- Map uses clear day labels and clickable email nodes. Clicking a schedule/condition opens Welcome settings with day-based schedule, expiry, timezone, and test audience. Profile activity/progress labels describe welcome enrollment and step names.
+
+Files: `welcome-config.ts`, `welcome.ts`, shared `discounts.ts` (also used by cart), `WelcomeSettings.tsx`, plus the existing enrollment/worker/storefront/editor/rendering modules. No database schema migration is needed. New installations seed the versioned default; existing stored flows are upgraded as a review-required browser draft when opened, not silently overwritten.
+
+Verification: 65 marketing tests pass, including real Prisma writes against disposable PGlite with mocked Shopify/Resend and an accelerated 120+ day clock covering multiple isolated profiles. Cases include schedule boundaries, coupon reuse and lost responses, old purchases, expired offers, lookup failures, suppressed recipients, UNKNOWN delivery, delayed initial delivery, pausing during preparation, frozen retries, repeated signups, test-audience changes, single-opt-in popup completion, and DST. TypeScript, changed-source ESLint, and production build pass. The flow browser suite passes desktop and 390/320px layouts, all four previews, and schedule persistence. Its two old `Saved to flow` assertions were updated to the shared editor's existing `Email saved` label.
+
+Still needed before real cutover:
+1. Deploy the reviewed code, then save the upgraded Welcome flow with the intended test audience and review status.
+2. Test a fresh subscriber through the Reef Ops popup and redeem a real welcome code. These tests did not contact live Shopify or Resend.
+3. Get the original Klaviyo hero image files/URLs or exported HTML for exact fish artwork. Current presets use aqua text banners and HTML social cards; no original artwork was available in the connected browser session. Existing uploaded branding is preserved.
+4. Replace/disable the Klaviyo popup and equivalent Klaviyo welcome flow in a coordinated cutover. The storefront theme has not been changed. Keep the Reef Ops popup off for general visitors while the flow is restricted to a test address; otherwise other signups would subscribe without receiving the test-restricted welcome offer.
+5. Retain the earlier migration, consent, footer-address, and sending-readiness requirements before unrestricted activation. Do not interpret the user's implementation request as permission to send marketing to the existing list.

@@ -16,6 +16,8 @@ import {
   phone,
 } from "@/lib/marketing/rules";
 import { setup } from "@/lib/marketing/delivery";
+import { enroll } from "@/lib/marketing/flows";
+import { validateFlow } from "@/lib/marketing/flow-config";
 export const dynamic = "force-dynamic";
 const allowedOrigin = (request: Request) => {
   const origin = request.headers.get("origin");
@@ -52,6 +54,10 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 16000) return reply({ error: "Payload too large" }, 413);
     const b = JSON.parse(raw);
+    const welcome = b.action === "event" ? null : await prisma.marketingResource.findUnique({
+      where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "welcome" } },
+    });
+    const singleOptIn = !!(welcome?.data as { welcome?: unknown } | undefined)?.welcome;
     // Shopify custom pixels have an opaque (null) sandbox origin. This is
     // not proof of identity: allow only rate-limited anonymous observations.
     // Signup, consent, session lookup and other actions retain storefront-only access.
@@ -78,7 +84,8 @@ export async function POST(request: Request) {
         !config.sendingEnabled ||
         !config.migrationConfirmed ||
         !config.emailReady ||
-        !config.couponReady
+        (!config.couponReady && !singleOptIn) ||
+        (singleOptIn && !config.ingestEnabled)
       )
         return reply(
           { enabled: false, error: "Signup is not enabled yet." },
@@ -86,12 +93,9 @@ export async function POST(request: Request) {
         );
     }
     if (b.action === "config") {
-      const welcome = await prisma.marketingResource.findUnique({
-        where: {
-          shop_kind_key: { shop: shop(), kind: "FLOW", key: "welcome" },
-        },
-      });
       return reply({
+        singleOptIn,
+        couponDays: (welcome?.data as { welcome?: { couponDays?: number } })?.welcome?.couponDays,
         enabled:
           !!welcome?.enabled &&
           (welcome.data as { reviewed?: boolean }).reviewed === true,
@@ -125,11 +129,6 @@ export async function POST(request: Request) {
       });
     });
     if (b.action === "signup") {
-      const welcome = await prisma.marketingResource.findUnique({
-        where: {
-          shop_kind_key: { shop: shop(), kind: "FLOW", key: "welcome" },
-        },
-      });
       if (
         !welcome?.enabled ||
         !(welcome.data as { reviewed?: boolean }).reviewed
@@ -154,7 +153,25 @@ export async function POST(request: Request) {
             version: "v1",
           },
         });
-        if (existing?.suppressed || existing?.status === "SUBSCRIBED") return;
+        if (existing?.suppressed) return;
+        if (singleOptIn) {
+          if (existing?.status === "SUBSCRIBED" && p.lists.includes("Mailable Subscribers")) return;
+          const flow = validateFlow("welcome", welcome.data);
+          let timezone = flow.welcome!.fallbackTimezone;
+          if (typeof b.timezone === "string") {
+            try { new Intl.DateTimeFormat("en", { timeZone: b.timezone }).format(); timezone = b.timezone; } catch {}
+          }
+          await consent(tx, p.id, "EMAIL", "SUBSCRIBED", "storefront-single-opt-in-v1", new Date());
+          await tx.marketingProfile.update({ where: { id: p.id }, data: {
+            lists: [...new Set([...p.lists, "Mailable Subscribers"])],
+            properties: json({ ...(p.properties as object), timezone }),
+          } });
+          await record(tx, { key: `subscribed:${session}`, type: "EMAIL_SUBSCRIBED", profileId: p.id,
+            payload: { list: "Mailable Subscribers", source: "reef-ops-popup", optIn: "single" } });
+          await enroll(tx, "welcome", p.id, session, new Date());
+          return;
+        }
+        if (existing?.status === "SUBSCRIBED") return;
         const recent = await tx.marketingMessage.findFirst({
           where: {
             profileId: p.id,
@@ -215,9 +232,10 @@ export async function POST(request: Request) {
       });
       return reply({
         ok: true,
+        ...(singleOptIn ? { completed: true } : {}),
         session,
         message:
-          "If this address is eligible, a confirmation email will arrive shortly. Your 10% offer follows confirmation.",
+          singleOptIn ? "Thanks for signing up! If eligible, your welcome offer will arrive by email." : "If this address is eligible, a confirmation email will arrive shortly. Your 10% offer follows confirmation.",
       });
     }
     if (b.action === "sms") {

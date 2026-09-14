@@ -5,6 +5,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { readDraft } from "../app/our-klaviyo/flow-drafts";
 import EmailPreview from "../app/our-klaviyo/EmailPreview";
 import { JSDOM } from "jsdom";
+import { readFile } from "node:fs/promises";
 import {
   defaultContent,
   defaultMarketingSettings,
@@ -26,6 +27,36 @@ dom.window.HTMLDialogElement.prototype.close = function () {
   this.removeAttribute("open");
 };
 let cleanup: () => void;
+test("single-opt-in popup submits consent and finishes without a confirmation or SMS step", async () => {
+  const popup = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://store.example", runScripts: "dangerously" });
+  const requests: Record<string, unknown>[] = [];
+  const w = popup.window;
+  w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  const nativeTimeout = w.setTimeout.bind(w);
+  w.setTimeout = ((handler: TimerHandler) => nativeTimeout(handler, 0)) as typeof w.setTimeout;
+  w.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)); requests.push(body);
+    return Response.json(body.action === "config" ? { enabled: true, singleOptIn: true, couponDays: 30 } : body.action === "signup" ? { ok: true, completed: true, message: "Your offer will arrive by email." } : { ok: true });
+  };
+  try {
+    const script = w.document.createElement("script");
+    script.dataset.endpoint = "https://app.example/api/marketing/storefront";
+    script.textContent = await readFile("public/reef-marketing.js", "utf8");
+    w.document.body.append(script);
+    const { waitFor } = await import("@testing-library/react");
+    await waitFor(() => assert.ok(w.document.querySelector("form")));
+    assert.match(w.document.body.textContent!, /offer lasts 30 days/);
+    w.document.querySelector<HTMLInputElement>('[name="email"]')!.value = "test@example.com";
+    w.document.querySelector<HTMLInputElement>('[name="consent"]')!.checked = true;
+    w.document.querySelector("form")!.dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => assert.equal(w.localStorage.getItem("reef-marketing-submitted"), "1"));
+    assert.equal(requests.filter(r => r.action === "signup").length, 1);
+    assert.equal(requests.find(r => r.action === "signup")?.emailConsent, true);
+    assert.equal(requests.some(r => r.action === "sms" || r.action === "status"), false);
+    assert.equal(w.document.querySelector("form"), null);
+    assert.match(w.document.body.textContent!, /Thanks for joining/);
+  } finally { popup.window.close(); }
+});
 afterEach(() => cleanup?.());
 test.beforeEach(() => {
   Object.assign(globalThis, { indexedDB: new IDBFactory() });
@@ -90,8 +121,8 @@ test("message and delay nodes edit their explicit target and invalid links do no
       }}
     />,
   );
-  await view.findByText("First");
-  testing.fireEvent.click(view.getByText("First"));
+  await view.findByText("Welcome · 10% off");
+  testing.fireEvent.click(view.getByText("Welcome · 10% off"));
   assert.equal(
     (view.getByLabelText("Subject") as HTMLInputElement).value,
     "First",
@@ -101,14 +132,14 @@ test("message and delay nodes edit their explicit target and invalid links do no
   });
   assert.ok(view.getByRole("alert"));
   testing.fireEvent.click(view.getByLabelText("Back to flow"));
-  testing.fireEvent.click(view.getByText("180 minutes after trigger"));
-  const input = view.getByLabelText("Wait (minutes)") as HTMLInputElement;
-  assert.equal(input.value, "180");
-  testing.fireEvent.change(input, { target: { value: "60" } });
+  testing.fireEvent.click(view.getByText("Day 3"));
+  const input = view.getByLabelText("First reminder · day") as HTMLInputElement;
+  assert.equal(input.value, "3");
+  testing.fireEvent.change(input, { target: { value: "4" } });
   testing.fireEvent.click(view.getByText("Close editor"));
   testing.fireEvent.click(view.getByText("Save flow"));
-  assert.equal(saved?.steps[0].minutes, 60);
-  assert.equal(saved?.steps[1].minutes, 1440);
+  assert.equal(saved?.steps[0].minutes, 0);
+  assert.equal(saved?.steps[1].minutes, 4 * 1440);
 });
 
 test("unfinished copy and artwork survive editor remounts and successful saves", async () => {

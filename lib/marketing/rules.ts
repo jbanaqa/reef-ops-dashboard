@@ -14,8 +14,15 @@ export type Content = {
   url: string;
   hero?: string;
   preview?: string;
-  template?: "standard" | "b2b-wholesale" | "cart-recovery";
+  template?:
+    | "standard"
+    | "b2b-wholesale"
+    | "cart-recovery"
+    | "welcome"
+    | "welcome-social";
   couponCode?: string;
+  couponExpiresAt?: string;
+  offerAboveBody?: boolean;
   logo?: string;
   logoScale?: number;
   footerImage?: string;
@@ -73,7 +80,8 @@ export function marketingSettings(
     Partial<MarketingOperations>;
   const saved = (v.operations || {}) as Partial<MarketingOperations>;
   const branding = (v.branding || {}) as Partial<EmailBranding>;
-  const brandingImage = (value: unknown) => (value ? imageSource(value) : undefined);
+  const brandingImage = (value: unknown) =>
+    value ? imageSource(value) : undefined;
   const brandingScale = (value: unknown) => {
     const n = Number(value);
     return Number.isFinite(n)
@@ -86,8 +94,12 @@ export function marketingSettings(
       v.organizationName || defaultMarketingSettings.organizationName,
     ).slice(0, 120),
     branding: {
-      ...(brandingImage(branding.logo) ? { logo: brandingImage(branding.logo) } : {}),
-      ...(brandingScale(branding.logoScale) ? { logoScale: brandingScale(branding.logoScale) } : {}),
+      ...(brandingImage(branding.logo)
+        ? { logo: brandingImage(branding.logo) }
+        : {}),
+      ...(brandingScale(branding.logoScale)
+        ? { logoScale: brandingScale(branding.logoScale) }
+        : {}),
       ...(brandingImage(branding.footerImage)
         ? { footerImage: brandingImage(branding.footerImage) }
         : {}),
@@ -231,7 +243,10 @@ export function personalize(value: string, name = "", html = false) {
 }
 export function textBody(c: Content, name = "") {
   return personalize(
-    c.bodyHtml !== undefined ? htmlText(c.bodyHtml) : c.body,
+    (c.bodyHtml !== undefined ? htmlText(c.bodyHtml) : c.body).replaceAll(
+      "{{ coupon_expires }}",
+      c.couponExpiresAt || "your personal expiration date",
+    ),
     name,
   );
 }
@@ -271,22 +286,42 @@ function cartProductHtml(c: Content) {
   if (!products.length) return "";
   const rows: string[] = [];
   for (let i = 0; i < products.length; i += 2) {
-    const cells = products.slice(i, i + 2).map((p) =>
-      '<td valign="top" width="50%" style="width:50%;padding:12px 8px 18px;text-align:center">' +
-      '<a href="' + escapeHtml(p.url) + '" style="color:#122f35;text-decoration:none">' +
-      (p.image
-        ? '<img src="' + escapeHtml(p.image) + '" width="240" alt="' + escapeHtml(p.title) + '" style="display:block;width:100%;max-width:240px;height:auto;margin:0 auto 9px;background:#f1f4f4">'
-        : '<div style="width:100%;height:150px;background:#f1f4f4;margin:0 auto 9px;color:#7b8789;font-size:12px;line-height:150px">Product image</div>') +
-      '<strong style="display:block;font-family:Georgia,serif;font-size:16px;line-height:1.25;text-decoration:underline">' +
-      escapeHtml(p.title) +
-      '</strong>' +
-      (p.price ? '<span style="display:block;margin-top:7px;color:#0b9b91;font-size:14px">' + escapeHtml(p.price) + '</span>' : "") +
-      '</a></td>',
-    );
-    if (cells.length === 1) cells.push('<td width="50%" style="width:50%;padding:12px 8px 18px">&nbsp;</td>');
-    rows.push('<tr>' + cells.join("") + '</tr>');
+    const cells = products
+      .slice(i, i + 2)
+      .map(
+        (p) =>
+          '<td valign="top" width="50%" style="width:50%;padding:12px 8px 18px;text-align:center">' +
+          '<a href="' +
+          escapeHtml(p.url) +
+          '" style="color:#122f35;text-decoration:none">' +
+          (p.image
+            ? '<img src="' +
+              escapeHtml(p.image) +
+              '" width="240" alt="' +
+              escapeHtml(p.title) +
+              '" style="display:block;width:100%;max-width:240px;height:auto;margin:0 auto 9px;background:#f1f4f4">'
+            : '<div style="width:100%;height:150px;background:#f1f4f4;margin:0 auto 9px;color:#7b8789;font-size:12px;line-height:150px">Product image</div>') +
+          '<strong style="display:block;font-family:Georgia,serif;font-size:16px;line-height:1.25;text-decoration:underline">' +
+          escapeHtml(p.title) +
+          "</strong>" +
+          (p.price
+            ? '<span style="display:block;margin-top:7px;color:#0b9b91;font-size:14px">' +
+              escapeHtml(p.price) +
+              "</span>"
+            : "") +
+          "</a></td>",
+      );
+    if (cells.length === 1)
+      cells.push(
+        '<td width="50%" style="width:50%;padding:12px 8px 18px">&nbsp;</td>',
+      );
+    rows.push("<tr>" + cells.join("") + "</tr>");
   }
-  return '<table role="presentation" class="reef-cart-products" width="100%" style="width:100%;border-collapse:collapse;table-layout:fixed;border-top:1px solid #71cbd2;margin-top:18px"><tbody>' + rows.join("") + '</tbody></table>';
+  return (
+    '<table role="presentation" class="reef-cart-products" width="100%" style="width:100%;border-collapse:collapse;table-layout:fixed;border-top:1px solid #71cbd2;margin-top:18px"><tbody>' +
+    rows.join("") +
+    "</tbody></table>"
+  );
 }
 export function content(value: unknown): Content {
   if (!value || typeof value !== "object")
@@ -311,15 +346,21 @@ export function content(value: unknown): Content {
         : undefined,
     button: String(c.button || "Shop now").slice(0, 80),
     url: safeUrl(c.url),
-    hero: c.hero ? safeUrl(c.hero) : undefined,
+    hero: c.hero ? imageSource(c.hero) : undefined,
     preview: String(c.preview || "").slice(0, 200),
     template:
-      c.template === "cart-recovery"
-        ? "cart-recovery"
-        : c.template === "b2b-wholesale"
-          ? "b2b-wholesale"
-          : "standard",
+      c.template === "welcome" || c.template === "welcome-social"
+        ? c.template
+        : c.template === "cart-recovery"
+          ? "cart-recovery"
+          : c.template === "b2b-wholesale"
+            ? "b2b-wholesale"
+            : "standard",
     couponCode: c.couponCode ? String(c.couponCode).slice(0, 100) : undefined,
+    couponExpiresAt: c.couponExpiresAt
+      ? new Date(c.couponExpiresAt).toISOString()
+      : undefined,
+    offerAboveBody: c.offerAboveBody === true,
     logo: c.logo ? imageSource(c.logo) : undefined,
     logoScale: c.logo ? scale(c.logoScale, c.logoWidth, 260) : undefined,
     footerImage: c.footerImage ? imageSource(c.footerImage) : undefined,
@@ -335,8 +376,12 @@ export function content(value: unknown): Content {
       c.footerUnsubscribeText === undefined
         ? undefined
         : String(c.footerUnsubscribeText).slice(0, 300),
-    instagramUrl: c.instagramUrl ? safeUrl(c.instagramUrl).slice(0, 500) : undefined,
-    facebookUrl: c.facebookUrl ? safeUrl(c.facebookUrl).slice(0, 500) : undefined,
+    instagramUrl: c.instagramUrl
+      ? safeUrl(c.instagramUrl).slice(0, 500)
+      : undefined,
+    facebookUrl: c.facebookUrl
+      ? safeUrl(c.facebookUrl).slice(0, 500)
+      : undefined,
     footerScale: c.footerImage
       ? scale(c.footerScale, c.footerWidth, 560)
       : undefined,
@@ -397,10 +442,14 @@ function socialHtml(c: Content) {
     '<div style="margin:24px 0 14px;text-align:center">' +
     '<strong style="display:block;margin-bottom:12px;color:#122f35;font-size:18px">Follow Us</strong>' +
     (c.instagramUrl
-      ? '<a href="' + escapeHtml(c.instagramUrl) + '" style="display:inline-block;margin:0 9px;color:#122f35;font-size:24px;font-weight:bold;text-decoration:none" aria-label="Instagram">◎</a>'
+      ? '<a href="' +
+        escapeHtml(c.instagramUrl) +
+        '" style="display:inline-block;margin:0 9px;color:#122f35;font-size:24px;font-weight:bold;text-decoration:none" aria-label="Instagram">◎</a>'
       : "") +
     (c.facebookUrl
-      ? '<a href="' + escapeHtml(c.facebookUrl) + '" style="display:inline-block;margin:0 9px;color:#122f35;font-family:Arial,sans-serif;font-size:24px;font-weight:bold;text-decoration:none" aria-label="Facebook">f</a>'
+      ? '<a href="' +
+        escapeHtml(c.facebookUrl) +
+        '" style="display:inline-block;margin:0 9px;color:#122f35;font-family:Arial,sans-serif;font-size:24px;font-weight:bold;text-decoration:none" aria-label="Facebook">f</a>'
       : "") +
     "</div>"
   );
@@ -480,6 +529,160 @@ export function render(
   c = content(withBranding(content(c), branding));
   address = c.showPostalAddress ? address : "";
   const e = escapeHtml;
+  if (c.template === "welcome" || c.template === "welcome-social") {
+    const displayExpiry = c.couponExpiresAt
+      ? new Intl.DateTimeFormat("en-US", {
+          dateStyle: "long",
+          timeStyle: "short",
+          timeZone: "America/Los_Angeles",
+        }).format(new Date(c.couponExpiresAt)) + " Pacific time"
+      : "your personal expiration date";
+    c = {
+      ...c,
+      body: c.body.replaceAll("{{ coupon_expires }}", displayExpiry),
+      bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", displayExpiry),
+    };
+    const social = c.template === "welcome-social";
+    const instagram =
+      c.instagramUrl || "https://www.instagram.com/coralsanonymous/";
+    const facebook =
+      c.facebookUrl || "https://www.facebook.com/coralsanonymousshop/";
+    const body =
+      c.bodyHtml !== undefined
+        ? personalize(c.bodyHtml, profileName, true)
+        : e(personalize(c.body, profileName)).replace(/\n/g, "<br>");
+    const expiry = c.couponExpiresAt
+      ? '<p style="font-size:12px;color:#555">Expires ' +
+        e(
+          new Intl.DateTimeFormat("en-US", {
+            dateStyle: "long",
+            timeStyle: "short",
+            timeZone: "America/Los_Angeles",
+          }).format(new Date(c.couponExpiresAt)),
+        ) +
+        " Pacific time. One use. Cannot combine with other discounts.</p>"
+      : "";
+    const offer =
+      c.couponCode && !social
+        ? '<div style="text-align:center;padding:16px 0 28px"><h2 style="font-size:23px;margin:0 0 18px">' +
+          (c.offerAboveBody ? "10% OFF Your Entire Order:" : "Discount Code:") +
+          '</h2><span style="display:inline-block;border:2px solid #e6e6e6;border-radius:20px;padding:8px 16px;font-size:23px;font-weight:bold;overflow-wrap:anywhere">' +
+          e(c.couponCode) +
+          "</span>" +
+          expiry +
+          "</div>"
+        : "";
+    const hero = c.hero
+      ? '<img src="' +
+        e(c.hero) +
+        '" alt="' +
+        e(c.heading) +
+        '" width="500" style="display:block;width:100%;max-width:500px;height:auto;margin:auto">'
+      : !social
+        ? '<div style="background:#8bd8e2;padding:44px 22px;text-align:center;border:1px solid #459ca4"><p style="font-size:25px;margin:0;color:#172e32;font-weight:bold">Aloha Friend,</p><p style="font-size:29px;line-height:1.25;font-weight:bold;margin:18px 0">' +
+          (c.offerAboveBody
+            ? "Thank you for subscribing<br>to our newsletter!"
+            : "Save 10% off<br>your entire order!") +
+          "</p></div>"
+        : "";
+    const socialCard = (
+      url: string,
+      label: string,
+      handle: string,
+      copy: string,
+      color: string,
+    ) =>
+      '<td width="50%" valign="top" style="padding:8px"><a href="' +
+      e(url) +
+      '" style="display:block;background:' +
+      color +
+      ';padding:28px 12px;color:white;text-decoration:none;text-align:center"><span style="font-size:12px;font-weight:bold">FOLLOW US ON</span><h2 style="font-size:23px;margin:12px 0">' +
+      label +
+      '</h2><span style="font-size:12px">' +
+      handle +
+      '</span><p style="font-weight:bold;font-size:16px;line-height:1.4;margin-top:28px">' +
+      copy +
+      "</p></a></td>";
+    return (
+      "<!doctype html><html>" +
+      emailHead +
+      '<body style="margin:0;background:#f7f7f7;font-family:Arial,sans-serif;color:#080808"><table role="presentation" width="100%"><tr><td class="reef-outer" align="center" style="padding:16px"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:white"><tr><td style="display:none;font-size:1px;max-height:0;overflow:hidden">' +
+      e(c.preview || "") +
+      "</td></tr>" +
+      (c.logo
+        ? '<tr><td class="reef-logo" align="center" style="padding:20px"><img src="' +
+          e(c.logo) +
+          '" alt="' +
+          e(organizationName) +
+          '" width="' +
+          Math.round(260 * (c.logoScale || 1)) +
+          '" style="max-width:100%;height:auto"></td></tr>'
+        : "") +
+      '<tr><td style="padding:8px 30px 0">' +
+      hero +
+      '</td></tr><tr><td class="reef-copy" style="padding:16px 30px 24px;font-size:16px;line-height:1.4"><h1 style="text-align:center;font-size:28px;line-height:1.2;margin:0 0 22px">' +
+      e(c.heading) +
+      "</h1>" +
+      (c.offerAboveBody ? offer : "") +
+      '<div style="' +
+      (c.offerAboveBody
+        ? "border-top:1px solid #ddd;padding-top:30px;text-align:left"
+        : "text-align:center") +
+      '">' +
+      body +
+      "</div>" +
+      (!c.offerAboveBody ? offer : "") +
+      (social
+        ? '<table role="presentation" width="100%" style="table-layout:fixed;margin-top:24px"><tr>' +
+          socialCard(
+            instagram,
+            "INSTAGRAM",
+            "@coralsanonymous",
+            "DAILY CORAL POSTS, SALES, AND MORE!",
+            "#c95379",
+          ) +
+          socialCard(
+            facebook,
+            "FACEBOOK",
+            "@coralsanonymousshop",
+            "CORAL SALES, PROMO CODES AND MORE!",
+            "#606aff",
+          ) +
+          "</tr></table>"
+        : "") +
+      '<p style="margin:26px 0 0;text-align:center"><a href="' +
+      e(c.url) +
+      '" style="display:block;border-radius:4px;background:#e69a49;padding:12px 16px;color:white;font-size:17px;font-weight:bold;text-decoration:none">' +
+      e(c.button) +
+      '</a></p></td></tr><tr><td style="background:#f7f7f7;padding:28px 20px;text-align:center;font-size:11px;line-height:1.6">' +
+      (c.footerImage
+        ? '<img src="' +
+          e(c.footerImage) +
+          '" alt="" width="' +
+          Math.round(560 * (c.footerScale || 1)) +
+          '" style="max-width:100%;height:auto">'
+        : "") +
+      (c.footerTitle
+        ? '<h2 style="font-size:18px">' + e(c.footerTitle) + "</h2>"
+        : "") +
+      socialHtml({ ...c, instagramUrl: instagram, facebookUrl: facebook }) +
+      (c.footerText
+        ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
+        : "") +
+      "<p>" +
+      e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
+      ' <a href="' +
+      e(unsubscribe) +
+      '" style="color:#555">Unsubscribe</a></p><p>' +
+      e(organizationName) +
+      (address ? "<br>" + e(address) : "") +
+      "</p><p>© " +
+      new Date().getFullYear() +
+      " " +
+      e(organizationName) +
+      " | All rights reserved.</p></td></tr></table></td></tr></table></body></html>"
+    );
+  }
   if (c.couponCode && c.template !== "cart-recovery") {
     const line = "Your 10% discount code: " + c.couponCode;
     c = {
@@ -517,7 +720,11 @@ export function render(
       '</td></tr><tr><td align="center" style="padding:0;background:#82d2dc"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed"><tr><td class="reef-copy reef-cart-copy"' +
       (c.hero ? ' background="' + e(c.hero) + '"' : "") +
       ' style="padding:58px 42px 28px;text-align:center;color:white;background-color:#70b8c2;' +
-      (c.hero ? 'background-image:url(' + e(c.hero) + ');background-size:cover;background-position:center;' : 'background-image:linear-gradient(135deg,#91d6dd,#5896a4,#91d6dd);') +
+      (c.hero
+        ? "background-image:url(" +
+          e(c.hero) +
+          ");background-size:cover;background-position:center;"
+        : "background-image:linear-gradient(135deg,#91d6dd,#5896a4,#91d6dd);") +
       '">' +
       '<h1 style="font-family:Georgia,serif;font-style:italic;font-size:30px;line-height:1.3;color:white;text-shadow:1px 2px 2px #173e46">' +
       e(c.heading) +
@@ -694,9 +901,9 @@ export function render(
     e(c.button) +
     '</a></p></td></tr><tr><td style="padding:24px;font-size:12px;text-align:center">' +
     (footerTitle(c) ? "<strong>" + e(footerTitle(c)) + "</strong><br>" : "") +
-      (c.footerText
-        ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
-        : "") +
+    (c.footerText
+      ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
+      : "") +
     socialHtml(c) +
     e(organizationName) +
     "<br>" +
@@ -758,7 +965,7 @@ export const flowDefaults = [
     name: "Welcome Series 08.2025",
     trigger: "EMAIL_SUBSCRIBED",
     description:
-      "Once per profile after new email signup; configured first-order coupon in the first message. Review subsequent delays and copy.",
-    delays: [0, 1440, 4320],
+      "Single opt-in welcome, reminders on days 3 and 10, a 14-day personal offer, and a social email on day 15. No re-entry.",
+    delays: [0, 4320, 14400, 21600],
   },
 ] as const;

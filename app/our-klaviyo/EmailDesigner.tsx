@@ -21,7 +21,7 @@ function Artwork({
   value?: string;
   scale: number;
   onChange: (value: string | undefined) => void;
-  onScale: (value: number) => void;
+  onScale?: (value: number) => void;
 }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -93,18 +93,20 @@ function Artwork({
           Remove {label.toLowerCase()}
         </button>
       )}
-      <label className="mk-art-scale">
-        Image size <span>{Math.round(scale * 100)}%</span>
-        <input
-          aria-label={label + " size"}
-          type="range"
-          min="0.25"
-          max="2.5"
-          step="0.05"
-          value={scale}
-          onChange={(e) => onScale(Number(e.target.value))}
-        />
-      </label>
+      {onScale && (
+        <label className="mk-art-scale">
+          Image size <span>{Math.round(scale * 100)}%</span>
+          <input
+            aria-label={label + " size"}
+            type="range"
+            min="0.25"
+            max="2.5"
+            step="0.05"
+            value={scale}
+            onChange={(e) => onScale(Number(e.target.value))}
+          />
+        </label>
+      )}
       {error && (
         <p className="mk-editor-error" role="alert">
           {error}
@@ -263,7 +265,9 @@ export default function EmailDesigner({
                   ? tab === "content" || tab === "footer"
                   : tab !== "artwork" ||
                     content.template === "b2b-wholesale" ||
-                    content.template === "cart-recovery",
+                    content.template === "cart-recovery" ||
+                    content.template === "welcome" ||
+                    content.template === "welcome-social",
               )
               .map((tab) => (
                 <button
@@ -331,18 +335,19 @@ export default function EmailDesigner({
                       onChange={(value) => changeContent("bodyHtml", value)}
                     />
                   </section>
-                  {content.template !== "b2b-wholesale" && (
-                    <label>
-                      Hero image URL
-                      <input
-                        type="url"
-                        value={content.hero || ""}
-                        onChange={(e) =>
-                          changeContent("hero", e.target.value || undefined)
-                        }
-                      />
-                    </label>
-                  )}
+                  {content.template !== "b2b-wholesale" &&
+                    !content.template?.startsWith("welcome") && (
+                      <label>
+                        Hero image URL
+                        <input
+                          type="url"
+                          value={content.hero || ""}
+                          onChange={(e) =>
+                            changeContent("hero", e.target.value || undefined)
+                          }
+                        />
+                      </label>
+                    )}
                   <section className="mk-editor-section">
                     <h3>Call to action</h3>
                     <p>The button at the end of your message.</p>
@@ -440,6 +445,14 @@ export default function EmailDesigner({
                     mobile.
                   </p>
                 </div>
+                {content.template?.startsWith("welcome") && (
+                  <Artwork
+                    label="Hero"
+                    value={content.hero}
+                    scale={1}
+                    onChange={(value) => changeContent("hero", value)}
+                  />
+                )}
                 <Artwork
                   label="Logo"
                   value={content.logo}
@@ -532,8 +545,8 @@ export default function EmailDesigner({
                 </label>
                 <small>
                   The logo, footer artwork, and social links saved here become
-                  shared defaults for future emails. The Unsubscribe link
-                  stays in every email.
+                  shared defaults for future emails. The Unsubscribe link stays
+                  in every email.
                 </small>
                 <h3 style={{ marginTop: 24 }}>Sender details</h3>
                 <label

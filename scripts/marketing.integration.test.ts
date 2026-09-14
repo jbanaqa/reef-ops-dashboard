@@ -7,6 +7,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { PrismaClient } from "../app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { defaultContent } from "../lib/marketing/rules";
+import { registerWelcomeTests } from "./welcome.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -249,9 +250,11 @@ test("signup session cannot confirm; inbox-only secret is single-use", async () 
   const f = await prisma.marketingResource.findUniqueOrThrow({
     where: { shop_kind_key: { shop, kind: "FLOW", key: "welcome" } },
   });
+  const legacy = { ...(f.data as Record<string, unknown>), reviewed: true };
+  delete (legacy as Record<string, unknown>).welcome;
   await prisma.marketingResource.update({
     where: { id: f.id },
-    data: { enabled: true, data: { ...(f.data as object), reviewed: true } },
+    data: { enabled: true, data: store.json(legacy) },
   });
   const signup = await import("../app/api/marketing/storefront/route");
   const confirm = await import("../app/api/marketing/confirm/route");
@@ -2812,3 +2815,4 @@ test("send this test step now advances only the selected email and keeps deliver
     });
   }
 });
+registerWelcomeTests(() => ({ prisma, store, worker }));

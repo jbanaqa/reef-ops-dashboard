@@ -1,4 +1,5 @@
 import { enrollCart, CartLine } from "./cart";
+import { enrollWelcome } from "./welcome";
 import { content, DAY, withCoupon } from "./rules";
 import { flowSequence, validateFlow } from "./flow-config";
 export type { FlowConfig } from "./flow-config";
@@ -23,6 +24,10 @@ export async function enroll(
   if (!resource?.enabled) return;
   const config = validateFlow(key, resource.data);
   if (!config.reviewed) return;
+  if (key === "welcome" && config.welcome) {
+    await enrollWelcome(tx, profileId, at, config);
+    return;
+  }
   if (key === "abandoned-cart" && config.cart?.testEmail !== undefined) {
     const recipient = await tx.marketingProfile.findUnique({
       where: { id: profileId },

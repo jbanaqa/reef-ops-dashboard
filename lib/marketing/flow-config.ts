@@ -1,6 +1,7 @@
 import { CartConfig, validateCart } from "./cart-config";
 import { StockConfig, validateStock } from "./stock-config";
 import { defaultContent } from "./rules";
+import { validateWelcome, type WelcomeConfig } from "./welcome-config";
 import { channels, content, Content, flowDefaults } from "./rules";
 
 export type FlowStep = {
@@ -23,11 +24,12 @@ export type FlowConfig = {
   threshold?: number;
   stock?: StockConfig;
   cart?: CartConfig;
+  welcome?: WelcomeConfig;
 };
 export type FlowTarget = {
   kind: "step" | "sms" | "branch" | "wait" | "info";
   index?: number;
-  section?: "products" | "coupon";
+  section?: "products" | "coupon" | "welcome-settings";
   branch?: "yes" | "no";
   timing?: "smsMinutes" | "branchMinutes";
 };
@@ -102,6 +104,21 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
   });
   if (key === "b2b-welcome" && steps.length !== 1)
     throw new Error("B2B welcome sends one email per profile.");
+  const welcome =
+    key === "welcome" && f.welcome ? validateWelcome(f.welcome) : undefined;
+  if (
+    welcome &&
+    (steps.length !== 4 ||
+      steps.some((s) => s.channel !== "EMAIL") ||
+      steps[0].minutes !== 0 ||
+      steps[1].minutes <= 0 ||
+      steps[2].minutes <= steps[1].minutes ||
+      steps[2].minutes >= welcome.couponDays * 1440 ||
+      steps[3].minutes < welcome.couponDays * 1440)
+  )
+    throw new Error(
+      "Welcome needs four emails: immediately, two ordered reminders before expiry, then social after expiry.",
+    );
   if (
     f.cart &&
     (key !== "abandoned-cart" ||
@@ -130,6 +147,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
   )
     throw new Error("Invalid inventory threshold.");
   return {
+    ...(welcome ? { welcome } : {}),
     ...(stock ? { stock } : {}),
     ...(key === "abandoned-cart" && f.cart
       ? { cart: validateCart(f.cart) }

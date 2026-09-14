@@ -1,5 +1,6 @@
 import { recommendationHistory } from "./cart-feed";
 import crypto from "node:crypto";
+import { uniqueDiscount } from "./discounts";
 import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
 import { Content, content, DAY, eligible } from "./rules";
@@ -392,91 +393,8 @@ export async function cartProducts(
   return result;
 }
 
-/** Persist the random code before contacting Shopify, then look up on every retry. */
 export async function cartCoupon(messageId: string) {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const code =
-    "AC300-" +
-    Array.from(
-      crypto.randomBytes(8),
-      (b) => alphabet[b % alphabet.length],
-    ).join("");
-  const r = await prisma.marketingResource.upsert({
-    where: {
-      shop_kind_key: { shop: shop(), kind: "CART_COUPON", key: messageId },
-    },
-    create: {
-      shop: shop(),
-      kind: "CART_COUPON",
-      key: messageId,
-      name: "Abandon_Cart10",
-      data: { code },
-    },
-    update: {},
-  });
-  const saved = r.data as { code: string; discountId?: string };
-  if (saved.discountId) return saved.code;
-  const title = "Reef Ops Abandon_Cart10 " + messageId;
-  const lookup = await shopifyGraphql<{
-    data?: {
-      codeDiscountNodeByCode: {
-        id: string;
-        codeDiscount: { title?: string };
-      } | null;
-    };
-  }>(
-    `query CartCouponLookup($code: String!) { codeDiscountNodeByCode(code:$code) { id codeDiscount { ... on DiscountCodeBasic { title } } } }`,
-    { code: saved.code },
-  );
-  if (!lookup.data || !("codeDiscountNodeByCode" in lookup.data))
-    throw new Error("Discount lookup unavailable");
-  let id = lookup.data.codeDiscountNodeByCode?.id;
-  if (id && lookup.data.codeDiscountNodeByCode?.codeDiscount.title !== title)
-    throw new Error("Discount code conflict; review required");
-  if (!id) {
-    const start = new Date(),
-      end = new Date(start);
-    end.setUTCFullYear(end.getUTCFullYear() + 1);
-    const result = await shopifyGraphql<{
-      data?: {
-        discountCodeBasicCreate?: {
-          codeDiscountNode?: { id: string } | null;
-          userErrors?: { message: string }[];
-        };
-      };
-    }>(
-      `mutation CartCouponCreate($input: DiscountCodeBasicInput!) { discountCodeBasicCreate(basicCodeDiscount:$input) { codeDiscountNode { id } userErrors { message } } }`,
-      {
-        input: {
-          title,
-          code: saved.code,
-          context: { all: "ALL" },
-          startsAt: start.toISOString(),
-          endsAt: end.toISOString(),
-          customerGets: { value: { percentage: 0.1 }, items: { all: true } },
-          combinesWith: {
-            orderDiscounts: false,
-            productDiscounts: false,
-            shippingDiscounts: false,
-          },
-          usageLimit: 1,
-          appliesOncePerCustomer: true,
-        },
-      },
-    );
-    id = result.data?.discountCodeBasicCreate?.codeDiscountNode?.id;
-    if (!id)
-      throw new Error(
-        result.data?.discountCodeBasicCreate?.userErrors
-          ?.map((e) => e.message)
-          .join("; ") || "Discount creation unavailable",
-      );
-  }
-  await prisma.marketingResource.update({
-    where: { id: r.id },
-    data: { data: { code: saved.code, discountId: id } },
-  });
-  return saved.code;
+  return (await uniqueDiscount(messageId, { kind: "CART_COUPON", name: "Abandon_Cart10", prefix: "AC300-" })).code;
 }
 export async function cartReadiness() {
   const r = await shopifyGraphql<{

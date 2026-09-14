@@ -198,6 +198,9 @@ function eventLabel(e: Activity) {
     BOUNCED: "Email bounced",
     COMPLAINED: "Spam complaint received",
     UNSUBSCRIBED: "Unsubscribed",
+    EMAIL_SUBSCRIBED: "Joined Mailable Subscribers",
+    WELCOME_ENTERED: "Entered the welcome series",
+    FORM_EMAIL_SUBMITTED: "Email signup submitted",
     "checkouts/create": "Checkout started",
     "checkouts/update": "Checkout updated",
   };

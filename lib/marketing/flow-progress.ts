@@ -1,4 +1,5 @@
 import { flowDefaults } from "./rules";
+import { welcomeLabels } from "./welcome-config";
 type Message = {
   id: string;
   key: string;
@@ -65,11 +66,13 @@ export function flowProgress(
                       ? "Finished · some messages not sent"
                       : "Scheduled steps completed";
       const step = (m: Message) =>
-        m.flowCondition === "cart-v1:first"
-          ? "First reminder"
-          : m.flowCondition?.startsWith("cart-v1:final")
-            ? "Follow-up email"
-            : m.subject || "Message";
+        m.flowCondition?.startsWith("welcome-v1:")
+          ? welcomeLabels[Number(m.flowCondition.split(":")[1])] || m.subject
+          : m.flowCondition === "cart-v1:first"
+            ? "First reminder"
+            : m.flowCondition?.startsWith("cart-v1:final")
+              ? "Follow-up email"
+              : m.subject || "Message";
       return {
         id: rows[0].id,
         flowKey: rows[0].flowKey!,

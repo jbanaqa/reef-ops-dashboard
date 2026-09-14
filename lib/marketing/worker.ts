@@ -28,6 +28,15 @@ import {
 } from "./stock-config";
 import { validateFlow } from "./flow-config";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
+import {
+  loadWelcome,
+  welcomeHasOrdered,
+  welcomeAudienceBlock,
+  welcomeDependency,
+  prepareWelcome,
+  advanceWelcome,
+  type WelcomeRun,
+} from "./welcome";
 
 export async function runMarketing(onlyMessageId?: string) {
   const inbox = onlyMessageId ? null : await processMarketingInbox();
@@ -204,6 +213,32 @@ export async function runMarketing(onlyMessageId?: string) {
       );
     inspected++;
     let cartRun: CartRun | null = null;
+    let welcomeRun: WelcomeRun | null = null;
+    let welcomePurchased = false;
+    if (candidate.flowCondition?.startsWith("welcome-v1:")) {
+      try {
+        welcomeRun = await loadWelcome(candidate.profileId);
+        if (candidate.flowStep === 1 || candidate.flowStep === 2) {
+          const p = await prisma.marketingProfile.findUniqueOrThrow({
+            where: { id: candidate.profileId },
+          });
+          if (!p.email) throw new Error("Subscriber email missing");
+          welcomePurchased =
+            !!p.lastOrderAt || (await welcomeHasOrdered(p.email));
+        }
+      } catch (error) {
+        await prisma.marketingMessage.updateMany({
+          where: { id: candidate.id, status: "PENDING" },
+          data: {
+            dueAt: new Date(Date.now() + 900000),
+            error:
+              "Waiting for welcome checks: " +
+              (error instanceof Error ? error.message : "lookup failed"),
+          },
+        });
+        continue;
+      }
+    }
     let shopifyOrder: Date | null = null;
     if (candidate.flowCondition?.startsWith("cart-v1:")) {
       try {
@@ -301,7 +336,7 @@ export async function runMarketing(onlyMessageId?: string) {
         if (!f?.enabled || !(f.data as { reviewed?: boolean }).reviewed)
           deferred = "Flow paused";
         if (
-          ["b2b-welcome", "abandoned-cart"].includes(m.flowKey) &&
+          ["b2b-welcome", "abandoned-cart", "welcome"].includes(m.flowKey) &&
           !config.ingestEnabled
         )
           deferred = "Shopify ingestion paused";
@@ -364,6 +399,42 @@ export async function runMarketing(onlyMessageId?: string) {
         }
         if (m.flowKey === "b2b-welcome" && !m.profile.tags.includes("b2b"))
           reason = "B2B tag removed";
+        if (
+          m.flowKey === "welcome" &&
+          (f?.data as { welcome?: unknown })?.welcome &&
+          !welcomeRun
+        )
+          reason =
+            "Legacy welcome replaced; existing subscribers are not re-enrolled";
+        if (welcomeRun && f) {
+          const live = validateFlow("welcome", f.data);
+          reason ||= welcomeAudienceBlock(live, welcomeRun, m.profile.email);
+          const index = m.flowStep!;
+          if (
+            (index === 1 || index === 2) &&
+            (welcomePurchased || m.profile.lastOrderAt)
+          )
+            reason = "Customer has placed an order; discount reminder skipped";
+          const dependency = await welcomeDependency(tx, m.profileId, index);
+          if (dependency === "wait")
+            deferred = "Waiting for welcome email delivery";
+          else reason ||= dependency;
+          if (index < 3) {
+            const coupon = await tx.marketingResource.findUnique({
+              where: {
+                shop_kind_key: {
+                  shop: shop(),
+                  kind: "WELCOME_COUPON",
+                  key: m.profileId,
+                },
+              },
+            });
+            const expires = (coupon?.data as { endsAt?: string } | undefined)
+              ?.endsAt;
+            if (expires && new Date(expires) <= new Date())
+              reason = "Welcome discount expired; offer email skipped";
+          }
+        }
         if (m.flowKey === "abandoned-cart") {
           const testBlock = cartTestBlock(
             (f?.data as { cart?: CartConfig })?.cart,
@@ -393,7 +464,7 @@ export async function runMarketing(onlyMessageId?: string) {
             if (staleDue) {
               const smsMinutes = cartRun.config.cart?.testEmail
                 ? 0
-                : cartRun.config.smsMinutes ?? 30;
+                : (cartRun.config.smsMinutes ?? 30);
               const firstMinutes = smsMinutes + cartRun.config.steps[0].minutes;
               const minutes =
                 m.flowCondition === "cart-v1:sms"
@@ -530,84 +601,86 @@ export async function runMarketing(onlyMessageId?: string) {
           }
         }
       }
-      if (cartRun && !deferred) {
+      if ((cartRun || welcomeRun) && !deferred) {
         const bypassRecentEmailSuppression =
           m.channel === "EMAIL" &&
-          cartRun.config.cart?.bypassRecentEmailSuppression === true &&
-          !!cartRun.config.cart.testEmail &&
+          cartRun?.config.cart?.bypassRecentEmailSuppression === true &&
+          !!cartRun?.config.cart.testEmail &&
           cartRun.config.cart.testEmail === m.profile.email;
         if (!bypassRecentEmailSuppression) {
-        // Reserve against concurrent claims as well as already sent messages.
-        const recent = await tx.marketingMessage.findFirst({
-          where: {
-            shop: shop(),
-            profileId: m.profileId,
-            id: { not: m.id },
-            channel:
-              m.channel === "EMAIL"
-                ? "EMAIL"
-                : { in: ["SMS_MARKETING", "SMS_TRANSACTIONAL"] },
-            AND: [
-              {
-                OR: [
-                  { flowKey: null },
-                  { flowKey: { not: "email-confirmation" } },
-                ],
-              },
-            ],
-            OR: [
-              {
-                status: "SENT",
-                sentAt: {
-                  gte: new Date(
-                    Date.now() - (m.channel === "EMAIL" ? 16 : 24) * 3600000,
-                  ),
-                },
-              },
-              { status: { in: ["SENDING", "UNKNOWN"] } },
-            ],
-          },
-        });
-        const externalEmail =
-          m.channel === "EMAIL"
-            ? await tx.marketingEvent.findFirst({
-                where: {
-                  shop: shop(),
-                  type: "EXTERNAL_EMAIL_SENT",
-                  occurredAt: {
-                    gte: new Date(Date.now() - 16 * 3600000),
-                    lte: new Date(),
-                  },
+          // Reserve against concurrent claims as well as already sent messages.
+          const recent = await tx.marketingMessage.findFirst({
+            where: {
+              shop: shop(),
+              profileId: m.profileId,
+              id: { not: m.id },
+              channel:
+                m.channel === "EMAIL"
+                  ? "EMAIL"
+                  : { in: ["SMS_MARKETING", "SMS_TRANSACTIONAL"] },
+              AND: [
+                {
                   OR: [
-                    { profileId: m.profileId },
-                    {
-                      payload: {
-                        path: ["email"],
-                        equals: m.profile.email || "",
-                      },
-                    },
+                    { flowKey: null },
+                    { flowKey: { not: "email-confirmation" } },
                   ],
                 },
-              })
-            : null;
-        if (externalEmail)
-          reason =
-            "Skipped: recently received email through Klaviyo (16 hours)";
-        if (recent) {
-          if (recent.status === "SENT")
-            reason =
-              "Skipped: recently received " +
-              (m.channel === "EMAIL" ? "email (16 hours)" : "text (24 hours)");
-          else deferred = "Another message delivery is being checked";
-        }
-        if (reason) {
-          await tx.marketingMessage.update({
-            where: { id: m.id },
-            data: { status: "CANCELLED", error: reason },
+              ],
+              OR: [
+                {
+                  status: "SENT",
+                  sentAt: {
+                    gte: new Date(
+                      Date.now() - (m.channel === "EMAIL" ? 16 : 24) * 3600000,
+                    ),
+                  },
+                },
+                { status: { in: ["SENDING", "UNKNOWN"] } },
+              ],
+            },
           });
-          await advanceCart(tx, m);
-          return null;
-        }
+          const externalEmail =
+            m.channel === "EMAIL"
+              ? await tx.marketingEvent.findFirst({
+                  where: {
+                    shop: shop(),
+                    type: "EXTERNAL_EMAIL_SENT",
+                    occurredAt: {
+                      gte: new Date(Date.now() - 16 * 3600000),
+                      lte: new Date(),
+                    },
+                    OR: [
+                      { profileId: m.profileId },
+                      {
+                        payload: {
+                          path: ["email"],
+                          equals: m.profile.email || "",
+                        },
+                      },
+                    ],
+                  },
+                })
+              : null;
+          if (externalEmail)
+            reason =
+              "Skipped: recently received email through Klaviyo (16 hours)";
+          if (recent) {
+            if (recent.status === "SENT")
+              reason =
+                "Skipped: recently received " +
+                (m.channel === "EMAIL"
+                  ? "email (16 hours)"
+                  : "text (24 hours)");
+            else deferred = "Another message delivery is being checked";
+          }
+          if (reason) {
+            await tx.marketingMessage.update({
+              where: { id: m.id },
+              data: { status: "CANCELLED", error: reason },
+            });
+            await advanceCart(tx, m);
+            return null;
+          }
         }
       }
       if (deferred) {
@@ -649,6 +722,127 @@ export async function runMarketing(onlyMessageId?: string) {
     if (!claimed) continue;
     const { message, settings } = claimed;
     try {
+      if (welcomeRun) {
+        try {
+          const readyKey = {
+            shop: shop(),
+            kind: "WELCOME_READY",
+            key: message.id,
+          };
+          const ready = await prisma.marketingResource.findUnique({
+            where: { shop_kind_key: readyKey },
+          });
+          if (ready) {
+            const saved = ready.data as { content: Content; subject: string };
+            message.content = JSON.parse(JSON.stringify(saved.content));
+            message.subject = saved.subject;
+          } else {
+            message.content = JSON.parse(
+              JSON.stringify(
+                await prepareWelcome(
+                  message.profileId,
+                  message.flowStep!,
+                  welcomeRun,
+                ),
+              ),
+            );
+            const live = await prisma.marketingResource.findUniqueOrThrow({
+              where: {
+                shop_kind_key: { shop: shop(), kind: "FLOW", key: "welcome" },
+              },
+            });
+            message.subject = validateFlow("welcome", live.data).steps[
+              message.flowStep!
+            ].subject;
+            await prisma.marketingResource.create({
+              data: {
+                ...readyKey,
+                name: "Prepared welcome email",
+                data: json({
+                  content: message.content,
+                  subject: message.subject,
+                }),
+              },
+            });
+          }
+          await prisma.marketingMessage.update({
+            where: { id: message.id },
+            data: { content: json(message.content), subject: message.subject },
+          });
+          const latest = await prisma.marketingMessage.findUniqueOrThrow({
+            where: { id: message.id },
+            include: { profile: { include: { consents: true } } },
+          });
+          const live = await prisma.marketingResource.findUniqueOrThrow({
+            where: {
+              shop_kind_key: { shop: shop(), kind: "FLOW", key: "welcome" },
+            },
+          });
+          const liveSettings = await prisma.marketingResource.findUnique({
+            where: {
+              shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" },
+            },
+          });
+          const state = marketingSettings(liveSettings?.data),
+            gates = setup(state.operations, state.postalAddress);
+          const expired = (message.content as Content).couponExpiresAt;
+          const purchased =
+            (message.flowStep === 1 || message.flowStep === 2) &&
+            (!!latest.profile.lastOrderAt ||
+              (await welcomeHasOrdered(latest.profile.email!)));
+          const block = welcomeAudienceBlock(
+            validateFlow("welcome", live.data),
+            welcomeRun,
+            latest.profile.email,
+          );
+          if (latest.status !== "SENDING") continue;
+          if (
+            block ||
+            purchased ||
+            !eligible(
+              latest.profile.consents.find((c) => c.channel === "EMAIL"),
+            ) ||
+            (expired && new Date(expired) <= new Date())
+          ) {
+            await prisma.marketingMessage.update({
+              where: { id: message.id },
+              data: {
+                status: "CANCELLED",
+                error:
+                  block ||
+                  "Purchase, consent, or discount expiration changed during preparation",
+              },
+            });
+            continue;
+          }
+          if (
+            !live.enabled ||
+            !(live.data as { reviewed?: boolean }).reviewed ||
+            !gates.sendingEnabled ||
+            !gates.ingestEnabled ||
+            !gates.emailReady ||
+            !gates.migrationConfirmed ||
+            (await inboxUnresolved())
+          ) {
+            await prisma.marketingMessage.update({
+              where: { id: message.id },
+              data: {
+                status: "PENDING",
+                dueAt: new Date(Date.now() + 900000),
+                error: "Sending paused during preparation",
+              },
+            });
+            continue;
+          }
+        } catch (error) {
+          throw new DeliveryError(
+            "Welcome preparation: " +
+              (error instanceof Error ? error.message : "failed"),
+            false,
+            true,
+          );
+        }
+      }
       if (cartRun && message.channel === "EMAIL") {
         try {
           const c = message.content as Content;
@@ -799,6 +993,7 @@ export async function runMarketing(onlyMessageId?: string) {
           data: { status: "SENT", sentAt: new Date(), providerId },
         });
         await advanceCart(tx, message);
+        await advanceWelcome(tx, message);
         await record(tx, {
           key: "sent:" + message.id,
           type: "SENT",

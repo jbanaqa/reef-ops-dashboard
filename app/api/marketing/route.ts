@@ -711,6 +711,8 @@ export async function POST(request: Request) {
         if (b.enabled && !f.reviewed)
           throw new Error("Review the flow configuration before enabling.");
         if (b.enabled && b.key === "low-stock") validateStock(f.stock, true);
+        if (b.enabled && b.key === "welcome" && !f.welcome)
+          throw new Error("Open and review the updated welcome flow before enabling it.");
         if (b.enabled && b.key === "abandoned-cart" && !f.cart)
           throw new Error(
             "Open and review the updated cart flow before enabling it.",

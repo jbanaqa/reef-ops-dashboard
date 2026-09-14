@@ -62,8 +62,13 @@
     return;
   setTimeout(
     async () => {
+      let singleOptIn = false;
+      let couponDays = 14;
       try {
-        if (!(await post({ action: "config" })).enabled) return;
+        const config = await post({ action: "config" });
+        if (!config.enabled) return;
+        singleOptIn = config.singleOptIn === true;
+        couponDays = config.couponDays || 14;
       } catch {
         return;
       }
@@ -155,6 +160,7 @@
         status.textContent = "";
         panel.innerHTML =
           '<p>Get 10% off your first order after confirming your email.</p><form><label>Email <input name="email" type="email" required></label><label><input type="checkbox" name="consent" required> I agree to receive marketing emails.</label><input name="website" tabindex="-1" aria-hidden="true" style="display:none"><p><button type="submit">Sign up</button></p></form>';
+        if (singleOptIn) panel.querySelector("p").textContent = "Sign up for emails and get 10% off your first order. Your personal offer lasts " + couponDays + " days.";
         const form = panel.querySelector("form");
         form.onsubmit = async (e) => {
           e.preventDefault();
@@ -167,7 +173,14 @@
               email: f.get("email"),
               emailConsent: f.get("consent") === "on",
               website: f.get("website"),
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             });
+            if (result.completed) {
+              finish();
+              panel.textContent = "Thanks for joining our reefing community!";
+              status.textContent = result.message;
+              return;
+            }
             session = result.session;
             storage.set("reef-marketing-session", session);
             waiting();

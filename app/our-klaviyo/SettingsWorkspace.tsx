@@ -1059,9 +1059,9 @@ export default function SettingsWorkspace({
                     <dd>{setup.smsReady ? "Configured" : "Not configured"}</dd>
                   </div>
                   <div>
-                    <dt>Signup coupon</dt>
+                    <dt>Welcome discounts</dt>
                     <dd>
-                      {setup.couponReady ? "Configured" : "Not configured"}
+                      Managed in the welcome flow; Shopify discount access required
                     </dd>
                   </div>
                   <div>

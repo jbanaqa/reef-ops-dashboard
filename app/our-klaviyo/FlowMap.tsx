@@ -4,6 +4,7 @@ import {
   FlowTarget,
   flowSequence,
 } from "@/lib/marketing/flow-config";
+import { welcomeLabels } from "@/lib/marketing/welcome-config";
 type Resource = {
   key: string;
   name: string;
@@ -22,7 +23,7 @@ export function flowNodes(resource: Resource): Node[] {
     f = resource.data as unknown as FlowConfig;
   const triggers: Record<string, string> = {
     "b2b-welcome": "Shopify B2B tag added",
-    welcome: "Email signup confirmed",
+    welcome: "Joins Mailable Subscribers",
     "abandoned-cart": "Identified checkout started",
     "low-stock": "Inventory crosses threshold",
     "delivery-upsell": "Trusted delivery date received",
@@ -39,6 +40,67 @@ export function flowNodes(resource: Resource): Node[] {
           : "New events enroll only while this flow is reviewed and enabled.",
     },
   ];
+  if (key === "welcome" && f.welcome) {
+    nodes[0].detail =
+      "Reef Ops popup · single opt-in · once per subscriber. Imports do not enroll.";
+    nodes[0].target = { kind: "info", section: "welcome-settings" };
+    f.steps.forEach((s, i) => {
+      if (i)
+        nodes.push({
+          id: "welcome-wait:" + i,
+          kind: "wait",
+          label:
+            "Day " +
+            s.minutes / 1440 +
+            (i === 3
+              ? " · " +
+                String(f.welcome!.socialHour).padStart(2, "0") +
+                ":00 local time"
+              : ""),
+          detail:
+            i === 3
+              ? "After the offer expires. Purchasers also reach this step."
+              : i === 2
+                ? (s.minutes - f.steps[1].minutes) / 1440 +
+                  " days after the first reminder."
+                : "After the welcome offer starts.",
+          target: { kind: "info", section: "welcome-settings" },
+        });
+      if (i === 1 || i === 2)
+        nodes.push({
+          id: "welcome-purchase:" + i,
+          kind: "condition",
+          label: "Still has no orders?",
+          detail:
+            "Yes: send this reminder. Purchased: skip the discount reminders and continue to the social email.",
+          target: { kind: "info", section: "welcome-settings" },
+        });
+      nodes.push({
+        id: "welcome-email:" + i,
+        kind: "email",
+        label: welcomeLabels[i],
+        detail: (i === 0 ? "Immediately · " : "") + s.subject,
+        target: { kind: "step", index: i },
+      });
+      if (i === 2)
+        nodes.push({
+          id: "welcome-expiry",
+          kind: "condition",
+          label: "Day " + f.welcome!.couponDays + " · discount expires",
+          detail:
+            "Same personal code in all three emails. Its expiration never resets.",
+          target: { kind: "info", section: "welcome-settings" },
+        });
+    });
+    nodes.push({
+      id: "end",
+      kind: "end",
+      label: "End · no re-entry",
+      detail: "Consent and recent email checks apply before sending.",
+      target: { kind: "info" },
+    });
+    return nodes;
+  }
   for (const s of flowSequence(key, f)) {
     const timing =
       s.target.kind === "sms"

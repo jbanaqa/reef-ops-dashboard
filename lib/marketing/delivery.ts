@@ -40,7 +40,7 @@ export function emailBody(
     content: string;
     content_id: string;
   }[] = [];
-  for (const field of ["logo", "footerImage"] as const) {
+  for (const field of ["logo", "footerImage", "hero"] as const) {
     const image = effectiveContent[field];
     const match = image?.match(
       /^data:image\/(png|jpeg|webp|gif);base64,([a-zA-Z0-9+/=]+)$/,
@@ -66,6 +66,7 @@ export function emailBody(
           effectiveContent.couponCode +
           " (one use; cannot combine with other discounts)"
         : undefined,
+      effectiveContent.couponExpiresAt ? "Offer expires: " + effectiveContent.couponExpiresAt : undefined,
       (effectiveContent.products || [])
         .map((p) => [p.title, p.price, p.url].filter(Boolean).join(" · "))
         .join("\n"),

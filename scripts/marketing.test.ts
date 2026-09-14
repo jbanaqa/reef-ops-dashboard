@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  welcomeDraft,
+  welcomeSteps,
+  defaultWelcome,
+} from "../lib/marketing/welcome-config";
+import {
   content,
   defaultContent,
   eligible,
@@ -15,6 +20,94 @@ import {
   withCoupon,
   personalize,
 } from "../lib/marketing/rules";
+test("welcome schedule rejects offers after expiry and preserves customized drafts", async () => {
+  const { validateFlow } = await import("../lib/marketing/flow-config");
+  const f = { reviewed: false, steps: welcomeSteps, welcome: defaultWelcome };
+  assert.equal(validateFlow("welcome", f).steps.length, 4);
+  assert.throws(() =>
+    validateFlow("welcome", {
+      ...f,
+      welcome: { ...defaultWelcome, couponDays: 10 },
+    }),
+  );
+  assert.throws(() =>
+    validateFlow("welcome", {
+      ...f,
+      steps: f.steps.map((s, i) => (i === 2 ? { ...s, minutes: 1440 } : s)),
+    }),
+  );
+  assert.throws(() =>
+    validateFlow("welcome", {
+      ...f,
+      welcome: { ...defaultWelcome, fallbackTimezone: "" },
+    }),
+  );
+  assert.throws(() =>
+    validateFlow("welcome", {
+      ...f,
+      welcome: { ...defaultWelcome, testEmail: "invalid" },
+    }),
+  );
+  const old = {
+    reviewed: true,
+    steps: [
+      {
+        ...welcomeSteps[0],
+        content: {
+          ...defaultContent,
+          body: "Keep my copy",
+          hero: "https://example.com/hero.png",
+        },
+      },
+    ],
+  };
+  const upgrade = welcomeDraft(old);
+  assert.equal(upgrade.reviewed, false);
+  assert.equal(upgrade.steps[0].content.body, "Keep my copy");
+  assert.equal(upgrade.steps[0].content.hero, "https://example.com/hero.png");
+  assert.equal(upgrade.steps.length, 4);
+  const scaffold = welcomeDraft({ reviewed: false, steps: [{ minutes: 0, channel: "EMAIL", subject: "Welcome Series 08.2025", content: defaultContent }] });
+  assert.equal(scaffold.steps[0].content.heading, "Thanks for signing up!");
+  assert.equal(scaffold.steps[0].content.offerAboveBody, true);
+  assert.equal(scaffold.steps[0].subject, welcomeSteps[0].subject);
+});
+test("welcome templates render the assigned offer, shared branding, date, and social links", () => {
+  const c = {
+    ...welcomeSteps[0].content,
+    couponCode: "WELCOME10-EXAMPLE",
+    couponExpiresAt: "2026-10-01T19:00:00Z",
+  };
+  const html = render(
+    c,
+    "https://example.com/unsubscribe",
+    "Hidden address",
+    "Jane Doe",
+    "Corals Anonymous",
+    { logo: "https://example.com/logo.png" },
+  );
+  assert.match(html, /example.com\/logo.png/);
+  assert.match(html, /Aloha Jane/);
+  assert.match(html, /WELCOME10-EXAMPLE/);
+  assert.ok(
+    html.indexOf("WELCOME10-EXAMPLE") < html.indexOf("Our story started"),
+  );
+  assert.doesNotMatch(html, /Hidden address/);
+  const reminder = render(
+    {
+      ...welcomeSteps[2].content,
+      couponCode: "WELCOME10-EXAMPLE",
+      couponExpiresAt: c.couponExpiresAt,
+    },
+    "#unsubscribe",
+    "",
+  );
+  assert.doesNotMatch(reminder, /\{\{ coupon_expires \}\}/);
+  assert.match(reminder, /October 1, 2026/);
+  const social = render(welcomeSteps[3].content, "#unsubscribe", "");
+  assert.match(social, /INSTAGRAM/);
+  assert.match(social, /FACEBOOK/);
+  assert.doesNotMatch(social, /Discount Code:/);
+});
 test("suppression always overrides subscribed status", () => {
   assert.equal(eligible({ status: "SUBSCRIBED", suppressed: true }), false);
   assert.equal(eligible({ status: "SUBSCRIBED", suppressed: false }), true);

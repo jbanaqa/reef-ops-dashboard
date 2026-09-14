@@ -629,13 +629,14 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                 visitors and recognized profiles are suppressed.
               </p>
               <p>
-                The first-order offer is 10% off. Email ownership is confirmed
-                before welcome messages begin. SMS consent remains separate.
+                The updated welcome flow uses single opt-in: agreeing to email
+                marketing starts the series without a confirmation email. SMS
+                signup is not part of this sequence. Save and review the welcome
+                flow before replacing the existing Klaviyo popup.
               </p>
               <p>
                 Form enabled: <b>{data.setup.formEnabled ? "Yes" : "No"}</b> ·
-                Coupon configured:{" "}
-                <b>{data.setup.couponReady ? "Yes" : "No"}</b>
+                Discounts: <b>Managed in the welcome flow</b>
               </p>
               <p>
                 Install the storefront script and configure the permitted

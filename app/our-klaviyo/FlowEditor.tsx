@@ -14,6 +14,11 @@ import { FlowMap, Node } from "./FlowMap";
 import EmailDesigner from "./EmailDesigner";
 import FlowDialog from "./FlowDialog";
 import CartTools from "./CartTools";
+import WelcomeSettings from "./WelcomeSettings";
+import {
+  welcomeDraft,
+  type WelcomeConfig,
+} from "@/lib/marketing/welcome-config";
 import { readDraft, writeDraft } from "./flow-drafts";
 
 import { cartDraft, CartConfig } from "@/lib/marketing/cart-config";
@@ -28,6 +33,7 @@ type Step = {
 type Branch = { subject: string; content: Content };
 type Data = {
   cart?: CartConfig;
+  welcome?: WelcomeConfig;
   reviewed?: boolean;
   description?: string;
   threshold?: number;
@@ -74,13 +80,19 @@ function FlowEditorState({
   ) => void | Promise<unknown>;
 }) {
   const upgrade = (data: Data) =>
-    resource.key === "abandoned-cart" ? cartDraft(data as FlowConfig) : data;
+    resource.key === "abandoned-cart"
+      ? cartDraft(data as FlowConfig)
+      : resource.key === "welcome"
+        ? welcomeDraft(data as FlowConfig)
+        : data;
   const initial = upgrade(resource.data as unknown as Data);
+  const [previewNow] = useState(() => Date.now());
   const [flow, setFlow] = useState<Data>(() =>
     JSON.parse(JSON.stringify(initial)),
   );
   const [enabled, setEnabled] = useState(
-    resource.key === "abandoned-cart" && !resource.data.cart
+    (resource.key === "abandoned-cart" && !resource.data.cart) ||
+      (resource.key === "welcome" && !resource.data.welcome)
       ? false
       : resource.enabled,
   );
@@ -118,7 +130,8 @@ function FlowEditorState({
         ) {
           setFlow(upgrade(draft.flow));
           setEnabled(
-            resource.key === "abandoned-cart" && !draft.flow.cart
+            (resource.key === "abandoned-cart" && !draft.flow.cart) ||
+              (resource.key === "welcome" && !draft.flow.welcome)
               ? false
               : draft.enabled,
           );
@@ -264,25 +277,33 @@ function FlowEditorState({
     if (content && selected?.node.kind !== "sms")
       preview = render(
         normalizeContent(
-          flow.cart
+          flow.welcome && (selected?.target.index ?? 0) < 3
             ? {
                 ...content,
-                products: Array.from(
-                  { length: flow.cart.productCount },
-                  (_, i) => ({
-                    title:
-                      i === 0
-                        ? "Example coral from your cart"
-                        : "Example recommended coral",
-                    url: "https://coralsanonymous.com/cart",
-                    price: "Sample product",
-                  }),
-                ),
-                ...(selected?.target.branch === "no"
-                  ? { couponCode: "AC300-PREVIEW" }
-                  : {}),
+                couponCode: "WELCOME10-PREVIEW",
+                couponExpiresAt: new Date(
+                  previewNow + flow.welcome.couponDays * 86400000,
+                ).toISOString(),
               }
-            : content,
+            : flow.cart
+              ? {
+                  ...content,
+                  products: Array.from(
+                    { length: flow.cart.productCount },
+                    (_, i) => ({
+                      title:
+                        i === 0
+                          ? "Example coral from your cart"
+                          : "Example recommended coral",
+                      url: "https://coralsanonymous.com/cart",
+                      price: "Sample product",
+                    }),
+                  ),
+                  ...(selected?.target.branch === "no"
+                    ? { couponCode: "AC300-PREVIEW" }
+                    : {}),
+                }
+              : content,
         ),
         "#unsubscribe",
         settings.postalAddress,
@@ -604,7 +625,8 @@ function FlowEditorState({
           ) {
             setFlow(upgrade(JSON.parse(JSON.stringify(resource.data)) as Data));
             setEnabled(
-              resource.key === "abandoned-cart" && !resource.data.cart
+              (resource.key === "abandoned-cart" && !resource.data.cart) ||
+                (resource.key === "welcome" && !resource.data.welcome)
                 ? false
                 : resource.enabled,
             );
@@ -658,36 +680,46 @@ function FlowEditorState({
                     testEmail(
                       to,
                       subject,
-                      flow.cart
+                      flow.welcome && (selected.target.index ?? 0) < 3
                         ? {
                             ...c,
-                            products: Array.from(
-                              { length: flow.cart.productCount },
-                              () => ({
-                                title: "Example coral",
-                                url: "https://coralsanonymous.com/cart",
-                              }),
-                            ),
-                            ...(selected.target.branch === "no"
-                              ? { couponCode: "AC300-PREVIEW" }
-                              : {}),
+                            couponCode: "WELCOME10-PREVIEW",
+                            couponExpiresAt: new Date(
+                              Date.now() + flow.welcome.couponDays * 86400000,
+                            ).toISOString(),
                           }
-                        : c,
+                        : flow.cart
+                          ? {
+                              ...c,
+                              products: Array.from(
+                                { length: flow.cart.productCount },
+                                () => ({
+                                  title: "Example coral",
+                                  url: "https://coralsanonymous.com/cart",
+                                }),
+                              ),
+                              ...(selected.target.branch === "no"
+                                ? { couponCode: "AC300-PREVIEW" }
+                                : {}),
+                            }
+                          : c,
                     )
                 : undefined
             }
             recoveryLink={!!flow.cart}
             previewCaption={
-              flow.cart
-                ? "Example products shown. Each customer receives their own checkout link and available recommendations."
-                : undefined
+              flow.welcome
+                ? "Preview code only. Each subscriber receives one real code, reused until its fixed expiration. Original Klaviyo artwork can be added in Artwork."
+                : flow.cart
+                  ? "Example products shown. Each customer receives their own checkout link and available recommendations."
+                  : undefined
             }
             organizationName={settings.organizationName}
             postalAddress={settings.postalAddress}
           />
         ) : (
           <FlowDialog
-            title={selected.node.label}
+            title={selected.target.section === "welcome-settings" ? "Welcome settings" : selected.node.label}
             close={() => setSelected(null)}
           >
             {selected.target.kind === "info" && (
@@ -695,6 +727,13 @@ function FlowEditorState({
                 {selected.node.detail ||
                   "Reef Ops evaluates this decision automatically before continuing."}
               </p>
+            )}
+            {selected.target.section === "welcome-settings" && flow.welcome && (
+              <WelcomeSettings
+                flow={flow as FlowConfig}
+                onChange={setFlow}
+                onAudienceChange={() => setEnabled(false)}
+              />
             )}
             {selected.target.section === "products" && flow.cart && (
               <div className="mk-cart-feed-note">
