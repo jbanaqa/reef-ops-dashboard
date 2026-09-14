@@ -28,6 +28,7 @@ import {
 } from "./stock-config";
 import { validateFlow } from "./flow-config";
 import type { WelcomeConfig } from "./welcome-config";
+import type { DeliveryUpsellConfig } from "./delivery-upsell-config";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
 import { canConfirmEmailResubscription } from "./confirmation";
 import {
@@ -293,6 +294,7 @@ export async function runMarketing(onlyMessageId?: string) {
       if (!m || m.status !== "PENDING" || m.dueAt > new Date()) return null;
       let stockSettings: StockConfig | null = null;
       let liveWelcomeConfig: WelcomeConfig | undefined;
+      let liveDeliveryConfig: DeliveryUpsellConfig | undefined;
       const isStock = m.flowKey === "low-stock";
       const verification = m.flowKey === "email-confirmation",
         consent = m.profile.consents.find((c) => c.channel === m.channel);
@@ -349,7 +351,7 @@ export async function runMarketing(onlyMessageId?: string) {
         if (!f?.enabled || !(f.data as { reviewed?: boolean }).reviewed)
           deferred = "Flow paused";
         if (
-          ["b2b-welcome", "abandoned-cart", "welcome"].includes(m.flowKey) &&
+          ["b2b-welcome", "abandoned-cart", "welcome", "delivery-upsell"].includes(m.flowKey) &&
           !config.ingestEnabled
         )
           deferred = "Shopify ingestion paused";
@@ -412,6 +414,17 @@ export async function runMarketing(onlyMessageId?: string) {
         }
         if (m.flowKey === "b2b-welcome" && !m.profile.tags.includes("b2b"))
           reason = "B2B tag removed";
+        if (m.flowKey === "delivery-upsell") {
+          const live = f ? validateFlow("delivery-upsell", f.data) : null;
+          liveDeliveryConfig = live?.delivery;
+          if (!liveDeliveryConfig)
+            deferred = "Review delivery upsell settings";
+          else if (
+            liveDeliveryConfig.testEmail &&
+            liveDeliveryConfig.testEmail !== m.profile.email
+          )
+            reason = "Delivery upsell test audience changed";
+        }
         if (
           m.flowKey === "welcome" &&
           (f?.data as { welcome?: unknown })?.welcome &&
@@ -618,7 +631,7 @@ export async function runMarketing(onlyMessageId?: string) {
           }
         }
       }
-      if ((cartRun || welcomeRun) && !deferred) {
+      if ((cartRun || welcomeRun || liveDeliveryConfig) && !deferred) {
         const bypassRecentEmailSuppression =
           m.channel === "EMAIL" &&
           ((cartRun?.config.cart?.bypassRecentEmailSuppression === true &&
@@ -626,7 +639,9 @@ export async function runMarketing(onlyMessageId?: string) {
             cartRun.config.cart.testEmail === m.profile.email) ||
             (welcomeRun?.testEmail === m.profile.email &&
               liveWelcomeConfig?.testEmail === m.profile.email &&
-              liveWelcomeConfig.bypassRecentEmailSuppression === true));
+              liveWelcomeConfig.bypassRecentEmailSuppression === true) ||
+            (liveDeliveryConfig?.testEmail === m.profile.email &&
+              liveDeliveryConfig.bypassRecentEmailSuppression === true));
         if (!bypassRecentEmailSuppression) {
           // Reserve against concurrent claims as well as already sent messages.
           const recent = await tx.marketingMessage.findFirst({

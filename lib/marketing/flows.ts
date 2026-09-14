@@ -36,6 +36,13 @@ export async function enroll(
     if (recipient?.email !== config.cart.testEmail) return;
   }
   if (key === "delivery-upsell" && !context.expectedDeliveryAt) return;
+  if (key === "delivery-upsell" && config.delivery?.testEmail) {
+    const recipient = await tx.marketingProfile.findUnique({
+      where: { id: profileId },
+      select: { email: true },
+    });
+    if (recipient?.email !== config.delivery.testEmail) return;
+  }
   if (key === "abandoned-cart" && at < new Date(Date.now() - 3 * DAY)) {
     if (!config.cart) return;
     const p = await tx.marketingProfile.findUnique({
@@ -106,7 +113,7 @@ export async function enroll(
     }
     const dueAt =
       key === "delivery-upsell"
-        ? new Date(+context.expectedDeliveryAt! - DAY)
+        ? context.expectedDeliveryAt!
         : new Date(+at + step.minutes * 60000);
     if (key === "delivery-upsell" && dueAt < new Date()) continue;
     const messageKey = base + ":" + step.id;
@@ -148,6 +155,8 @@ export async function enroll(
           profileId,
           flowKey: key,
           flowStep: step.target.index ?? null,
+          flowCondition:
+            key === "delivery-upsell" ? "delivery-v1:notice" : null,
           ...data,
         },
         update: {},

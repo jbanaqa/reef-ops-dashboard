@@ -26,7 +26,7 @@ export function flowNodes(resource: Resource): Node[] {
     welcome: "Joins Mailable Subscribers",
     "abandoned-cart": "Identified checkout started",
     "low-stock": "Inventory crosses threshold",
-    "delivery-upsell": "Trusted delivery date received",
+    "delivery-upsell": "Shopify order has a delivery-date tag",
   };
   const nodes: Node[] = [
     {
@@ -40,6 +40,11 @@ export function flowNodes(resource: Resource): Node[] {
           : "New events enroll only while this flow is reviewed and enabled.",
     },
   ];
+  if (key === "delivery-upsell" && f.delivery) {
+    nodes[0].detail =
+      "Reef Ops reads month-date order tags, including Shipping, Shiping, and Ship-prefixed variants. Each order can enter once.";
+    nodes[0].target = { kind: "info", section: "delivery-settings" };
+  }
   if (key === "welcome" && f.welcome) {
     nodes[0].detail =
       "Reef Ops popup · single opt-in · once per subscriber. Imports do not enroll.";
@@ -113,12 +118,15 @@ export function flowNodes(resource: Resource): Node[] {
       kind: "wait",
       label:
         key === "delivery-upsell"
-          ? "24 hours before expected delivery"
+          ? `${f.delivery?.daysBefore ?? 2} calendar days before delivery · ${String(f.delivery?.sendHour ?? 8).padStart(2, "0")}:00 ${f.delivery?.timezone ?? "America/Los_Angeles"}`
           : s.minutes + " minutes after trigger",
-      detail: "Delays are measured from the trigger, not the previous message.",
+      detail:
+        key === "delivery-upsell"
+          ? "A direct scheduled time replaces Klaviyo's repeated daily condition chain."
+          : "Delays are measured from the trigger, not the previous message.",
       target:
         key === "delivery-upsell"
-          ? { kind: "info" }
+          ? { kind: "info", section: "delivery-settings" }
           : { kind: "wait", index: s.target.index, timing },
     });
     if (key === "abandoned-cart")

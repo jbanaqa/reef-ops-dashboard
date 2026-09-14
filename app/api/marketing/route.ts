@@ -722,6 +722,8 @@ export async function POST(request: Request) {
         if (b.enabled && b.key === "low-stock") validateStock(f.stock, true);
         if (b.enabled && b.key === "welcome" && !f.welcome)
           throw new Error("Open and review the updated welcome flow before enabling it.");
+        if (b.enabled && b.key === "delivery-upsell" && !f.delivery)
+          throw new Error("Open and review the updated delivery upsell before enabling it.");
         if (b.enabled && b.key === "abandoned-cart" && !f.cart)
           throw new Error(
             "Open and review the updated cart flow before enabling it.",

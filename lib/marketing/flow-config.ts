@@ -2,6 +2,10 @@ import { CartConfig, validateCart } from "./cart-config";
 import { StockConfig, validateStock } from "./stock-config";
 import { defaultContent } from "./rules";
 import { validateWelcome, type WelcomeConfig } from "./welcome-config";
+import {
+  validateDeliveryUpsell,
+  type DeliveryUpsellConfig,
+} from "./delivery-upsell-config";
 import { channels, content, Content, flowDefaults } from "./rules";
 
 export type FlowStep = {
@@ -25,11 +29,12 @@ export type FlowConfig = {
   stock?: StockConfig;
   cart?: CartConfig;
   welcome?: WelcomeConfig;
+  delivery?: DeliveryUpsellConfig;
 };
 export type FlowTarget = {
   kind: "step" | "sms" | "branch" | "wait" | "info";
   index?: number;
-  section?: "products" | "coupon" | "welcome-settings";
+  section?: "products" | "coupon" | "welcome-settings" | "delivery-settings";
   branch?: "yes" | "no";
   timing?: "smsMinutes" | "branchMinutes";
 };
@@ -106,6 +111,10 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     throw new Error("B2B welcome sends one email per profile.");
   const welcome =
     key === "welcome" && f.welcome ? validateWelcome(f.welcome) : undefined;
+  const delivery =
+    key === "delivery-upsell" && f.delivery
+      ? validateDeliveryUpsell(f.delivery)
+      : undefined;
   if (
     welcome &&
     (steps.length !== 4 ||
@@ -147,6 +156,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
   )
     throw new Error("Invalid inventory threshold.");
   return {
+    ...(delivery ? { delivery } : {}),
     ...(welcome ? { welcome } : {}),
     ...(stock ? { stock } : {}),
     ...(key === "abandoned-cart" && f.cart

@@ -933,7 +933,7 @@ export const flowDefaults = [
     name: "24 Hour Notice | Upsell",
     trigger: "DELIVERY_SCHEDULED",
     description:
-      "Schedule 24 hours before a trusted expected-delivery timestamp. Requires delivery-source mapping.",
+      "Send one add-on reminder two calendar days before the Shopify delivery-date tag. Triom handles order merging and refunds.",
     delays: [0],
   },
   {

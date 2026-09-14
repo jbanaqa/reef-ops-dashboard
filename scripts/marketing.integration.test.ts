@@ -159,6 +159,92 @@ test("B2B tag event hydrates consent, preserves omitted tags, and sends once", a
   );
 });
 
+test("Shopify delivery-date order tag schedules one upsell notice", async () => {
+  const { deliveryUpsellDraft, deliveryDateFromTags, deliveryUpsellDueAt } =
+    await import("../lib/marketing/delivery-upsell-config");
+  const { validateFlow } = await import("../lib/marketing/flow-config");
+  const row = await prisma.marketingResource.findUniqueOrThrow({
+    where: {
+      shop_kind_key: { shop, kind: "FLOW", key: "delivery-upsell" },
+    },
+  });
+  const config = validateFlow(
+    "delivery-upsell",
+    deliveryUpsellDraft(row.data as never),
+  );
+  config.reviewed = true;
+  await prisma.marketingResource.update({
+    where: { id: row.id },
+    data: { enabled: true, data: store.json(config) },
+  });
+  const delivery = new Date(Date.now() + 30 * 86400000);
+  const tag = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })
+    .format(delivery)
+    .replace(",", "");
+  const expectedDate = deliveryDateFromTags([tag])!;
+  const expectedDue = deliveryUpsellDueAt(expectedDate, config.delivery!);
+  await ingest.ingestShopify("orders/create", "delivery-order-9001", {
+    id: "9001",
+    created_at: new Date().toISOString(),
+    tags: [tag],
+    customer: {
+      id: "9001",
+      email: "delivery@example.com",
+      email_marketing_consent: {
+        state: "subscribed",
+        consent_updated_at: new Date().toISOString(),
+      },
+    },
+  });
+  const message = await prisma.marketingMessage.findFirstOrThrow({
+    where: {
+      flowKey: "delivery-upsell",
+      profile: { email: "delivery@example.com" },
+    },
+  });
+  assert.equal(message.flowCondition, "delivery-v1:notice");
+  assert.equal(message.dueAt.toISOString(), expectedDue.toISOString());
+  assert.equal(message.content && (message.content as { url?: string }).url,
+    "https://coralsanonymous.com/collections/new-arrivals");
+  await ingest.ingestShopify("orders/create", "delivery-order-9001", {
+    id: "9001",
+    tags: [tag],
+    customer: { id: "9001", email: "delivery@example.com" },
+  });
+  assert.equal(
+    await prisma.marketingMessage.count({ where: { flowKey: "delivery-upsell" } }),
+    1,
+  );
+  await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "delivery-recent-email",
+      profileId: message.profileId,
+      channel: "EMAIL",
+      subject: "Recent email",
+      content: defaultContent,
+      status: "SENT",
+      sentAt: new Date(),
+      dueAt: new Date(),
+    },
+  });
+  await prisma.marketingMessage.update({
+    where: { id: message.id },
+    data: { dueAt: new Date() },
+  });
+  await worker.runMarketing(message.id);
+  const skipped = await prisma.marketingMessage.findUniqueOrThrow({
+    where: { id: message.id },
+  });
+  assert.equal(skipped.status, "CANCELLED");
+  assert.match(skipped.error || "", /recently received email \(16 hours\)/);
+});
+
 test("tag removal cancels an unsent B2B welcome", async () => {
   customer = {
     ...customer,

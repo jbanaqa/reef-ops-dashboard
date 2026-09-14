@@ -1,5 +1,9 @@
 import { defaultStockConfig } from "./stock-config";
 import { defaultWelcome, welcomeSteps } from "./welcome-config";
+import {
+  defaultDeliveryUpsell,
+  deliveryUpsellStep,
+} from "./delivery-upsell-config";
 import { validateFlow } from "./flow-config";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
@@ -234,11 +238,15 @@ export async function seed() {
         data: json({
           ...(f.key === "low-stock" ? { stock: defaultStockConfig } : {}),
           ...(f.key === "welcome" ? { welcome: defaultWelcome } : {}),
+          ...(f.key === "delivery-upsell"
+            ? { delivery: defaultDeliveryUpsell }
+            : {}),
           trigger: f.trigger,
           description: f.description,
           reviewed: false,
           steps:
-            f.key === "welcome" ? welcomeSteps : f.key === "low-stock"
+            f.key === "welcome" ? welcomeSteps : f.key === "delivery-upsell"
+              ? [deliveryUpsellStep] : f.key === "low-stock"
               ? validateFlow("low-stock", { stock: defaultStockConfig }).steps
               : f.delays.map((delay, index) => ({
                   minutes: delay,

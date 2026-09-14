@@ -36,9 +36,9 @@ const descriptions: Record<
     symbol: "↗",
   },
   "delivery-upsell": {
-    trigger: "Delivery scheduled",
+    trigger: "Shopify delivery-date order tag",
     description:
-      "Reach customers before an expected delivery with a relevant offer.",
+      "Invite customers to add items before packing; Triom merges and refunds the add-on order.",
     symbol: "◷",
   },
   "low-stock": {

@@ -173,6 +173,32 @@ const { chromium } = require("playwright");
     }
 
     await page.setViewportSize({ width: 1440, height: 1000 });
+    await page
+      .getByRole("button", { name: "Open 24 Hour Notice | Upsell", exact: true })
+      .click();
+    await page
+      .getByText("Shopify order has a delivery-date tag", { exact: true })
+      .click();
+    await page.getByRole("dialog").waitFor();
+    assert.equal(
+      await page.getByLabel("Calendar days before delivery", { exact: true }).inputValue(),
+      "2",
+    );
+    assert.equal(
+      await page.getByLabel("Send hour (0–23)", { exact: true }).inputValue(),
+      "8",
+    );
+    await page.getByText("Triom handles merging and refunds after checkout.", { exact: false }).waitFor();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByText("Last Chance to Add Corals", { exact: false }).click();
+    await page.getByRole("dialog").waitFor();
+    assert.equal(
+      await page.getByLabel("Button destination", { exact: true }).inputValue(),
+      "https://coralsanonymous.com/collections/new-arrivals",
+    );
+    await page.getByLabel("Back to flow", { exact: true }).click();
+    await page.getByRole("button", { name: "← All flows", exact: true }).click();
+
     await page.route("**/api/marketing*", async (route) => {
       const request = route.request();
       if (request.url().includes("view=cart-history"))

@@ -23,7 +23,7 @@ type Candidate = {
 type TestContext = {
   flow: { enabled: boolean; data: unknown };
   config: FlowConfig;
-  kind: "cart" | "welcome";
+  kind: "cart" | "welcome" | "delivery";
   cartRun?: CartRun;
   welcomeRun?: WelcomeRun;
 };
@@ -84,6 +84,15 @@ async function testContext(
     if (!welcomeRun || welcomeAudienceBlock(config, welcomeRun, address))
       return null;
     return { flow, config, kind: "welcome", welcomeRun };
+  }
+  if (
+    m.flowKey === "delivery-upsell" &&
+    m.flowCondition === "delivery-v1:notice"
+  ) {
+    const config = validateFlow(m.flowKey, flow.data);
+    if (!config.delivery?.testEmail || config.delivery.testEmail !== address)
+      return null;
+    return { flow, config, kind: "delivery" };
   }
   return null;
 }

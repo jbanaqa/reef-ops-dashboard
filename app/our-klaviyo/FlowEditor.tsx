@@ -15,6 +15,11 @@ import EmailDesigner from "./EmailDesigner";
 import FlowDialog from "./FlowDialog";
 import CartTools from "./CartTools";
 import WelcomeSettings from "./WelcomeSettings";
+import DeliveryUpsellSettings from "./DeliveryUpsellSettings";
+import {
+  deliveryUpsellDraft,
+  type DeliveryUpsellConfig,
+} from "@/lib/marketing/delivery-upsell-config";
 import {
   welcomeDraft,
   type WelcomeConfig,
@@ -34,6 +39,7 @@ type Branch = { subject: string; content: Content };
 type Data = {
   cart?: CartConfig;
   welcome?: WelcomeConfig;
+  delivery?: DeliveryUpsellConfig;
   reviewed?: boolean;
   description?: string;
   threshold?: number;
@@ -84,6 +90,8 @@ function FlowEditorState({
       ? cartDraft(data as FlowConfig)
       : resource.key === "welcome"
         ? welcomeDraft(data as FlowConfig)
+        : resource.key === "delivery-upsell"
+          ? deliveryUpsellDraft(data as FlowConfig)
         : data;
   const initial = upgrade(resource.data as unknown as Data);
   const [previewNow] = useState(() => Date.now());
@@ -92,7 +100,8 @@ function FlowEditorState({
   );
   const [enabled, setEnabled] = useState(
     (resource.key === "abandoned-cart" && !resource.data.cart) ||
-      (resource.key === "welcome" && !resource.data.welcome)
+      (resource.key === "welcome" && !resource.data.welcome) ||
+      (resource.key === "delivery-upsell" && !resource.data.delivery)
       ? false
       : resource.enabled,
   );
@@ -131,7 +140,8 @@ function FlowEditorState({
           setFlow(upgrade(draft.flow));
           setEnabled(
             (resource.key === "abandoned-cart" && !draft.flow.cart) ||
-              (resource.key === "welcome" && !draft.flow.welcome)
+              (resource.key === "welcome" && !draft.flow.welcome) ||
+              (resource.key === "delivery-upsell" && !draft.flow.delivery)
               ? false
               : draft.enabled,
           );
@@ -626,7 +636,8 @@ function FlowEditorState({
             setFlow(upgrade(JSON.parse(JSON.stringify(resource.data)) as Data));
             setEnabled(
               (resource.key === "abandoned-cart" && !resource.data.cart) ||
-                (resource.key === "welcome" && !resource.data.welcome)
+                (resource.key === "welcome" && !resource.data.welcome) ||
+                (resource.key === "delivery-upsell" && !resource.data.delivery)
                 ? false
                 : resource.enabled,
             );
@@ -732,6 +743,13 @@ function FlowEditorState({
               <WelcomeSettings
                 flow={flow as FlowConfig}
                 onChange={setFlow}
+                onAudienceChange={() => setEnabled(false)}
+              />
+            )}
+            {selected.target.section === "delivery-settings" && flow.delivery && (
+              <DeliveryUpsellSettings
+                flow={flow as FlowConfig}
+                onChange={(next) => setFlow(next as Data)}
                 onAudienceChange={() => setEnabled(false)}
               />
             )}

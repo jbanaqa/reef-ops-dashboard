@@ -20,6 +20,58 @@ import {
   withCoupon,
   personalize,
 } from "../lib/marketing/rules";
+import {
+  defaultDeliveryUpsell,
+  deliveryDateFromTags,
+  deliveryUpsellDueAt,
+  deliveryUpsellDraft,
+} from "../lib/marketing/delivery-upsell-config";
+
+test("delivery upsell accepts Shopify month tags and schedules across DST", () => {
+  assert.deepEqual(deliveryDateFromTags(["VIP", "September 18 2026"]), {
+    year: 2026,
+    month: 9,
+    day: 18,
+  });
+  assert.deepEqual(deliveryDateFromTags("Shipping 2026-11-03, wholesale"), {
+    year: 2026,
+    month: 11,
+    day: 3,
+  });
+  assert.equal(
+    deliveryDateFromTags(["September sale", "Ship February 30 2027"]),
+    null,
+  );
+  assert.equal(
+    deliveryUpsellDueAt(
+      { year: 2026, month: 11, day: 3 },
+      defaultDeliveryUpsell,
+    ).toISOString(),
+    "2026-11-01T16:00:00.000Z",
+  );
+});
+
+test("delivery upsell upgrades only untouched scaffold copy", () => {
+  const upgraded = deliveryUpsellDraft({
+    reviewed: true,
+    steps: [
+      {
+        minutes: 0,
+        channel: "EMAIL",
+        subject: "24 Hour Notice | Upsell",
+        content: defaultContent,
+      },
+    ],
+  });
+  assert.equal(upgraded.reviewed, false);
+  assert.equal(upgraded.delivery?.daysBefore, 2);
+  assert.match(upgraded.steps[0].subject, /Last Chance/);
+  assert.equal(
+    upgraded.steps[0].content.url,
+    "https://coralsanonymous.com/collections/new-arrivals",
+  );
+});
+
 test("welcome schedule rejects offers after expiry and preserves customized drafts", async () => {
   const { validateFlow } = await import("../lib/marketing/flow-config");
   const f = { reviewed: false, steps: welcomeSteps, welcome: defaultWelcome };

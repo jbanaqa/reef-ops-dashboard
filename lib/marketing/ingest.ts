@@ -3,6 +3,11 @@ import { shopifyGraphql } from "@/lib/shopify";
 import { atomic, consent, identify, json, record, shop, Tx } from "./store";
 import { date, DAY } from "./rules";
 import { enroll } from "./flows";
+import {
+  deliveryDateFromTags,
+  deliveryUpsellDueAt,
+} from "./delivery-upsell-config";
+import { validateFlow } from "./flow-config";
 
 type Customer = {
   id?: string | number;
@@ -370,6 +375,38 @@ export async function ingestShopify(
           },
           data: { status: "CANCELLED", error: "Order placed" },
         });
+      }
+      if (!historical) {
+        const deliveryDate = deliveryDateFromTags(p.tags);
+        if (deliveryDate) {
+          const flow = await tx.marketingResource.findUnique({
+            where: {
+              shop_kind_key: {
+                shop: shop(),
+                kind: "FLOW",
+                key: "delivery-upsell",
+              },
+            },
+          });
+          if (flow?.enabled) {
+            const config = validateFlow("delivery-upsell", flow.data);
+            if (config.reviewed && config.delivery) {
+              await enroll(
+                tx,
+                "delivery-upsell",
+                profile.id,
+                String(p.id),
+                at,
+                {
+                  expectedDeliveryAt: deliveryUpsellDueAt(
+                    deliveryDate,
+                    config.delivery,
+                  ),
+                },
+              );
+            }
+          }
+        }
       }
     }
     if (
