@@ -1,3 +1,4 @@
+/* Reef Ops workspace theme. Interaction geometry and responsive behavior retained. */
 .page {
   display: flex;
   flex-direction: column;
@@ -16,19 +17,19 @@
   padding: 14px 16px;
   border-radius: 10px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .errorBanner {
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #b91c1c;
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .successBanner {
-  border: 1px solid #a7f3d0;
-  background: #ecfdf5;
-  color: #047857;
+  border: 1px solid var(--success);
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .formPanel {
@@ -43,15 +44,15 @@
   width: 100%;
   padding: 22px 24px;
   border: 0;
-  border-radius: 12px;
-  background: #ffffff;
-  color: #0f172a;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-main);
   text-align: left;
   cursor: pointer;
 }
 
 .formPanelToggle:hover {
-  background: #f8fafc;
+  background: var(--surface-muted);
 }
 
 .formPanelToggle > span:first-child {
@@ -65,8 +66,8 @@
 }
 
 .formPanelToggle small {
-  color: #64748b;
-  font-size: 13px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: 400;
 }
 
@@ -77,9 +78,9 @@
   width: 34px;
   height: 34px;
   flex-shrink: 0;
-  border-radius: 999px;
-  background: #f0fdfa;
-  color: #0f766e;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text-main);
   font-size: 24px;
 }
 
@@ -88,12 +89,12 @@
   flex-direction: column;
   gap: 26px;
   padding: 24px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border);
 }
 
 .supplierSelector {
   padding-bottom: 24px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
 }
 
 .supplierSearchWrap {
@@ -109,10 +110,10 @@
   right: 0;
   max-height: 420px;
   overflow-y: auto;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .supplierSearchResult {
@@ -122,9 +123,9 @@
   width: 100%;
   padding: 14px 16px;
   border: 0;
-  border-top: 1px solid #eef2f7;
-  background: #ffffff;
-  color: #0f172a;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-main);
   text-align: left;
   cursor: pointer;
 }
@@ -134,11 +135,11 @@
 }
 
 .supplierSearchResult:hover:not(:disabled) {
-  background: #f0fdfa;
+  background: var(--surface-muted);
 }
 
 .supplierSearchResult:disabled {
-  background: #f8fafc;
+  background: var(--surface-muted);
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -151,28 +152,28 @@
 }
 
 .supplierResultTop strong {
-  color: #0f766e;
-  font-size: 13px;
+  color: var(--text-main);
+  font-size: 14px;
 }
 
 .supplierResultName {
-  color: #0f172a;
+  color: var(--text-main);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .supplierResultDetails {
-  color: #64748b;
-  font-size: 12px;
+  color: var(--text-main);
+  font-size: 14px;
 }
 
 .alreadyMappedBadge {
-  border-radius: 999px;
+  border-radius: 5px;
   padding: 4px 8px;
-  background: #e2e8f0;
-  color: #64748b;
-  font-size: 10px;
-  font-weight: 800;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 14px;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
@@ -180,9 +181,9 @@
   max-width: 760px;
   margin-top: 16px;
   padding: 16px;
-  border: 1px solid #99f6e4;
-  border-radius: 12px;
-  background: #f0fdfa;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--brand-soft);
 }
 
 .selectedSupplierTop {
@@ -194,26 +195,26 @@
 
 .selectedSupplierCode {
   margin: 0;
-  color: #0f766e;
-  font-size: 12px;
-  font-weight: 800;
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
 .selectedSupplierName {
   margin: 5px 0 0;
-  color: #0f172a;
+  color: var(--text-main);
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .changeSupplierButton {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #0f766e;
-  font-size: 13px;
-  font-weight: 800;
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -226,12 +227,12 @@
   flex-wrap: wrap;
   gap: 8px 20px;
   margin-top: 13px;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .selectedSupplierMetadata strong {
-  color: #334155;
+  color: var(--text-muted);
 }
 
 .formGrid {
@@ -247,9 +248,9 @@
   align-self: end;
   min-height: 42px;
   padding: 10px 12px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--brand-soft);
   cursor: pointer;
 }
 
@@ -268,14 +269,14 @@
 }
 
 .activeField small {
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 400;
 }
 
 .variantSection {
   padding-top: 24px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border);
 }
 
 .variantSectionHeader {
@@ -292,7 +293,7 @@
 
 .variantSectionHeader p {
   margin: 7px 0 0;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -304,14 +305,14 @@
   gap: 18px;
   margin-top: 18px;
   padding: 18px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 12px;
-  background: #f8fafc;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
 }
 
 .noVariants p {
   margin: 0;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 14px;
 }
 
@@ -325,9 +326,9 @@
 .variantCard {
   position: relative;
   padding: 20px;
-  border: 1px solid #dbe4ee;
-  border-radius: 14px;
-  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
 }
 
 .variantCardHeader {
@@ -347,9 +348,9 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #b91c1c;
-  font-size: 13px;
-  font-weight: 800;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -376,24 +377,24 @@
   right: 0;
   max-height: 360px;
   overflow-y: auto;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .searchMessage,
 .searchErrorMessage {
   padding: 16px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .searchMessage {
-  color: #64748b;
+  color: var(--text-main);
 }
 
 .searchErrorMessage {
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .searchResult {
@@ -403,9 +404,9 @@
   width: 100%;
   padding: 13px 14px;
   border: 0;
-  border-top: 1px solid #eef2f7;
-  background: #ffffff;
-  color: #0f172a;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-main);
   text-align: left;
   cursor: pointer;
 }
@@ -415,27 +416,27 @@
 }
 
 .searchResult:hover {
-  background: #f0fdfa;
+  background: var(--surface-muted);
 }
 
 .searchResultTitle {
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.35;
 }
 
 .searchResultDetails {
-  color: #64748b;
-  font-size: 12px;
+  color: var(--text-main);
+  font-size: 14px;
   line-height: 1.4;
 }
 
 .selectedVariant {
   margin-top: 16px;
   padding: 15px;
-  border: 1px solid #99f6e4;
-  border-radius: 10px;
-  background: #f0fdfa;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--brand-soft);
 }
 
 .selectedVariantTop {
@@ -447,24 +448,24 @@
 
 .selectedVariantTitle {
   margin: 0;
-  color: #0f172a;
+  color: var(--text-main);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .selectedVariantSubtitle {
   margin: 5px 0 0;
-  color: #475569;
-  font-size: 13px;
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
 .changeVariantButton {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #0f766e;
-  font-size: 13px;
-  font-weight: 800;
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -477,19 +478,19 @@
   flex-wrap: wrap;
   gap: 7px 18px;
   margin-top: 12px;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .selectedMetadata strong {
-  color: #334155;
+  color: var(--text-muted);
 }
 
 .selectionHelp {
   margin: 12px 0 0;
-  color: #64748b;
-  font-size: 13px;
+  color: var(--text-main);
+  font-size: 14px;
 }
 
 .listCard {
@@ -502,7 +503,7 @@
   justify-content: space-between;
   gap: 20px;
   padding: 24px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
 }
 
 .filters {
@@ -519,7 +520,7 @@
 
 .mappingCard {
   padding: 22px 24px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border);
 }
 
 .mappingCard:first-child {
@@ -527,7 +528,7 @@
 }
 
 .inactiveMapping {
-  background: #f8fafc;
+  background: var(--brand-soft);
   opacity: 0.8;
 }
 
@@ -554,21 +555,21 @@
 .inactiveBadge {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: 5px;
   padding: 4px 9px;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
 .activeBadge {
-  background: #ccfbf1;
-  color: #0f766e;
+  background: var(--brand-soft);
+  color: var(--text-main);
 }
 
 .inactiveBadge {
-  background: #e2e8f0;
-  color: #64748b;
+  background: var(--brand-soft);
+  color: var(--text-main);
 }
 
 .compactSummary {
@@ -576,12 +577,12 @@
   flex-wrap: wrap;
   gap: 8px 18px;
   margin-top: 10px;
-  color: #64748b;
-  font-size: 13px;
+  color: var(--text-main);
+  font-size: 14px;
 }
 
 .compactSummary strong {
-  color: #0f172a;
+  color: var(--text-main);
 }
 
 .mappingActions {
@@ -597,17 +598,17 @@
   justify-content: center;
   min-height: 40px;
   padding: 9px 16px;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #b91c1c;
+  border: 1px solid var(--danger);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--danger);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .deleteButton:hover {
-  background: #fef2f2;
+  background: var(--surface-muted);
 }
 
 .deleteButton:disabled {
@@ -618,31 +619,31 @@
 .expandedMappingContent {
   margin-top: 20px;
   padding-top: 20px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border);
 }
 
 .variantTableWrap {
   width: 100%;
   overflow-x: auto;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
 .variantTable {
   width: 100%;
   min-width: 720px;
   border-collapse: collapse;
-  background: #ffffff;
-  font-size: 13px;
+  background: var(--surface);
+  font-size: 14px;
 }
 
 .variantTable th {
   padding: 11px 14px;
-  border-bottom: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 800;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.05em;
   text-align: left;
   text-transform: uppercase;
@@ -651,8 +652,8 @@
 
 .variantTable td {
   padding: 13px 14px;
-  border-bottom: 1px solid #eef2f7;
-  color: #334155;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-main);
 }
 
 .variantTable tbody tr:last-child td {
@@ -662,8 +663,8 @@
 .idCell {
   max-width: 220px;
   overflow-wrap: anywhere;
-  font-family: monospace;
-  font-size: 12px;
+  font-family: inherit;
+  font-size: 14px;
 }
 
 .emptyState {
@@ -678,7 +679,7 @@
 
 .emptyState p {
   margin: 8px 0 0;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 14px;
 }
 

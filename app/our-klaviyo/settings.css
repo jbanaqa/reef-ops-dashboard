@@ -1,8 +1,9 @@
+/* Reef Ops workspace theme. Interaction geometry and responsive behavior retained. */
 .sw-workspace {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 32px;
-  --sw-accent: #147d74;
+  --sw-accent: var(--brand);
   --sw-line: var(--border);
   --sw-muted: var(--text-muted);
   font-size: 14px;
@@ -30,20 +31,20 @@
 }
 .sw-nav button small {
   margin-top: 5px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .marketing .sw-nav button[aria-current] {
   background: var(--surface);
   border-color: var(--sw-line);
-  box-shadow: 0 2px 8px #001f1710;
+  box-shadow: none;
   color: var(--sw-accent);
 }
 .sw-nav i {
-  color: #b37d22;
+  color: var(--text-main);
   font-style: normal;
 }
 .sw-nav > p {
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--sw-muted);
   padding: 0 16px;
@@ -70,13 +71,13 @@
   font-size: 14px;
 }
 .sw-eyebrow {
-  font-size: 10px !important;
-  font-weight: 750;
+  font-size: 12px !important;
+  font-weight: 600;
   letter-spacing: 1.6px;
 }
 .sw-card {
   border: 1px solid var(--sw-line);
-  border-radius: 16px;
+  border-radius: 10px;
   background: var(--surface);
   padding: 26px;
   margin-bottom: 20px;
@@ -91,18 +92,18 @@
   margin: 20px 0 12px;
 }
 .sw-card p {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.65;
   color: var(--sw-muted);
 }
 .marketing .sw-primary {
-  background: var(--sw-accent);
+  background: var(--brand);
   border-color: var(--sw-accent);
-  color: white;
+  color: var(--on-brand);
   font-weight: 650;
 }
 .marketing .sw-primary:hover {
-  background: #10685f;
+  background: var(--surface-muted);
 }
 .sw-status-grid {
   display: grid;
@@ -113,17 +114,17 @@
 .sw-status-grid article {
   background: var(--surface);
   border: 1px solid var(--sw-line);
-  border-radius: 14px;
+  border-radius: 5px;
   padding: 19px;
 }
 .sw-status-grid article > span:first-child {
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--sw-muted);
   margin-bottom: 12px;
 }
 .sw-status-grid p {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--sw-muted);
   margin-bottom: 0;
@@ -132,17 +133,17 @@
   display: inline-block;
   padding: 5px 9px;
   border: 1px solid var(--sw-line);
-  border-radius: 30px;
-  font-size: 11px;
+  border-radius: 10px;
+  font-size: 14px;
   font-weight: 650;
   white-space: nowrap;
   background: var(--surface-muted);
   color: var(--sw-muted);
 }
 .sw-tag.active {
-  background: #e7f5ef;
-  color: #21644b;
-  border-color: #c6e6d7;
+  background: var(--brand-soft);
+  color: var(--text-main);
+  border-color: var(--border);
 }
 .sw-sync-action {
   display: flex;
@@ -151,7 +152,7 @@
   gap: 24px;
   padding: 19px;
   background: var(--surface-muted);
-  border-radius: 12px;
+  border-radius: 10px;
   margin: 20px 0;
 }
 .sw-sync-action strong {
@@ -171,7 +172,7 @@
 }
 .sw-stat-line span {
   display: block;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--sw-muted);
   margin-bottom: 6px;
 }
@@ -180,9 +181,9 @@
   font-weight: 600;
 }
 .sw-hint {
-  font-size: 12px !important;
+  font-size: 14px !important;
   padding: 14px 16px;
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--surface-muted);
   line-height: 1.6;
 }
@@ -212,10 +213,10 @@
   width: 42px;
   height: 24px;
   flex: 0 0 42px;
-  border-radius: 30px;
+  border-radius: 7px;
   padding: 0;
   cursor: pointer;
-  background: #a7b7b1;
+  background: var(--surface-muted);
   border: 0;
 }
 .sw-toggle-row input:after {
@@ -224,13 +225,13 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: white;
+  background: var(--surface);
   left: 3px;
   top: 3px;
   transition: transform 0.15s;
 }
 .marketing .sw-toggle-row input:checked {
-  background: var(--sw-accent);
+  background: var(--brand-soft);
 }
 .sw-toggle-row input:checked:after {
   transform: translateX(18px);
@@ -245,7 +246,7 @@
   margin-top: 22px;
 }
 .sw-save-row > span {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--sw-muted);
 }
 .sw-checklist {
@@ -257,7 +258,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 13px;
+  font-size: 14px;
   padding: 9px 0;
 }
 .sw-checklist .sw-tag {
@@ -266,32 +267,32 @@
 }
 .sw-warning {
   padding: 12px 14px;
-  border-left: 3px solid #bf8d39;
-  background: #fff4df;
-  color: #73531e !important;
-  border-radius: 4px;
+  border-left: 3px solid var(--warning);
+  background: var(--surface-muted);
+  color: var(--warning) !important;
+  border-radius: 10px;
 }
 .sw-alert,
 .sw-notice {
   padding: 15px;
   border-radius: 10px;
-  background: #ffeded;
-  color: #8b2929;
-  font-size: 13px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 14px;
   line-height: 1.6;
   margin: 0 0 18px;
 }
 .sw-notice {
-  background: #e4f5ef;
-  color: #125740;
+  background: var(--surface-muted);
+  color: var(--text-main);
 }
 .sw-feedback:focus {
   outline: none;
 }
 .sw-confirm {
   padding: 18px;
-  border: 1px solid #c89852;
-  border-radius: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
   margin-top: 18px;
 }
 .sw-confirm h4 {
@@ -306,13 +307,13 @@
   text-align: center;
   padding: 26px;
   border: 1px dashed var(--sw-line);
-  border-radius: 12px;
+  border-radius: 10px;
   margin: 24px 0;
   background: var(--surface-muted);
 }
 .sw-footer-preview span {
   display: block;
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 1px;
   color: var(--sw-muted);
 }
@@ -333,9 +334,9 @@
 .sw-readonly {
   padding: 15px;
   border: 1px solid var(--sw-line);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--surface-muted);
-  font-size: 13px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .marketing .sw-card fieldset {
@@ -360,10 +361,10 @@
   flex-shrink: 0;
 }
 .sw-issue strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 .sw-issue small {
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 5px;
 }
 .sw-card summary {
@@ -373,21 +374,21 @@
   line-height: 1.5;
 }
 .sw-issue summary {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--sw-muted);
 }
 .sw-card code {
   display: block;
   padding: 12px;
   margin-top: 10px;
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--surface-muted);
-  font-size: 11px;
+  font-size: 14px;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 .sw-health-good {
-  color: #25805b !important;
+  color: var(--text-main) !important;
 }
 .sw-connection-results {
   list-style: none;
@@ -402,7 +403,7 @@
   padding: 12px 0;
   border-top: 1px solid var(--sw-line);
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: 14px;
 }
 .sw-connection-results small {
   flex-basis: 100%;
@@ -416,7 +417,7 @@
 .sw-import-help {
   padding: 12px;
   background: var(--surface-muted);
-  border-radius: 8px;
+  border-radius: 10px;
 }
 .sw-import-results {
   max-height: 320px;
@@ -432,7 +433,7 @@
   overflow-wrap: anywhere;
 }
 .sw-diagnostics {
-  font-size: 12px;
+  font-size: 14px;
 }
 .sw-diagnostics > div {
   display: flex;
@@ -457,7 +458,7 @@
 .sw-workspace input:focus-visible,
 .sw-workspace summary:focus-visible,
 .sw-workspace textarea:focus-visible {
-  outline: 3px solid #4aa997;
+  outline: 3px solid var(--border);
   outline-offset: 3px;
 }
 @media (max-width: 1000px) {
@@ -500,7 +501,7 @@
   }
   .marketing .sw-nav button {
     padding: 12px;
-    font-size: 13px;
+    font-size: 14px;
   }
   .sw-nav small,
   .sw-nav > p {

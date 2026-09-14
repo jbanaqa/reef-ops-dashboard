@@ -1,5 +1,6 @@
+/* Reef Ops workspace theme. Interaction geometry and responsive behavior retained. */
 .aw-workspace {
-  --aw-accent: #147d74;
+  --aw-accent: var(--brand);
   --aw-line: var(--border, #dce5e3);
   --aw-muted: var(--text-muted, #60736e);
   font-size: 14px;
@@ -39,7 +40,7 @@
 .marketing .aw-tabs button {
   border: 0;
   background: transparent;
-  border-radius: 0;
+  border-radius: 7px;
   padding: 15px 18px;
   font-size: 14px;
   color: var(--aw-muted);
@@ -48,20 +49,20 @@
 .marketing .aw-tabs button[aria-current] {
   border-bottom-color: var(--aw-accent);
   color: var(--text-main);
-  font-weight: 700;
+  font-weight: 600;
 }
 .marketing .aw-primary {
-  background: var(--aw-accent);
-  color: white;
+  background: var(--brand);
+  color: var(--on-brand);
   border-color: var(--aw-accent);
   font-weight: 600;
 }
 .marketing .aw-primary:hover {
-  background: #11675f;
+  background: var(--surface-muted);
 }
 .aw-directory {
   border: 1px solid var(--aw-line);
-  border-radius: 18px;
+  border-radius: 10px;
   background: var(--surface);
   overflow: hidden;
 }
@@ -74,8 +75,8 @@
   max-width: 700px;
 }
 .aw-eyebrow {
-  font-size: 10px !important;
-  font-weight: 750;
+  font-size: 12px !important;
+  font-weight: 600;
   letter-spacing: 1.7px;
   color: var(--aw-muted);
   margin: 0 0 6px !important;
@@ -134,7 +135,7 @@
   opacity: 0.5;
 }
 .marketing .aw-list th {
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--aw-muted);
@@ -180,9 +181,9 @@
   flex: 0 0 38px;
   width: 38px;
   height: 38px;
-  border-radius: 12px;
-  background: #e5f1ee;
-  color: #236d62;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text-main);
   font-size: 16px;
   font-weight: 650;
 }
@@ -190,9 +191,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border-radius: 20px;
+  border-radius: 5px;
   padding: 5px 9px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
   border: 1px solid var(--aw-line);
@@ -205,14 +206,14 @@
   border-radius: 50%;
 }
 .aw-badge.good {
-  background: #e7f5ee;
-  color: #246847;
-  border-color: #c9e5d5;
+  background: var(--surface-muted);
+  color: var(--text-main);
+  border-color: var(--border);
 }
 .aw-badge.warning {
-  background: #fff3df;
-  color: #8a5518;
-  border-color: #efd8b2;
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: var(--warning);
 }
 .aw-badge.muted {
   background: var(--surface-muted);
@@ -224,10 +225,10 @@
   flex-wrap: wrap;
 }
 .aw-tags span {
-  font-size: 11px;
+  font-size: 14px;
   padding: 4px 7px;
   border: 1px solid var(--aw-line);
-  border-radius: 5px;
+  border-radius: 10px;
   overflow-wrap: anywhere;
 }
 .aw-tags .aw-no-tag {
@@ -237,7 +238,7 @@
 .aw-pagination {
   border-top: 1px solid var(--aw-line);
   padding: 16px 24px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--aw-muted);
 }
 .aw-pagination > div {
@@ -271,7 +272,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--aw-line);
-  border-radius: 16px;
+  border-radius: 10px;
   background: var(--surface);
   padding: 24px;
 }
@@ -286,7 +287,7 @@
   padding-left: 18px;
   margin: 0 0 24px;
   line-height: 1.9;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--aw-muted);
   flex: 1;
 }
@@ -295,7 +296,7 @@
   gap: 8px;
 }
 .aw-hint {
-  font-size: 12px !important;
+  font-size: 14px !important;
   padding: 14px 16px;
   background: var(--surface-muted);
   border-radius: 10px;
@@ -312,9 +313,9 @@
   padding: 0;
   border: 0;
   border-left: 1px solid var(--aw-line);
-  background: var(--surface, #fff);
+  background: var(--surface);
   color: var(--text-main, #1e3430);
-  box-shadow: -20px 0 70px #001d282b;
+  box-shadow: none;
   overflow: hidden;
 }
 .aw-drawer[open] {
@@ -322,8 +323,7 @@
   flex-direction: column;
 }
 .aw-drawer::backdrop {
-  background: #071f3066;
-  backdrop-filter: blur(2px);
+  background: rgba(16,43,54,.48);
 }
 .aw-drawer-header {
   display: flex;
@@ -364,7 +364,7 @@
 }
 .aw-identity p {
   margin: 5px 0 10px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-identity.compact {
   margin-bottom: 12px;
@@ -390,7 +390,7 @@
 }
 .marketing .aw-drawer .aw-tabs button {
   padding: 13px 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-refresh {
   margin-left: auto !important;
@@ -399,7 +399,7 @@
   margin: 24px 0;
 }
 .aw-detail-section > p {
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-preference {
   display: flex;
@@ -410,15 +410,15 @@
   gap: 12px;
 }
 .aw-preference strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-preference p {
-  font-size: 11px;
+  font-size: 14px;
   margin: 5px 0 0;
 }
 .aw-facts {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-facts > div {
   display: flex;
@@ -447,21 +447,21 @@
 }
 .aw-section-heading p {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .aw-count {
   padding: 5px 9px;
-  border-radius: 999px;
-  background: #e7f5ee;
-  color: #246847;
-  font-size: 11px;
-  font-weight: 700;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 600;
   white-space: nowrap;
 }
 .aw-flow-card {
   padding: 16px;
   border: 1px solid var(--aw-line);
-  border-radius: 14px;
+  border-radius: 10px;
   margin-bottom: 12px;
   background: var(--surface);
 }
@@ -470,12 +470,12 @@
 }
 .aw-flow-card > .aw-split p {
   margin: 3px 0 0;
-  font-size: 11px;
+  font-size: 14px;
 }
 .aw-flow-card .aw-badge.current {
-  color: #176f68;
-  border-color: #b9ddd8;
-  background: #eaf7f5;
+  color: var(--text-main);
+  border-color: var(--border);
+  background: var(--surface-muted);
 }
 .aw-flow-counts {
   display: flex;
@@ -485,10 +485,10 @@
 }
 .aw-flow-counts span {
   padding: 5px 8px;
-  border-radius: 7px;
+  border-radius: 10px;
   background: var(--surface-muted);
   color: var(--aw-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 .aw-flow-counts strong {
   color: var(--text-main);
@@ -502,26 +502,26 @@
 .aw-flow-milestones > div {
   min-width: 0;
   padding: 11px 12px;
-  border-left: 3px solid #b9ddd8;
+  border-left: 3px solid var(--border);
   background: var(--surface-muted);
-  border-radius: 7px;
+  border-radius: 10px;
 }
 .aw-flow-milestones span,
 .aw-flow-milestones time,
 .aw-flow-milestones small {
   display: block;
   color: var(--aw-muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.45;
 }
 .aw-flow-milestones strong {
   display: block;
   margin: 3px 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 .aw-flow-milestones p {
   margin: 3px 0;
-  font-size: 11px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .aw-flow-card.compact {
@@ -531,13 +531,13 @@
 }
 .aw-flow-compact-last {
   margin: 9px 0 0;
-  font-size: 11px !important;
+  font-size: 14px !important;
 }
 .aw-history-group,
 .aw-test-tools,
 .aw-status-help {
   border: 1px solid var(--aw-line);
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--surface-muted);
 }
 .aw-history-group {
@@ -549,8 +549,8 @@
   padding: 12px 14px;
   cursor: pointer;
   color: var(--text-main);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
 }
 .aw-history-group summary span {
   float: right;
@@ -562,13 +562,13 @@
 .aw-quiet-state {
   padding: 18px;
   border: 1px dashed var(--aw-line);
-  border-radius: 12px;
+  border-radius: 10px;
   text-align: center;
   background: var(--surface-muted);
 }
 .aw-quiet-state p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 .aw-message-history {
   padding-top: 4px;
@@ -589,15 +589,15 @@
 }
 .marketing .aw-message-summary button[aria-pressed="true"] {
   border-color: var(--aw-accent);
-  background: #eaf7f5;
-  box-shadow: inset 0 0 0 1px var(--aw-accent);
+  background: var(--surface-muted);
+  box-shadow: none;
 }
 .aw-message-summary strong {
   font-size: 17px;
 }
 .aw-message-summary span {
   color: var(--aw-muted);
-  font-size: 10px;
+  font-size: 14px;
   white-space: nowrap;
 }
 .marketing .aw-flow-filter {
@@ -619,7 +619,7 @@
 .aw-status-help p {
   padding: 0 14px;
   margin: 0 0 12px;
-  font-size: 11px;
+  font-size: 14px;
 }
 .aw-test-tools button {
   margin: 0 14px 14px;
@@ -627,7 +627,7 @@
 .aw-message-list {
   overflow: hidden;
   border: 1px solid var(--aw-line);
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--surface);
 }
 .aw-message-row {
@@ -649,7 +649,7 @@
   overflow-wrap: anywhere;
 }
 .aw-message-row p {
-  font-size: 12px;
+  font-size: 14px;
   margin: 0;
 }
 .aw-message-row .aw-reason {
@@ -667,7 +667,7 @@
 .aw-reason {
   padding: 10px;
   background: var(--surface-muted);
-  border-radius: 6px;
+  border-radius: 10px;
 }
 .aw-timeline {
   list-style: none;
@@ -678,7 +678,7 @@
   position: relative;
   padding: 0 0 25px 24px;
   border-left: 1px solid var(--aw-line);
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-timeline li:before {
   content: "";
@@ -688,19 +688,19 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--aw-accent);
+  background: var(--surface-muted);
   border: 2px solid var(--surface);
 }
 .aw-timeline time {
   display: block;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--aw-muted);
   margin-top: 6px;
 }
 .aw-manage {
   border-top: 1px solid var(--aw-line);
   padding-top: 18px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .aw-manage summary {
   cursor: pointer;
@@ -711,10 +711,10 @@
 }
 .aw-confirm {
   padding: 16px;
-  border: 1px solid #d6a96b;
+  border: 1px solid var(--border);
   border-radius: 10px;
   margin-top: 16px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-confirm strong {
   display: block;
@@ -727,17 +727,17 @@
 .aw-success {
   padding: 14px;
   border-radius: 10px;
-  background: #ffeded;
-  color: #8b2929;
-  font-size: 13px;
+  background: var(--surface-muted);
+  color: var(--danger);
+  font-size: 14px;
   margin-bottom: 16px;
 }
 .aw-alert button {
   margin-left: 12px;
 }
 .aw-success {
-  background: #e4f5ef;
-  color: #125740;
+  background: var(--surface-muted);
+  color: var(--success);
 }
 .marketing .aw-form-fields {
   margin: 0;
@@ -747,7 +747,7 @@
 }
 .aw-form-fields > p,
 .aw-intro {
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-rule-base,
 .aw-rule-summary {
@@ -755,11 +755,11 @@
   border: 1px solid var(--aw-line);
   border-radius: 10px;
   margin: 24px 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .aw-rule-base p {
   margin: 5px 0 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 .aw-rule-summary ul {
   padding-left: 18px;
@@ -769,7 +769,7 @@
 .aw-optional {
   font-weight: 400;
   color: var(--aw-muted);
-  font-size: 12px;
+  font-size: 14px;
   margin-left: 6px;
 }
 .aw-sr-only {
@@ -784,7 +784,7 @@
 .aw-workspace input:focus-visible,
 .aw-workspace select:focus-visible,
 .aw-workspace summary:focus-visible {
-  outline: 3px solid #44ad9e;
+  outline: 3px solid var(--border);
   outline-offset: 3px;
 }
 .aw-workspace button:disabled {
@@ -828,7 +828,7 @@
     display: none;
   }
   .marketing .aw-contact-button {
-    font-size: 13px;
+    font-size: 14px;
   }
   .aw-list td:last-child button {
     font-size: 0;
@@ -885,7 +885,7 @@
 @media (max-width: 560px) {
   .marketing .aw-drawer .aw-tabs button {
     padding: 12px 6px !important;
-    font-size: 12px;
+    font-size: 14px;
   }
   .aw-drawer .aw-tabs {
     gap: 0;
@@ -942,7 +942,7 @@
   }
   .aw-directory-heading p {
     margin-top: 10px;
-    font-size: 13px;
+    font-size: 14px;
   }
 }
 
@@ -956,7 +956,7 @@
 .aw-test-send p {
   flex-basis: 100%;
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 @media (max-width: 420px) {

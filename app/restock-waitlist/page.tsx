@@ -150,14 +150,13 @@ export default async function RestockWaitlistPage({ searchParams }:PageProps) {
 
   return <div className={styles.page}>
     <section className={styles.hero}>
-      <div className={styles.heroGlow}/><div className={styles.heroGrid}/>
+
       <div className={styles.heroCopy}>
-        <p className={styles.eyebrow}><span/> Customer demand command center</p>
-        <h1>Restock <em>Waitlist</em></h1>
-        <p>Find the customers who need attention, send precise restock updates, and hand off a clean follow-up sheet without losing the history behind it.</p>
+        <p className={styles.eyebrow}><span/> CUSTOMER DEMAND</p>
+        <h1>Restock alerts</h1>
+        <p>Review who’s waiting, send restock updates, and prepare a follow-up sheet.</p>
         <div className={styles.heroMeta}><span><i/> Live queue</span><span>{totalCount} lifetime signups</span><span>Pacific Time</span></div>
       </div>
-      <div className={styles.orbit} aria-hidden="true"><div className={styles.orbitOuter}/><div className={styles.orbitInner}/><div className={styles.orbitCore}><strong>{waitingCount}</strong><span>waiting now</span></div><i/><i/></div>
     </section>
 
     <section className={styles.metricGrid} aria-label="Waitlist summary">
