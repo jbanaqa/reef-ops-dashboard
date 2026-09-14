@@ -7,6 +7,7 @@ import { ReefIcon } from "./ReefIcon";
 const navigation = [
   { label: "Workspace", items: [{ href: "/", label: "Overview", icon: "dashboard" }] },
   { label: "Inventory & demand", items: [
+    { href: "/receive-shipment", label: "Receive shipment", icon: "shipment" },
     { href: "/inventory-monitor", label: "Inventory monitor", icon: "inventory" },
     { href: "/restock-waitlist", label: "Restock alerts", icon: "restock" },
     { href: "/reorder-planner", label: "Reorder planner", icon: "reorder" },
@@ -19,7 +20,7 @@ const navigation = [
 ];
 const marketingSections = ["overview", "campaigns", "flows", "forms", "audiences", "templates", "analytics", "settings"];
 const pageTitles: Record<string, string> = {
-  "/": "Overview", "/inventory-monitor": "Inventory monitor", "/restock-waitlist": "Restock alerts",
+  "/": "Overview", "/receive-shipment": "Receive shipment", "/inventory-monitor": "Inventory monitor", "/restock-waitlist": "Restock alerts",
   "/reorder-planner": "Reorder planner", "/reorder-planner/upload": "Upload supplier inventory",
   "/reorder-planner/mappings": "Product mappings", "/collection-rotation": "Collection rotation",
   "/species-library": "Species library", "/feedback": "Customer intelligence", "/feedback/new": "Add customer signal", "/monitoring": "Brand monitoring",

@@ -4,6 +4,7 @@ type ReefIconProps = {
 };
 
 const paths: Record<string, React.ReactNode> = {
+  shipment: <><path d="m21 8-9-5-9 5 9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></>,
   mail: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></>,
   shop: <><path d="M4 7h16l1 14H3L4 7Z"/><path d="M8 7V6a4 4 0 0 1 8 0v1"/></>,
   dashboard: <><path d="M4 13h6V4H4v9Z"/><path d="M14 20h6v-9h-6v9Z"/><path d="M4 20h6v-3H4v3Z"/><path d="M14 7h6V4h-6v3Z"/></>,
