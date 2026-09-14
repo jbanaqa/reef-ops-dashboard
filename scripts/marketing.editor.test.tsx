@@ -45,6 +45,19 @@ test("single-opt-in popup submits consent and finishes without a confirmation or
     w.document.body.append(script);
     const { waitFor } = await import("@testing-library/react");
     await waitFor(() => assert.ok(w.document.querySelector("form")));
+    assert.ok(w.document.querySelector("dialog.reef-signup-dialog"));
+    assert.ok(w.document.querySelector(".reef-signup-shell"));
+    assert.ok(w.document.querySelector(".reef-signup-art"));
+    assert.match(w.document.body.textContent!, /Join our Reefing\s*Family!/);
+    assert.match(w.document.body.textContent!, /10% OFF/);
+    assert.equal(
+      w.document.querySelector<HTMLInputElement>('[name="email"]')?.placeholder,
+      "Email",
+    );
+    assert.equal(
+      w.document.querySelector<HTMLButtonElement>('[type="submit"]')?.textContent,
+      "Continue",
+    );
     assert.match(w.document.body.textContent!, /offer lasts 30 days/);
     w.document.querySelector<HTMLInputElement>('[name="email"]')!.value = "test@example.com";
     w.document.querySelector<HTMLInputElement>('[name="consent"]')!.checked = true;
