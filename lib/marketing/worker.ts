@@ -29,6 +29,7 @@ import {
 import { validateFlow } from "./flow-config";
 import type { WelcomeConfig } from "./welcome-config";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
+import { canConfirmEmailResubscription } from "./confirmation";
 import {
   loadWelcome,
   welcomeHasOrderedSince,
@@ -313,10 +314,18 @@ export async function runMarketing(onlyMessageId?: string) {
           },
         });
         const d = session?.data as
-          | { version?: number; expiresAt?: string; confirmed?: boolean }
+          | {
+              version?: number;
+              expiresAt?: string;
+              confirmed?: boolean;
+              purpose?: string;
+            }
           | undefined;
+        const resubscription =
+          d?.purpose === "resubscribe" &&
+          canConfirmEmailResubscription(consent);
         if (
-          consent?.suppressed ||
+          (consent?.suppressed && !resubscription) ||
           !d ||
           d.version !== 2 ||
           d.confirmed ||

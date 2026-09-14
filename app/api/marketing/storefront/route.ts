@@ -1,4 +1,7 @@
-import { newConfirmation } from "@/lib/marketing/confirmation";
+import {
+  canConfirmEmailResubscription,
+  newConfirmation,
+} from "@/lib/marketing/confirmation";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import {
@@ -139,7 +142,7 @@ export async function POST(request: Request) {
       const address = email(b.email),
         session = crypto.randomUUID(),
         confirmation = newConfirmation();
-      await atomic(async (tx) => {
+      const result = await atomic(async (tx) => {
         const p = await identify(tx, { email: address });
         const existing = await tx.marketingConsent.findUnique({
           where: { profileId_channel: { profileId: p.id, channel: "EMAIL" } },
@@ -153,9 +156,110 @@ export async function POST(request: Request) {
             version: "v1",
           },
         });
-        if (existing?.suppressed) return;
+        if (existing?.suppressed) {
+          if (!canConfirmEmailResubscription(existing))
+            return { completed: true, session };
+          const recent = await tx.marketingMessage.findFirst({
+            where: {
+              profileId: p.id,
+              flowKey: "email-confirmation",
+              status: { in: ["PENDING", "SENDING", "SENT", "UNKNOWN"] },
+              createdAt: { gte: new Date(Date.now() - 86400000) },
+            },
+            orderBy: { createdAt: "desc" },
+          });
+          if (recent) {
+            const recentSession = recent.key.replace(/^confirmation:/, "");
+            const saved = await tx.marketingResource.findUnique({
+              where: {
+                shop_kind_key: {
+                  shop: shop(),
+                  kind: "SIGNUP",
+                  key: recentSession,
+                },
+              },
+            });
+            const savedData = saved?.data as
+              | { purpose?: string; expiresAt?: string }
+              | undefined;
+            if (
+              savedData?.purpose === "resubscribe" &&
+              savedData.expiresAt &&
+              new Date(savedData.expiresAt) > new Date()
+            )
+              return {
+                completed: false,
+                resubscribe: true,
+                session: recentSession,
+              };
+          }
+          const flow = validateFlow("welcome", welcome.data);
+          let timezone = flow.welcome!.fallbackTimezone;
+          if (typeof b.timezone === "string") {
+            try {
+              new Intl.DateTimeFormat("en", { timeZone: b.timezone }).format();
+              timezone = b.timezone;
+            } catch {}
+          }
+          await tx.marketingResource.create({
+            data: {
+              shop: shop(),
+              kind: "SIGNUP",
+              key: session,
+              name: "Pending email resubscription",
+              data: json({
+                profileId: p.id,
+                expiresAt: new Date(Date.now() + 86400000).toISOString(),
+                confirmed: false,
+                version: 2,
+                purpose: "resubscribe",
+                timezone,
+                anonymousId:
+                  typeof b.anonymousId === "string"
+                    ? b.anonymousId.slice(0, 100)
+                    : "",
+              }),
+            },
+          });
+          await tx.marketingResource.create({
+            data: {
+              shop: shop(),
+              kind: "CONFIRMATION",
+              key: confirmation.hash,
+              name: "Email resubscription proof",
+              data: json({
+                session,
+                email: address,
+                expiresAt: new Date(Date.now() + 86400000).toISOString(),
+              }),
+            },
+          });
+          await tx.marketingMessage.create({
+            data: {
+              shop: shop(),
+              key: `confirmation:${session}`,
+              profileId: p.id,
+              flowKey: "email-confirmation",
+              channel: "EMAIL",
+              subject: "Confirm your Corals Anonymous email resubscription",
+              content: json({
+                ...defaultContent,
+                heading: "Confirm your email subscription",
+                body: "You asked to receive Corals Anonymous marketing emails again. Confirm this request to reactivate your subscription. If you did not request this, ignore this message.",
+                button: "Confirm resubscription",
+                url: `${process.env.APP_BASE_URL}/api/marketing/confirm?token=${confirmation.token}`,
+              }),
+              dueAt: new Date(),
+            },
+          });
+          return { completed: false, resubscribe: true, session };
+        }
         if (singleOptIn) {
-          if (existing?.status === "SUBSCRIBED" && p.lists.includes("Mailable Subscribers")) return;
+          if (
+            existing?.status === "SUBSCRIBED" &&
+            p.lists.includes("Mailable Subscribers")
+          )
+            return { completed: true, session };
           const flow = validateFlow("welcome", welcome.data);
           let timezone = flow.welcome!.fallbackTimezone;
           if (typeof b.timezone === "string") {
@@ -169,9 +273,10 @@ export async function POST(request: Request) {
           await record(tx, { key: `subscribed:${session}`, type: "EMAIL_SUBSCRIBED", profileId: p.id,
             payload: { list: "Mailable Subscribers", source: "reef-ops-popup", optIn: "single" } });
           await enroll(tx, "welcome", p.id, session, new Date());
-          return;
+          return { completed: true, session };
         }
-        if (existing?.status === "SUBSCRIBED") return;
+        if (existing?.status === "SUBSCRIBED")
+          return { completed: true, session };
         const recent = await tx.marketingMessage.findFirst({
           where: {
             profileId: p.id,
@@ -179,7 +284,11 @@ export async function POST(request: Request) {
             createdAt: { gte: new Date(Date.now() - 86400000) },
           },
         });
-        if (recent) return;
+        if (recent)
+          return {
+            completed: false,
+            session: recent.key.replace(/^confirmation:/, ""),
+          };
         await tx.marketingResource.create({
           data: {
             shop: shop(),
@@ -229,13 +338,16 @@ export async function POST(request: Request) {
             dueAt: new Date(),
           },
         });
+        return { completed: false, session };
       });
+      const completed = singleOptIn || result.completed;
       return reply({
         ok: true,
-        ...(singleOptIn ? { completed: true } : {}),
-        session,
+        ...(completed ? { completed: true } : { session: result.session }),
         message:
-          singleOptIn ? "Thanks for signing up! If eligible, your welcome offer will arrive by email." : "If this address is eligible, a confirmation email will arrive shortly. Your 10% offer follows confirmation.",
+          completed
+            ? "Thanks! If this address is eligible, the next step will arrive by email."
+            : "If this address is eligible, a confirmation email will arrive shortly. Your 10% offer follows confirmation.",
       });
     }
     if (b.action === "sms") {
@@ -337,13 +449,18 @@ export async function POST(request: Request) {
         },
       });
       const d = r?.data as
-        | { confirmed?: boolean; expiresAt?: string }
+        | {
+            confirmed?: boolean;
+            expiresAt?: string;
+            purpose?: string;
+          }
         | undefined;
       const valid = !!d?.expiresAt && new Date(d.expiresAt) > new Date();
       return reply({
         known: valid,
         confirmed: valid && !!d?.confirmed,
-        smsEnabled: config.smsReady,
+        purpose: d?.purpose,
+        smsEnabled: d?.purpose === "resubscribe" ? false : config.smsReady,
       });
     }
     throw new Error("Unsupported action.");

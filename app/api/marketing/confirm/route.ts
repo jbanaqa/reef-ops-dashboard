@@ -1,5 +1,8 @@
 import { atomic, consent, record, shop } from "@/lib/marketing/store";
-import { confirmationHash } from "@/lib/marketing/confirmation";
+import {
+  canConfirmEmailResubscription,
+  confirmationHash,
+} from "@/lib/marketing/confirmation";
 import { enroll } from "@/lib/marketing/flows";
 export const dynamic = "force-dynamic";
 const headers = {
@@ -42,6 +45,8 @@ export async function POST(request: Request) {
             confirmed: boolean;
             anonymousId?: string;
             version?: number;
+            purpose?: string;
+            timezone?: string;
           }
         | undefined;
       if (!d || d.version !== 2 || new Date(d.expiresAt) <= new Date())
@@ -50,27 +55,80 @@ export async function POST(request: Request) {
         where: { id: d.profileId },
         include: { consents: true },
       });
+      const emailConsent = profile.consents.find(
+        (consent) => consent.channel === "EMAIL",
+      );
+      const resubscribe = d.purpose === "resubscribe";
       if (
         profile.email !== p.email ||
-        profile.consents.some((c) => c.channel === "EMAIL" && c.suppressed)
+        (resubscribe
+          ? !canConfirmEmailResubscription(emailConsent)
+          : emailConsent?.suppressed)
       )
         throw new Error("This signup can no longer be confirmed.");
       if (!d.confirmed) {
-        await consent(
-          tx,
-          d.profileId,
-          "EMAIL",
-          "SUBSCRIBED",
-          "storefront-confirmed-v2",
-          new Date(),
-        );
+        const confirmedAt = new Date();
+        if (resubscribe) {
+          await record(tx, {
+            key: `consent:${d.profileId}:EMAIL:storefront-resubscribe-confirmed-v1:${confirmedAt.toISOString()}:SUBSCRIBED`,
+            type: "CONSENT",
+            profileId: d.profileId,
+            occurredAt: confirmedAt,
+            payload: {
+              channel: "EMAIL",
+              status: "SUBSCRIBED",
+              source: "storefront-resubscribe-confirmed-v1",
+              resubscription: true,
+            },
+          });
+          await tx.marketingConsent.update({
+            where: {
+              profileId_channel: {
+                profileId: d.profileId,
+                channel: "EMAIL",
+              },
+            },
+            data: {
+              status: "SUBSCRIBED",
+              suppressed: false,
+              reason: null,
+              source: "storefront-resubscribe-confirmed-v1",
+              occurredAt: confirmedAt,
+            },
+          });
+          await tx.marketingProfile.update({
+            where: { id: d.profileId },
+            data: {
+              lists: [...new Set([...profile.lists, "Mailable Subscribers"])],
+              ...(d.timezone
+                ? {
+                    properties: {
+                      ...(profile.properties as object),
+                      timezone: d.timezone,
+                    },
+                  }
+                : {}),
+            },
+          });
+        } else {
+          await consent(
+            tx,
+            d.profileId,
+            "EMAIL",
+            "SUBSCRIBED",
+            "storefront-confirmed-v2",
+            confirmedAt,
+          );
+        }
         await tx.marketingResource.update({
           where: { id: session!.id },
           data: { data: { ...d, confirmed: true } },
         });
         await record(tx, {
           key: "confirmed:" + p.session,
-          type: "FORM_EMAIL_CONFIRMED",
+          type: resubscribe
+            ? "FORM_EMAIL_RESUBSCRIBED"
+            : "FORM_EMAIL_CONFIRMED",
           profileId: d.profileId,
         });
         if (d.anonymousId)

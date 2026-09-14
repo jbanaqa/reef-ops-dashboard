@@ -495,7 +495,9 @@ export function registerWelcomeTests(
         );
         return p;
       });
-      await signup(suppressed.email!);
+      const suppressedResponse = await signup(suppressed.email!);
+      const suppressedBody = await suppressedResponse.json();
+      assert.equal(suppressedBody.completed, true);
       assert.equal(
         await prisma.marketingMessage.count({
           where: { profileId: suppressed.id },
@@ -511,6 +513,115 @@ export function registerWelcomeTests(
           })
         ).suppressed,
         true,
+      );
+
+      const voluntary = await store.atomic(async (tx) => {
+        const p = await store.identify(tx, {
+          email: "welcome-resubscribe@example.com",
+        });
+        await store.consent(
+          tx,
+          p.id,
+          "EMAIL",
+          "UNSUBSCRIBED",
+          "unsubscribe-link",
+          new Date(),
+        );
+        return p;
+      });
+      const resubscribeResponse = await signup(voluntary.email!);
+      const resubscribeBody = await resubscribeResponse.json();
+      assert.equal(resubscribeBody.completed, true);
+      assert.equal(resubscribeBody.resubscribe, undefined);
+      assert.equal(
+        resubscribeBody.message,
+        suppressedBody.message,
+        "the public response must not disclose prior subscription state",
+      );
+      const confirmationMessage =
+        await prisma.marketingMessage.findFirstOrThrow({
+          where: {
+            profileId: voluntary.id,
+            flowKey: "email-confirmation",
+          },
+        });
+      await worker.runMarketing(confirmationMessage.id);
+      assert.equal(
+        (
+          await prisma.marketingMessage.findUniqueOrThrow({
+            where: { id: confirmationMessage.id },
+          })
+        ).status,
+        "SENT",
+        "voluntary opt-outs can receive only the ownership confirmation",
+      );
+      const confirmationUrl = String(
+        (confirmationMessage.content as Content).url,
+      );
+      const confirmationApi = await import(
+        "../app/api/marketing/confirm/route"
+      );
+      assert.equal(
+        (
+          await confirmationApi.POST(
+            new Request(confirmationUrl, { method: "POST" }),
+          )
+        ).status,
+        200,
+      );
+      const reactivated =
+        await prisma.marketingConsent.findUniqueOrThrow({
+          where: {
+            profileId_channel: {
+              profileId: voluntary.id,
+              channel: "EMAIL",
+            },
+          },
+        });
+      assert.equal(reactivated.status, "SUBSCRIBED");
+      assert.equal(reactivated.suppressed, false);
+      assert.equal(
+        reactivated.source,
+        "storefront-resubscribe-confirmed-v1",
+      );
+      assert.ok(
+        (await profile(voluntary.email!)).lists.includes(
+          "Mailable Subscribers",
+        ),
+      );
+      assert.equal(
+        await prisma.marketingMessage.count({
+          where: { profileId: voluntary.id, flowKey: "welcome" },
+        }),
+        4,
+      );
+
+      const complained = await store.atomic(async (tx) => {
+        const p = await store.identify(tx, {
+          email: "welcome-complained@example.com",
+        });
+        await store.consent(
+          tx,
+          p.id,
+          "EMAIL",
+          "UNSUBSCRIBED",
+          "provider",
+          new Date(),
+          "COMPLAINED",
+        );
+        return p;
+      });
+      const complainedResponse = await signup(complained.email!);
+      assert.equal((await complainedResponse.json()).completed, true);
+      assert.equal(
+        await prisma.marketingMessage.count({
+          where: {
+            profileId: complained.id,
+            flowKey: "email-confirmation",
+          },
+        }),
+        0,
+        "complaints must never receive a resubscription email",
       );
       assert.equal(
         +welcomeLocalHour(

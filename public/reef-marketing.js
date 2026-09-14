@@ -267,7 +267,7 @@
       };
       const waiting = () => {
         panel.innerHTML =
-          '<p>If this address is eligible, check your inbox to confirm signup. Your offer follows confirmation.</p><button type="button">I confirmed my email</button><p><button type="button" class="retry">Use a different email or try again later</button></p>';
+          '<p>If this address is eligible, check your inbox to confirm the email subscription.</p><button type="button">I confirmed my email</button><p><button type="button" class="retry">Use a different email or try again later</button></p>';
         panel.querySelector("button").onclick = refresh;
         panel.querySelector(".retry").onclick = () => {
           storage.remove("reef-marketing-session");
@@ -281,7 +281,10 @@
           const result = await post({ action: "status", session });
           if (closed) return;
           if (result.confirmed) {
-            if (result.smsEnabled) sms();
+            if (result.purpose === "resubscribe") {
+              finish();
+              panel.textContent = "Your email subscription is active again.";
+            } else if (result.smsEnabled) sms();
             else {
               finish();
               panel.textContent =
