@@ -14,7 +14,8 @@ let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
 let store: typeof import("../lib/marketing/store"),
   ingest: typeof import("../lib/marketing/ingest"),
   inbox: typeof import("../lib/marketing/inbox"),
-  worker: typeof import("../lib/marketing/worker");
+  worker: typeof import("../lib/marketing/worker"),
+  audienceBackfill: typeof import("../lib/marketing/audience-backfill");
 const shop = "audit.myshopify.com",
   at = new Date(),
   sent: Record<string, unknown>[] = [];
@@ -33,6 +34,7 @@ let customer = {
   smsMarketingConsent: null,
 };
 const originalFetch = globalThis.fetch;
+let klaviyoPages: Record<string, unknown>[] = [];
 before(async () => {
   console.log("integration: creating isolated database");
   db = await PGlite.create();
@@ -76,6 +78,7 @@ before(async () => {
     RESEND_WEBHOOK_SECRET: "test",
     MARKETING_POSTAL_ADDRESS: "123 Test Street",
     MARKETING_WELCOME_COUPON: "FIRST10",
+    KLAVIYO_PRIVATE_API_KEY: "test-klaviyo-key",
   });
   prisma = new PrismaClient({
     adapter: new PrismaPg({
@@ -88,8 +91,14 @@ before(async () => {
   ingest = await import("../lib/marketing/ingest");
   inbox = await import("../lib/marketing/inbox");
   worker = await import("../lib/marketing/worker");
+  audienceBackfill = await import("../lib/marketing/audience-backfill");
   globalThis.fetch = async (input, init) => {
     const url = String(input);
+    if (url.startsWith("https://a.klaviyo.com/api/")) {
+      const next = klaviyoPages.shift();
+      if (!next) throw new Error("Unexpected Klaviyo request: " + url);
+      return Response.json(next);
+    }
     if (url.includes("/oauth/access_token"))
       return Response.json({ access_token: "mock" });
     if (url.includes("/graphql.json"))
@@ -183,6 +192,106 @@ test("B2B tag event hydrates consent, preserves omitted tags, and sends once", a
     }),
     1,
   );
+});
+
+test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopify tags without enrollment", async () => {
+  const subscribedAt = new Date(Date.now() - 86400000).toISOString();
+  const suppressedAt = new Date(Date.now() - 43200000).toISOString();
+  const subscribed = {
+    type: "profile",
+    id: "klaviyo-subscriber",
+    attributes: {
+      email: "klaviyo-subscriber@example.com",
+      first_name: "Kara",
+      last_name: "Reefer",
+      properties: { "Shopify Tags": "B2B, VIP" },
+      location: { timezone: "America/Los_Angeles" },
+      subscriptions: {
+        email: {
+          marketing: {
+            consent: "SUBSCRIBED",
+            consent_timestamp: subscribedAt,
+            last_updated: subscribedAt,
+            method: "FORM",
+            suppression: [],
+            list_suppressions: [],
+          },
+        },
+      },
+    },
+  };
+  const suppressed = {
+    type: "profile",
+    id: "klaviyo-suppressed",
+    attributes: {
+      email: "klaviyo-suppressed@example.com",
+      subscriptions: {
+        email: {
+          marketing: {
+            consent: "UNSUBSCRIBED",
+            last_updated: suppressedAt,
+            suppression: [
+              { reason: "UNSUBSCRIBE", timestamp: suppressedAt },
+            ],
+            list_suppressions: [
+              {
+                list_id: "mailable",
+                reason: "USER_SUPPRESSED",
+                timestamp: suppressedAt,
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+  klaviyoPages = [
+    {
+      data: [
+        {
+          type: "list",
+          id: "mailable",
+          attributes: { name: "Mailable Subscribers" },
+        },
+      ],
+      links: { next: null },
+    },
+    { data: [subscribed, suppressed], links: { next: null } },
+    { data: [subscribed, suppressed], links: { next: null } },
+  ];
+
+  assert.equal((await audienceBackfill.syncAudienceBackfill()).phase, "profiles");
+  assert.equal((await audienceBackfill.syncAudienceBackfill()).phase, "memberships");
+  const complete = await audienceBackfill.syncAudienceBackfill();
+  assert.equal(complete.phase, "complete");
+  assert.equal(complete.profiles, 2);
+  assert.equal(complete.memberships, 1);
+  assert.deepEqual(complete.lists, ["Mailable Subscribers"]);
+
+  const profile = await prisma.marketingProfile.findUniqueOrThrow({
+    where: {
+      shop_email: { shop, email: "klaviyo-subscriber@example.com" },
+    },
+    include: { consents: true, messages: true },
+  });
+  assert.deepEqual(profile.tags.sort(), ["b2b", "vip"]);
+  assert.deepEqual(profile.lists, ["Mailable Subscribers"]);
+  assert.equal(
+    profile.consents.find((entry) => entry.channel === "EMAIL")?.status,
+    "SUBSCRIBED",
+  );
+  assert.equal(profile.messages.length, 0);
+
+  const blocked = await prisma.marketingProfile.findUniqueOrThrow({
+    where: {
+      shop_email: { shop, email: "klaviyo-suppressed@example.com" },
+    },
+    include: { consents: true, messages: true },
+  });
+  assert.deepEqual(blocked.lists, []);
+  assert.equal(blocked.consents[0]?.suppressed, true);
+  assert.equal(blocked.messages.length, 0);
+  assert.equal(klaviyoPages.length, 0);
 });
 
 test("Shopify delivery-date order tag schedules one upsell notice", async () => {

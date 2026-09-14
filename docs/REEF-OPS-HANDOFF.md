@@ -344,7 +344,7 @@ Pixel source: `shopify/reef-marketing-custom-pixel.js`. Download control fills i
 ### History import
 
 - `cart-history.ts`, staff-triggered batches, durable progress/lease, pause/resume.
-- KLAVIYO_PRIVATE_API_KEY scopes events:read, metrics:read, profiles:read.
+- KLAVIYO_PRIVATE_API_KEY scopes events:read, metrics:read, profiles:read, and lists:read for both history and audience migration tools.
 - Checkout Started/Added to Cart: 90 days.
 - Viewed Product/Ordered Product: 3 days.
 - Received Email: 2 days.
@@ -354,6 +354,15 @@ Pixel source: `shopify/reef-marketing-custom-pixel.js`. Download control fills i
 - It is a snapshot, not continuous Klaviyo synchronization.
 - Refresh after drafting original Klaviyo flow and before cutover.
 - User-reported 29,598 processed and 2,197 ignored are not counts of successfully enrolled customers or sent emails.
+
+### Audience backfill
+
+- Settings → Advanced now has a staff-started, resumable Klaviyo audience backfill.
+- It requires `KLAVIYO_PRIVATE_API_KEY` with `profiles:read` and `lists:read`.
+- It imports profile identity, explicit email/SMS consent evidence, global suppressions, timezone, Klaviyo list membership, and an explicit Shopify Tags profile property when Klaviyo supplies one.
+- It does not infer consent from list membership or `can_receive_*`. List-specific suppression removes only that imported list membership.
+- The UI shows profile/list progress, suppressions, skipped identities, and a bounded list of row conflicts. It can pause after the current API page and resume from durable state.
+- It does not enroll historical Welcome or B2B flows, send messages, or alter Klaviyo. Shopify webhooks remain authoritative for later tag and consent changes.
 
 ## 14. Sending, data, and safety constraints
 

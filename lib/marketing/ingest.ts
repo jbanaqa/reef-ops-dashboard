@@ -536,10 +536,15 @@ export type ImportRow = {
   lastOpenedAt?: string;
   lastOrderAt?: string;
   lists?: string[];
+  removeLists?: string[];
   tags?: string[];
   timezone?: string;
 };
-export async function importProfiles(rows: ImportRow[], dryRun: boolean) {
+export async function importProfiles(
+  rows: ImportRow[],
+  dryRun: boolean,
+  auditName = "Klaviyo migration",
+) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 500)
     throw new Error("Import 1–500 rows per batch.");
   const results: { row: number; status: string; error?: string }[] = [];
@@ -603,7 +608,9 @@ export async function importProfiles(rows: ImportRow[], dryRun: boolean) {
         await tx.marketingProfile.update({
           where: { id: p.id },
           data: {
-            lists: [...new Set([...p.lists, ...(row.lists || [])])],
+            lists: [...new Set([...p.lists, ...(row.lists || [])])].filter(
+              (list) => !(row.removeLists || []).includes(list),
+            ),
             tags: [
               ...new Set([
                 ...p.tags,
@@ -641,7 +648,7 @@ export async function importProfiles(rows: ImportRow[], dryRun: boolean) {
         shop: shop(),
         kind: "IMPORT",
         key: crypto.randomUUID(),
-        name: "Klaviyo migration",
+        name: auditName,
         data: json({ at: new Date().toISOString(), results }),
       },
     });

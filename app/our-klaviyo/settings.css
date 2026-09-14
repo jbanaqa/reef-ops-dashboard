@@ -414,6 +414,33 @@
   flex-wrap: wrap;
   margin-top: 18px;
 }
+.sw-backfill {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--sw-line);
+}
+.sw-backfill-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+.sw-backfill-stats > div {
+  padding: 11px 12px;
+  border: 1px solid var(--sw-line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+.sw-backfill-stats dt {
+  color: var(--sw-muted);
+  font-size: 12px;
+}
+.sw-backfill-stats dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
 .sw-import-help {
   padding: 12px;
   background: var(--surface-muted);
@@ -489,6 +516,9 @@
   }
 }
 @media (max-width: 700px) {
+  .sw-backfill-stats {
+    grid-template-columns: 1fr 1fr;
+  }
   .sw-workspace {
     display: block;
   }

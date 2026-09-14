@@ -18,6 +18,21 @@ type ImportResult = { row: number; status: string; error?: string };
 type ConnectionResult = {
   results: { topic: string; status: string; message?: string }[];
 };
+type AudienceBackfill = {
+  configured: boolean;
+  phase: string;
+  profiles: number;
+  memberships: number;
+  suppressed: number;
+  ignored: number;
+  errors: number;
+  lists: string[];
+  currentList?: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+  issues: { profile: string; phase: string; error: string }[];
+};
 export type SettingsData = {
   settings: MarketingSettings;
   setup: Record<string, unknown>;
@@ -137,6 +152,9 @@ export default function SettingsWorkspace({
     null,
   );
   const [imported, setImported] = useState(false);
+  const [audienceBackfill, setAudienceBackfill] =
+    useState<AudienceBackfill | null>(null);
+  const stopBackfill = useRef(false);
   const feedback = useRef<HTMLDivElement>(null);
   const reviewRef = useRef<HTMLDivElement>(null);
   const businessDirty = !same(business, {
@@ -158,6 +176,28 @@ export default function SettingsWorkspace({
   useEffect(() => {
     if (review) reviewRef.current?.focus();
   }, [review]);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/marketing?view=audience-backfill")
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok)
+          throw new Error(result.error || "Could not load the Klaviyo backfill.");
+        if (active) setAudienceBackfill(result);
+      })
+      .catch((reason) => {
+        if (active)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Could not load the Klaviyo backfill.",
+          );
+      });
+    return () => {
+      active = false;
+      stopBackfill.current = true;
+    };
+  }, []);
   const setup = data.setup;
   const deployment = (setup.deployment || {}) as Partial<MarketingOperations>;
   const worker = data.resources.find(
@@ -234,6 +274,37 @@ export default function SettingsWorkspace({
     if (!Array.isArray(rows) || !rows.length || rows.length > 500)
       throw new Error("Choose a prepared file containing 1–500 contacts.");
     return rows;
+  }
+  async function runAudienceBackfill() {
+    setBusy("audience-backfill");
+    setError("");
+    setNotice("");
+    stopBackfill.current = false;
+    try {
+      let result: AudienceBackfill;
+      do {
+        result = await action<AudienceBackfill>({
+          action: "sync-klaviyo-audience",
+        });
+        setAudienceBackfill(result);
+        if (result.error) throw new Error(result.error);
+        if (result.phase === "complete") break;
+        await new Promise((resolve) => window.setTimeout(resolve, 125));
+      } while (!stopBackfill.current);
+      setNotice(
+        result!.phase === "complete"
+          ? `Klaviyo audience backfill finished: ${result!.profiles} profiles and ${result!.memberships} list memberships processed.`
+          : "Klaviyo audience backfill paused. You can continue from this point.",
+      );
+      if (result!.phase === "complete") await refresh();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Audience backfill paused.",
+      );
+    } finally {
+      setBusy("");
+      feedback.current?.focus();
+    }
   }
   const navDirty = (key: string) =>
     key === "overview"
@@ -872,6 +943,112 @@ export default function SettingsWorkspace({
                 >
                   Save review status
                 </button>
+              </div>
+              <div className="sw-backfill">
+                <h4>Bring over the Klaviyo audience</h4>
+                <p>
+                  Copy profiles, email and SMS consent, global suppressions,
+                  Shopify tags stored on Klaviyo profiles, and Klaviyo list
+                  membership. Imported contacts do not enter historical Welcome
+                  or B2B flows and no messages are sent.
+                </p>
+                {!audienceBackfill ? (
+                  <p>Checking the Klaviyo connection…</p>
+                ) : (
+                  <>
+                    <dl className="sw-backfill-stats">
+                      <div>
+                        <dt>Connection</dt>
+                        <dd>
+                          {audienceBackfill.configured
+                            ? "API key configured"
+                            : "API key missing"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Progress</dt>
+                        <dd>
+                          {audienceBackfill.phase === "not-started"
+                            ? "Not started"
+                            : audienceBackfill.phase === "complete"
+                              ? "Complete"
+                              : audienceBackfill.phase === "lists"
+                                ? "Reading lists"
+                                : audienceBackfill.phase === "profiles"
+                                  ? "Importing profiles"
+                                  : `Importing ${audienceBackfill.currentList || "list memberships"}`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Profiles</dt>
+                        <dd>{audienceBackfill.profiles.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>List memberships</dt>
+                        <dd>{audienceBackfill.memberships.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>Suppressions found</dt>
+                        <dd>{audienceBackfill.suppressed.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>Needs review</dt>
+                        <dd>{audienceBackfill.errors.toLocaleString()}</dd>
+                      </div>
+                      <div>
+                        <dt>Skipped without an address</dt>
+                        <dd>{audienceBackfill.ignored.toLocaleString()}</dd>
+                      </div>
+                    </dl>
+                    {!!audienceBackfill.lists.length && (
+                      <p>
+                        Lists found: {audienceBackfill.lists.join(", ")}
+                      </p>
+                    )}
+                    {audienceBackfill.completedAt && (
+                      <p>Last completed {date(audienceBackfill.completedAt)}.</p>
+                    )}
+                    {!!audienceBackfill.issues.length && (
+                      <details className="sw-import-help">
+                        <summary>Profiles that need review</summary>
+                        <ul>
+                          {audienceBackfill.issues.map((issue, index) => (
+                            <li key={`${issue.profile}-${index}`}>
+                              <strong>{issue.profile}</strong> · {issue.phase}: {issue.error}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    <div className="sw-import-actions">
+                      <button
+                        className="sw-primary"
+                        disabled={
+                          !!busy || !audienceBackfill.configured
+                        }
+                        onClick={() => void runAudienceBackfill()}
+                      >
+                        {busy === "audience-backfill"
+                          ? "Backfilling…"
+                          : audienceBackfill.phase === "complete"
+                            ? "Refresh from Klaviyo"
+                            : audienceBackfill.phase === "not-started"
+                              ? "Start backfill"
+                              : "Continue backfill"}
+                      </button>
+                      {busy === "audience-backfill" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            stopBackfill.current = true;
+                          }}
+                        >
+                          Pause after this batch
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </section>
             <section className="sw-card">

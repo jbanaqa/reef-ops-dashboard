@@ -11,11 +11,13 @@ import {
   defaultMarketingSettings,
 } from "../lib/marketing/rules";
 import FlowEditor from "../app/our-klaviyo/FlowEditor";
+import SettingsWorkspace from "../app/our-klaviyo/SettingsWorkspace";
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://app.example",
 });
 Object.assign(globalThis, {
   window: dom.window,
+  self: dom.window,
   document: dom.window.document,
   HTMLElement: dom.window.HTMLElement,
   FileReader: dom.window.FileReader,
@@ -69,6 +71,51 @@ test("single-opt-in popup submits consent and finishes without a confirmation or
     assert.equal(w.document.querySelector("form"), null);
     assert.match(w.document.body.textContent!, /Thanks for joining/);
   } finally { popup.window.close(); }
+});
+test("settings presents the resumable Klaviyo audience backfill", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  const original = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      phase: "memberships",
+      profiles: 120,
+      memberships: 45,
+      suppressed: 3,
+      ignored: 2,
+      errors: 1,
+      lists: ["Mailable Subscribers"],
+      currentList: "Mailable Subscribers",
+      issues: [
+        {
+          profile: "conflict@example.com",
+          phase: "Profiles",
+          error: "Identity conflict",
+        },
+      ],
+    });
+  try {
+    const view = testing.render(
+      <SettingsWorkspace
+        data={{
+          settings: defaultMarketingSettings,
+          setup: {},
+          resources: [],
+          messageCounts: [],
+        }}
+        refresh={async () => {}}
+      />,
+    );
+    testing.fireEvent.click(view.getByRole("button", { name: /Advanced/ }));
+    assert.ok(await view.findByText("Bring over the Klaviyo audience"));
+    assert.ok(await view.findByText("Importing Mailable Subscribers"));
+    assert.ok(view.getByRole("button", { name: "Continue backfill" }));
+    testing.fireEvent.click(view.getByText("Profiles that need review"));
+    assert.ok(view.getByText(/conflict@example.com/));
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 afterEach(() => cleanup?.());
 test.beforeEach(() => {
