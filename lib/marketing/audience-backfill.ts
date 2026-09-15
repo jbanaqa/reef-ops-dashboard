@@ -7,6 +7,7 @@ import type { Tx } from "./store";
 
 type Phase = "lists" | "profiles" | "memberships" | "complete";
 type KlaviyoList = { id: string; name: string };
+type AudienceIssue = { profile: string; phase: string; error: string };
 type Sync = {
   phase: Phase;
   lists: KlaviyoList[];
@@ -17,7 +18,7 @@ type Sync = {
   suppressed: number;
   ignored: number;
   errors: number;
-  issues?: { profile: string; phase: string; error: string }[];
+  issues?: AudienceIssue[];
   startedAt: string;
   completedAt?: string;
   leaseUntil?: string;
@@ -72,9 +73,20 @@ export type AudienceBackfillStatus = Awaited<
 >;
 
 export async function audienceBackfillStatus() {
-  const resource = await prisma.marketingResource.findUnique({
-    where: { shop_kind_key: where() },
-  });
+  const [resource, reviewCount, reviewRows] = await Promise.all([
+    prisma.marketingResource.findUnique({
+      where: { shop_kind_key: where() },
+    }),
+    prisma.marketingResource.count({
+      where: { shop: shop(), kind: "AUDIENCE_REVIEW" },
+    }),
+    prisma.marketingResource.findMany({
+      where: { shop: shop(), kind: "AUDIENCE_REVIEW" },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+      select: { data: true },
+    }),
+  ]);
   const state = resource?.data as Sync | undefined;
   return {
     configured: !!process.env.KLAVIYO_PRIVATE_API_KEY,
@@ -84,6 +96,7 @@ export async function audienceBackfillStatus() {
     suppressed: state?.suppressed || 0,
     ignored: state?.ignored || 0,
     errors: state?.errors || 0,
+    reviewCount,
     lists: state?.lists?.map((list) => list.name) || [],
     currentList:
       state?.phase === "memberships"
@@ -92,7 +105,7 @@ export async function audienceBackfillStatus() {
     startedAt: state?.startedAt,
     completedAt: state?.completedAt,
     error: state?.error,
-    issues: state?.issues || [],
+    issues: reviewRows.map((row) => row.data as AudienceIssue),
   };
 }
 
@@ -283,23 +296,53 @@ async function importPage(
   const converted = page.data.map((item) => klaviyoProfileRow(item, membership));
   state.ignored += converted.filter((entry) => !entry.row).length;
   state.suppressed += converted.filter((entry) => entry.suppressed).length;
-  const rows = converted.flatMap((entry) => (entry.row ? [entry.row] : []));
-  if (!rows.length) return;
-  // Keep Shopify's current phone for profiles already identified by email,
-  // while still importing phone numbers for new and phone-only profiles.
-  const existingEmails = new Set(
-    (
-      await prisma.marketingProfile.findMany({
-        where: {
-          shop: shop(),
-          email: { in: rows.flatMap((row) => (row.email ? [row.email] : [])) },
-        },
-        select: { email: true },
-      })
-    ).flatMap((profile) => (profile.email ? [profile.email] : [])),
+  const entries = converted.flatMap((entry, index) =>
+    entry.row ? [{ item: page.data[index], row: entry.row }] : [],
   );
+  const rows = entries.map((entry) => entry.row);
+  if (!rows.length) return;
+  // Email is the Klaviyo marketing identity. Keep Shopify's current phone and
+  // never move a phone that already belongs to another profile.
+  const [emailProfiles, phoneProfiles] = await Promise.all([
+    prisma.marketingProfile.findMany({
+      where: {
+        shop: shop(),
+        email: { in: rows.flatMap((row) => (row.email ? [row.email] : [])) },
+      },
+      select: { email: true },
+    }),
+    prisma.marketingProfile.findMany({
+      where: {
+        shop: shop(),
+        phone: { in: rows.flatMap((row) => (row.phone ? [row.phone] : [])) },
+      },
+      select: { email: true, phone: true },
+    }),
+  ]);
+  const existingEmails = new Set(
+    emailProfiles.flatMap((profile) => (profile.email ? [profile.email] : [])),
+  );
+  const phoneOwners = new Map(
+    phoneProfiles.flatMap((profile) =>
+      profile.phone ? [[profile.phone, profile.email] as const] : [],
+    ),
+  );
+  const batchPhoneEmails = new Map<string, Set<string>>();
   for (const row of rows)
-    if (row.email && existingEmails.has(row.email)) delete row.phone;
+    if (row.email && row.phone) {
+      const addresses = batchPhoneEmails.get(row.phone) || new Set<string>();
+      addresses.add(row.email);
+      batchPhoneEmails.set(row.phone, addresses);
+    }
+  for (const row of rows)
+    if (
+      row.email &&
+      row.phone &&
+      (existingEmails.has(row.email) ||
+        (phoneOwners.has(row.phone) && phoneOwners.get(row.phone) !== row.email) ||
+        (batchPhoneEmails.get(row.phone)?.size || 0) > 1)
+    )
+      delete row.phone;
   // The consent table already retains the imported state, source, and timestamp.
   // Avoid a second event row per channel during this large snapshot migration.
   const results = await importProfiles(
@@ -320,6 +363,41 @@ async function importPage(
         error: failure.error || "Import failed",
       });
   }
+  await atomic(async (tx) => {
+    for (const result of results) {
+      const entry = entries[result.row - 1];
+      if (!entry) continue;
+      const key = entry.item.id.slice(0, 100);
+      if (result.status === "ERROR")
+        await tx.marketingResource.upsert({
+          where: {
+            shop_kind_key: { shop: shop(), kind: "AUDIENCE_REVIEW", key },
+          },
+          create: {
+            shop: shop(),
+            kind: "AUDIENCE_REVIEW",
+            key,
+            name: "Klaviyo profile needs review",
+            data: json({
+              profile: entry.row.email || entry.row.phone || entry.item.id,
+              phase: membership ? membership.name : "Profiles",
+              error: result.error || "Import failed",
+            }),
+          },
+          update: {
+            data: json({
+              profile: entry.row.email || entry.row.phone || entry.item.id,
+              phase: membership ? membership.name : "Profiles",
+              error: result.error || "Import failed",
+            }),
+          },
+        });
+      else if (!membership)
+        await tx.marketingResource.deleteMany({
+          where: { shop: shop(), kind: "AUDIENCE_REVIEW", key },
+        });
+    }
+  });
   if (membership)
     state.memberships += results.filter((result) => {
       const row = rows[result.row - 1];

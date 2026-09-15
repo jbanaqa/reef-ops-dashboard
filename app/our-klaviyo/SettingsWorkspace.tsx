@@ -26,6 +26,7 @@ type AudienceBackfill = {
   suppressed: number;
   ignored: number;
   errors: number;
+  reviewCount?: number;
   lists: string[];
   currentList?: string;
   startedAt?: string;
@@ -206,6 +207,8 @@ export default function SettingsWorkspace({
   const pending = data.messageCounts
     .filter((m) => m.status === "PENDING")
     .reduce((n, m) => n + m._count, 0);
+  const needsReview =
+    audienceBackfill?.reviewCount ?? audienceBackfill?.errors ?? 0;
   function navigate(key: string) {
     setSection(key);
     setError("");
@@ -992,8 +995,10 @@ export default function SettingsWorkspace({
                         <dd>{audienceBackfill.suppressed.toLocaleString()}</dd>
                       </div>
                       <div>
-                        <dt>Needs review</dt>
-                        <dd>{audienceBackfill.errors.toLocaleString()}</dd>
+                        <dt>Unique profiles to review</dt>
+                        <dd>
+                          {needsReview.toLocaleString()}
+                        </dd>
                       </div>
                       <div>
                         <dt>Skipped without an address</dt>
@@ -1010,7 +1015,11 @@ export default function SettingsWorkspace({
                     )}
                     {!!audienceBackfill.issues.length && (
                       <details className="sw-import-help">
-                        <summary>Profiles that need review</summary>
+                        <summary>
+                          Profiles that need review
+                          {needsReview > audienceBackfill.issues.length &&
+                            ` · showing ${audienceBackfill.issues.length} of ${needsReview}`}
+                        </summary>
                         <ul>
                           {audienceBackfill.issues.map((issue, index) => (
                             <li key={`${issue.profile}-${index}`}>

@@ -246,6 +246,17 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
       },
     },
   };
+  const conflictingPhone = {
+    ...subscribed,
+    id: "klaviyo-conflicting-phone",
+    attributes: {
+      ...subscribed.attributes,
+      email: "klaviyo-email-owner@example.com",
+      phone_number: "+15555550300",
+      first_name: "Email",
+      last_name: "Owner",
+    },
+  };
   klaviyoPages = [
     {
       data: [
@@ -257,8 +268,8 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
       ],
       links: { next: null },
     },
-    { data: [subscribed, suppressed], links: { next: null } },
-    { data: [subscribed, suppressed], links: { next: null } },
+    { data: [subscribed, suppressed, conflictingPhone], links: { next: null } },
+    { data: [subscribed, suppressed, conflictingPhone], links: { next: null } },
   ];
 
   await prisma.marketingProfile.create({
@@ -269,13 +280,21 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
       name: "Existing Shopify customer",
     },
   });
+  const phoneOwner = await prisma.marketingProfile.create({
+    data: {
+      shop,
+      email: "shopify-phone-owner@example.com",
+      phone: "+15555550300",
+      name: "Shopify phone owner",
+    },
+  });
 
   assert.equal((await audienceBackfill.syncAudienceBackfill()).phase, "profiles");
   assert.equal((await audienceBackfill.syncAudienceBackfill()).phase, "memberships");
   const complete = await audienceBackfill.syncAudienceBackfill();
   assert.equal(complete.phase, "complete");
-  assert.equal(complete.profiles, 2);
-  assert.equal(complete.memberships, 1);
+  assert.equal(complete.profiles, 3);
+  assert.equal(complete.memberships, 2);
   assert.deepEqual(complete.lists, ["Mailable Subscribers"]);
 
   const importedAudience = await prisma.marketingResource.findUniqueOrThrow({
@@ -310,6 +329,30 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
         profileId: profile.id,
         type: "CONSENT",
       },
+    }),
+    0,
+  );
+
+  const emailOwner = await prisma.marketingProfile.findUniqueOrThrow({
+    where: {
+      shop_email: { shop, email: "klaviyo-email-owner@example.com" },
+    },
+    include: { consents: true },
+  });
+  assert.equal(emailOwner.phone, null);
+  assert.equal(emailOwner.consents[0]?.status, "SUBSCRIBED");
+  assert.deepEqual(emailOwner.lists, ["Mailable Subscribers"]);
+  assert.equal(
+    (
+      await prisma.marketingProfile.findUniqueOrThrow({
+        where: { id: phoneOwner.id },
+      })
+    ).phone,
+    "+15555550300",
+  );
+  assert.equal(
+    await prisma.marketingResource.count({
+      where: { shop, kind: "AUDIENCE_REVIEW" },
     }),
     0,
   );
