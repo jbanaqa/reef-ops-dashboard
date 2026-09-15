@@ -278,6 +278,18 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
   assert.equal(complete.memberships, 1);
   assert.deepEqual(complete.lists, ["Mailable Subscribers"]);
 
+  const importedAudience = await prisma.marketingResource.findUniqueOrThrow({
+    where: {
+      shop_kind_key: {
+        shop,
+        kind: "SEGMENT",
+        key: "klaviyo-list-mailable",
+      },
+    },
+  });
+  assert.equal(importedAudience.name, "Mailable Subscribers");
+  assert.deepEqual(importedAudience.data, { list: "Mailable Subscribers" });
+
   const profile = await prisma.marketingProfile.findUniqueOrThrow({
     where: {
       shop_email: { shop, email: "klaviyo-subscriber@example.com" },

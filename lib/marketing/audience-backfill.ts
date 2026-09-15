@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { importProfiles, ImportRow } from "./ingest";
 import { email, phone } from "./rules";
 import { atomic, json, shop } from "./store";
+import type { Tx } from "./store";
 
 type Phase = "lists" | "profiles" | "memberships" | "complete";
 type KlaviyoList = { id: string; name: string };
@@ -35,6 +36,36 @@ const where = () => ({
   kind: "AUDIENCE_SYNC",
   key: "klaviyo",
 });
+
+const savedAudienceKey = (list: KlaviyoList) =>
+  `klaviyo-list-${list.id}`.slice(0, 100);
+
+async function saveImportedListAudiences(
+  tx: Tx,
+  lists: KlaviyoList[],
+) {
+  for (const list of lists)
+    await tx.marketingResource.upsert({
+      where: {
+        shop_kind_key: {
+          shop: shop(),
+          kind: "SEGMENT",
+          key: savedAudienceKey(list),
+        },
+      },
+      create: {
+        shop: shop(),
+        kind: "SEGMENT",
+        key: savedAudienceKey(list),
+        name: list.name,
+        data: json({ list: list.name }),
+      },
+      update: {
+        name: list.name,
+        data: json({ list: list.name }),
+      },
+    });
+}
 
 export type AudienceBackfillStatus = Awaited<
   ReturnType<typeof audienceBackfillStatus>
@@ -389,6 +420,8 @@ export async function syncAudienceBackfill() {
     if ((current.data as Sync).leaseOwner !== state.leaseOwner) return;
     delete state.leaseUntil;
     delete state.leaseOwner;
+    if (state.phase === "complete" && !state.error)
+      await saveImportedListAudiences(tx, state.lists);
     await tx.marketingResource.update({
       where: { id: current.id },
       data: { data: json(state) },
