@@ -1,10 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { flowEmailTemplates } from "../lib/marketing/flow-email-templates";
 import {
   welcomeDraft,
   welcomeSteps,
   defaultWelcome,
 } from "../lib/marketing/welcome-config";
+
+test("templates show each saved flow email without replacing saved copy", () => {
+  const custom = {
+    ...welcomeSteps[0],
+    subject: "Our saved welcome subject",
+    content: { ...welcomeSteps[0].content, hero: "data:image/png;base64,art" },
+  };
+  const resources = [
+    { id: "welcome", key: "welcome", kind: "FLOW", data: { steps: [custom, ...welcomeSteps.slice(1)] } },
+    { id: "cart", key: "abandoned-cart", kind: "FLOW", data: { steps: [{ ...custom }], orderBranch: { yes: { subject: "Past buyer", content: custom.content }, no: { subject: "Offer", content: custom.content } } } },
+    { id: "stock", key: "low-stock", kind: "FLOW", data: { steps: [custom] } },
+  ];
+  const templates = flowEmailTemplates(resources);
+  assert.equal(templates.length, 7);
+  assert.equal(templates[0].subject, "Our saved welcome subject");
+  assert.equal(templates[0].data.hero, custom.content.hero);
+  assert.deepEqual(templates.slice(-2).map((template) => template.subject), ["Past buyer", "Offer"]);
+  assert.ok(templates.every((template) => template.sourceFlow !== "low-stock"));
+});
 import {
   content,
   defaultContent,

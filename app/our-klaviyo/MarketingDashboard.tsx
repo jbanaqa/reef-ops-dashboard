@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import EmailDesigner from "./EmailDesigner";
+import { flowEmailTemplates } from "@/lib/marketing/flow-email-templates";
 import FlowsWorkspace from "./FlowsWorkspace";
 import "./flows.css";
 import "./stock.css";
@@ -26,6 +27,8 @@ type Resource = {
   name: string;
   enabled: boolean;
   data: Record<string, unknown>;
+  subject?: string;
+  sourceFlow?: string;
 };
 type Profile = {
   id: string;
@@ -112,6 +115,12 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   const [dismissalDraft, setDismissalDraft] = useState<boolean | null>(null);
   const [popupDelayDraft, setPopupDelayDraft] = useState<string | null>(null);
   const [resource, setResource] = useState<Resource | null>(null);
+  const templates: Resource[] = data
+    ? [
+        ...flowEmailTemplates(data.resources),
+        ...data.resources.filter((r) => r.kind === "TEMPLATE"),
+      ]
+    : [];
   const load = useCallback(async () => {
     const r = await fetch("/api/marketing", { cache: "no-store" });
     const d = await r.json();
@@ -197,12 +206,18 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           backLabel={resource ? "Back to templates" : "Back to campaign"}
           editProducts
           subjectEditable={!resource}
-          subject={resource ? "Template preview" : campaign.subject}
+          subject={resource ? resource.subject || "Template preview" : campaign.subject}
           content={editingContent}
           html={emailHtml}
           previewError={emailPreviewError}
           busy={busy}
-          status={error || notice || "Save email to keep your changes."}
+          status={
+            error ||
+            notice ||
+            (resource?.sourceFlow
+              ? "Save creates a separate template; the flow email stays unchanged."
+              : "Save email to keep your changes.")
+          }
           organizationName={
             data?.settings.organizationName || "Corals Anonymous"
           }
@@ -223,7 +238,21 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           }}
           onSave={async () =>
             !!(await run(async () => {
-              if (resource)
+              if (resource?.sourceFlow) {
+                const copy = await action({
+                  action: "save-resource",
+                  kind: "TEMPLATE",
+                  name: `${resource.name} copy`,
+                  data: resource.data,
+                });
+                setResource({
+                  ...resource,
+                  id: copy.id,
+                  key: copy.key,
+                  name: copy.name,
+                  sourceFlow: undefined,
+                });
+              } else if (resource)
                 await action({ action: "save-resource", ...resource });
               else await save();
               return true;
@@ -445,20 +474,19 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                   <select
                     defaultValue=""
                     onChange={(e) => {
-                      const r = data.resources.find(
+                      const r = templates.find(
                         (r) => r.id === e.target.value,
                       );
                       if (r)
                         setCampaign({
                           ...campaign,
+                          ...(r.subject ? { subject: r.subject } : {}),
                           content: r.data as unknown as Content,
                         });
                     }}
                   >
                     <option value="">Choose a template</option>
-                    {data.resources
-                      .filter((r) => r.kind === "TEMPLATE")
-                      .map((r) => (
+                    {templates.map((r) => (
                         <option key={r.id} value={r.id}>
                           {r.name}
                         </option>
@@ -611,20 +639,24 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           )}
           {tab === "templates" && (
             <>
+              <p className="mk-muted">
+                Flow emails stay linked to their saved flows. Open one to preview it or save
+                a separate, reusable copy.
+              </p>
               <div className="mk-grid">
-                {data.resources
-                  .filter((r) => r.kind === "TEMPLATE")
-                  .map((r) => (
+                {templates.map((r) => (
                     <article className="mk-panel" key={r.id}>
-                      <span className="mk-status">Reusable</span>
+                      <span className="mk-status">
+                        {r.sourceFlow ? "From flow" : "Reusable"}
+                      </span>
                       <h2>{r.name}</h2>
-                      <p>Corals Anonymous email layout</p>
+                      <p>{r.subject || "Corals Anonymous email layout"}</p>
                       <button
                         onClick={() => {
                           setResource(r);
                         }}
                       >
-                        Review and edit
+                        {r.sourceFlow ? "Preview and make a copy" : "Review and edit"}
                       </button>
                     </article>
                   ))}
