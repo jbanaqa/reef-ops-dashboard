@@ -45,6 +45,7 @@ type Campaign = {
   subject: string;
   status: string;
   scheduledAt: string | null;
+  createdAt?: string;
   content: Content;
   audience: Record<string, unknown>;
   _count: { messages: number };
@@ -113,6 +114,12 @@ const flowTemplateGroups = [
     description: "Cart recovery emails, including the two purchase-history outcomes.",
   },
 ] as const;
+const newCampaign = () => ({
+  name: "",
+  subject: "",
+  content: defaultContent,
+  audience: { openedDays: 365 },
+});
 export default function MarketingDashboard({ tab }: { tab: string }) {
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
@@ -125,12 +132,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     subject: string;
     content: Content;
     audience: Record<string, unknown>;
-  }>({
-    name: "",
-    subject: "",
-    content: defaultContent,
-    audience: { openedDays: 365 },
-  });
+  }>(newCampaign());
   const [at, setAt] = useState(""),
     [editingEmail, setEditingEmail] = useState(false),
     [audienceCount, setAudienceCount] = useState<number | null>(null);
@@ -419,210 +421,314 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
             </>
           )}
           {tab === "campaigns" && (
-            <div className="mk-columns">
-              <article className="mk-panel">
-                <h2>
-                  {campaign.id ? "Edit campaign draft" : "Create campaign"}
-                </h2>
-                <label>
-                  Campaign name
-                  <input
-                    value={campaign.name}
-                    onChange={(e) =>
-                      setCampaign({ ...campaign, name: e.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  Audience
-                  <select
-                    value={JSON.stringify(campaign.audience)}
-                    onChange={(e) => {
-                      setCampaign({
-                        ...campaign,
-                        audience: JSON.parse(e.target.value),
-                      });
+            <div className="mk-campaign-workspace">
+              <div className="mk-campaign-intro">
+                <div>
+                  <p className="mk-eyebrow">ONE-TIME EMAIL CAMPAIGNS</p>
+                  <h2>Plan a sale, collection drop, or announcement</h2>
+                  <p>
+                    Build the audience and email first, then schedule it. Each
+                    recipient is checked again before delivery.
+                  </p>
+                </div>
+                {campaign.id && (
+                  <button
+                    onClick={() => {
+                      setCampaign(newCampaign());
+                      setAt("");
                       setAudienceCount(null);
                     }}
                   >
-                    <option value={JSON.stringify({ openedDays: 365 })}>
-                      Mailable Subscribers · opened in 365 days
-                    </option>
-                    <option value="{}">All eligible email subscribers</option>
-                    {data.resources
-                      .filter((r) => r.kind === "SEGMENT")
-                      .map((r) => (
-                        <option key={r.id} value={JSON.stringify(r.data)}>
-                          {r.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    run(
-                      async () =>
-                        setAudienceCount(
-                          (
-                            await action({
-                              action: "audience-count",
-                              audience: campaign.audience,
-                            })
-                          ).count,
-                        ),
-                      "Audience checked",
-                    )
-                  }
-                >
-                  Check audience
-                </button>
-                {audienceCount !== null && (
-                  <p>
-                    {audienceCount.toLocaleString()} currently eligible
-                    recipients. Eligibility is checked again at send time.
-                  </p>
+                    New campaign
+                  </button>
                 )}
-                <label>
-                  Subject
-                  <input
-                    value={campaign.subject}
-                    onChange={(e) =>
-                      setCampaign({ ...campaign, subject: e.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  Start from template
-                  <select
-                    defaultValue=""
-                    onChange={(e) => {
-                      const r = templates.find(
-                        (r) => r.id === e.target.value,
-                      );
-                      if (r)
-                        setCampaign({
-                          ...campaign,
-                          ...(r.subject ? { subject: r.subject } : {}),
-                          content: r.data as unknown as Content,
-                        });
-                    }}
-                  >
-                    <option value="">Choose a template</option>
-                    {templates.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                <button onClick={() => setEditingEmail(true)}>
-                  Edit email and preview
-                </button>
-                <div className="mk-actions">
-                  <button
-                    disabled={busy}
-                    onClick={() => run(save, "Draft saved")}
-                  >
-                    Save draft
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      run(
-                        () =>
-                          action({
-                            action: "save-resource",
-                            kind: "TEMPLATE",
-                            name: campaign.name || "Campaign template",
-                            data: campaign.content,
-                          }),
-                        "Reusable template saved",
-                      )
-                    }
-                  >
-                    Save as template
-                  </button>
-                </div>
-                <label>
-                  Send time (your device’s local timezone)
-                  <input
-                    type="datetime-local"
-                    value={at}
-                    onChange={(e) => setAt(e.target.value)}
-                  />
-                </label>
-                <button
-                  disabled={busy || !at}
-                  onClick={() =>
-                    run(async () => {
-                      const id = await save();
-                      await action({
-                        action: "schedule",
-                        id,
-                        at: new Date(at).toISOString(),
-                      });
-                      setCampaign({
-                        name: "",
-                        subject: "",
-                        content: defaultContent,
-                        audience: { openedDays: 365 },
-                      });
-                    }, "Campaign scheduled. Sending requires completed setup and an active worker.")
-                  }
-                >
-                  Save and schedule
-                </button>
-              </article>
-              <div>
-                <article className="mk-panel">
-                  <h2>Campaigns</h2>
-                  {!data.campaigns.length && (
-                    <p>Your first campaign starts here.</p>
-                  )}
-                  {data.campaigns.map((c) => (
-                    <div className="mk-row" key={c.id}>
-                      <h3>{c.name}</h3>
-                      <p>
-                        {c.status} · {c._count.messages} messages{" "}
-                        {c.scheduledAt &&
-                          `· ${new Date(c.scheduledAt).toLocaleString()}`}
-                      </p>
-                      <div className="mk-actions">
-                        {c.status === "DRAFT" && (
-                          <button onClick={() => setCampaign(c)}>Edit</button>
-                        )}
-                        <button
-                          onClick={() =>
-                            setCampaign({
-                              name: `${c.name} copy`,
-                              subject: c.subject,
-                              content: c.content,
-                              audience: c.audience,
-                            })
-                          }
-                        >
-                          Duplicate
-                        </button>
-                        {["DRAFT", "SCHEDULED", "SENDING"].includes(
-                          c.status,
-                        ) && (
-                          <button
-                            disabled={busy}
-                            onClick={() =>
-                              run(
-                                () => action({ action: "cancel", id: c.id }),
-                                "Campaign cancelled. Messages already in flight may finish.",
-                              )
-                            }
-                          >
-                            Cancel
-                          </button>
-                        )}
+              </div>
+              <div className="mk-campaign-layout">
+                <article className="mk-panel mk-campaign-composer">
+                  <div className="mk-campaign-composer-heading">
+                    <div>
+                      <p className="mk-eyebrow">CAMPAIGN DRAFT</p>
+                      <h2>
+                        {campaign.id ? "Edit campaign draft" : "Create campaign"}
+                      </h2>
+                    </div>
+                    <span className="mk-status">
+                      {campaign.id ? "Saved draft" : "New draft"}
+                    </span>
+                  </div>
+                  <section className="mk-campaign-section">
+                    <div className="mk-campaign-section-heading">
+                      <span>1</span>
+                      <div>
+                        <h3>Campaign details</h3>
+                        <p>Give the campaign an internal name and choose who receives it.</p>
                       </div>
                     </div>
-                  ))}
+                    <label>
+                      Campaign name
+                      <input
+                        placeholder="Example: September coral sale"
+                        value={campaign.name}
+                        onChange={(e) =>
+                          setCampaign({ ...campaign, name: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Audience
+                      <select
+                        value={JSON.stringify(campaign.audience)}
+                        onChange={(e) => {
+                          setCampaign({
+                            ...campaign,
+                            audience: JSON.parse(e.target.value),
+                          });
+                          setAudienceCount(null);
+                        }}
+                      >
+                        <option value={JSON.stringify({ openedDays: 365 })}>
+                          Mailable Subscribers · opened in 365 days
+                        </option>
+                        <option value="{}">All eligible email subscribers</option>
+                        {data.resources
+                          .filter((r) => r.kind === "SEGMENT")
+                          .map((r) => (
+                            <option key={r.id} value={JSON.stringify(r.data)}>
+                              {r.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <div className="mk-campaign-audience-check">
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            async () =>
+                              setAudienceCount(
+                                (
+                                  await action({
+                                    action: "audience-count",
+                                    audience: campaign.audience,
+                                  })
+                                ).count,
+                              ),
+                            "Audience checked",
+                          )
+                        }
+                      >
+                        Check audience
+                      </button>
+                      {audienceCount !== null && (
+                        <p>
+                          <b>{audienceCount.toLocaleString()}</b> currently eligible.
+                          Send-time consent and suppression checks still apply.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                  <section className="mk-campaign-section">
+                    <div className="mk-campaign-section-heading">
+                      <span>2</span>
+                      <div>
+                        <h3>Email content</h3>
+                        <p>Start with a proven layout, then tailor the message for this sale.</p>
+                      </div>
+                    </div>
+                    <label>
+                      Subject line
+                      <input
+                        placeholder="Example: 20% off new arrivals this weekend"
+                        value={campaign.subject}
+                        onChange={(e) =>
+                          setCampaign({ ...campaign, subject: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Start from a template
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          const template = templates.find(
+                            (r) => r.id === e.target.value,
+                          );
+                          if (template)
+                            setCampaign({
+                              ...campaign,
+                              ...(template.subject ? { subject: template.subject } : {}),
+                              content: template.data as unknown as Content,
+                            });
+                        }}
+                      >
+                        <option value="">Choose a template</option>
+                        {templates.map((template) => (
+                          <option key={template.id} value={template.id}>
+                            {template.sourceFlow
+                              ? `${template.name} · ${flowTemplateGroups.find((group) => group.key === template.sourceFlow)?.name || "Flow"}`
+                              : template.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="mk-campaign-email-action">
+                      <div>
+                        <strong>{campaign.subject || "Your campaign email"}</strong>
+                        <span>Open the editor to update content, artwork, buttons, products, and preview.</span>
+                      </div>
+                      <button onClick={() => setEditingEmail(true)}>
+                        Edit email and preview
+                      </button>
+                    </div>
+                    <div className="mk-actions">
+                      <button disabled={busy} onClick={() => run(save, "Draft saved")}>
+                        Save draft
+                      </button>
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            () =>
+                              action({
+                                action: "save-resource",
+                                kind: "TEMPLATE",
+                                name: campaign.name || "Campaign template",
+                                data: campaign.content,
+                              }),
+                            "Reusable template saved",
+                          )
+                        }
+                      >
+                        Save as template
+                      </button>
+                    </div>
+                  </section>
+                  <section className="mk-campaign-section">
+                    <div className="mk-campaign-section-heading">
+                      <span>3</span>
+                      <div>
+                        <h3>Schedule</h3>
+                        <p>Scheduling never bypasses your sending and audience safeguards.</p>
+                      </div>
+                    </div>
+                    <label>
+                      Send time (your device’s local timezone)
+                      <input
+                        type="datetime-local"
+                        value={at}
+                        onChange={(e) => setAt(e.target.value)}
+                      />
+                    </label>
+                    <button
+                      disabled={busy || !at}
+                      onClick={() =>
+                        run(async () => {
+                          const id = await save();
+                          await action({
+                            action: "schedule",
+                            id,
+                            at: new Date(at).toISOString(),
+                          });
+                          setCampaign(newCampaign());
+                          setAt("");
+                          setAudienceCount(null);
+                        }, "Campaign scheduled. Sending requires completed setup and an active worker.")
+                      }
+                    >
+                      Save and schedule
+                    </button>
+                  </section>
                 </article>
+                <aside className="mk-campaign-library">
+                  <div className="mk-campaign-library-heading">
+                    <div>
+                      <p className="mk-eyebrow">CAMPAIGN LIBRARY</p>
+                      <h2>Your campaigns</h2>
+                    </div>
+                    <span className="mk-status">{data.campaigns.length}</span>
+                  </div>
+                  {!data.campaigns.length ? (
+                    <div className="mk-campaign-empty">
+                      <strong>No campaigns yet</strong>
+                      <span>Build your first sale or promotional email on the left.</span>
+                    </div>
+                  ) : (
+                    <div className="mk-campaign-list">
+                      {data.campaigns.map((item) => {
+                        const statusCounts = data.messageCounts.filter(
+                          (count) => count.campaignId === item.id,
+                        );
+                        const sent = statusCounts
+                          .filter((count) => count.status === "SENT")
+                          .reduce((total, count) => total + count._count, 0);
+                        const pending = statusCounts
+                          .filter((count) => count.status === "PENDING")
+                          .reduce((total, count) => total + count._count, 0);
+                        return (
+                          <article className="mk-campaign-card" key={item.id}>
+                            <div className="mk-campaign-card-heading">
+                              <span className={`mk-campaign-status mk-campaign-status-${item.status.toLowerCase()}`}>
+                                {item.status.toLowerCase()}
+                              </span>
+                              {item.scheduledAt && (
+                                <time dateTime={item.scheduledAt}>
+                                  {new Date(item.scheduledAt).toLocaleString()}
+                                </time>
+                              )}
+                            </div>
+                            <h3>{item.name}</h3>
+                            <p>{item.subject}</p>
+                            <div className="mk-campaign-card-metrics">
+                              <span>{item._count.messages} messages</span>
+                              {sent > 0 && <span>{sent} sent</span>}
+                              {pending > 0 && <span>{pending} pending</span>}
+                            </div>
+                            <div className="mk-actions">
+                              {item.status === "DRAFT" && (
+                                <button
+                                  onClick={() => {
+                                    setCampaign(item);
+                                    setAt("");
+                                    setAudienceCount(null);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                              )}
+                              <button
+                                onClick={() => {
+                                  setCampaign({
+                                    name: `${item.name} copy`,
+                                    subject: item.subject,
+                                    content: item.content,
+                                    audience: item.audience,
+                                  });
+                                  setAt("");
+                                  setAudienceCount(null);
+                                }}
+                              >
+                                Duplicate
+                              </button>
+                              {["DRAFT", "SCHEDULED", "SENDING"].includes(item.status) && (
+                                <button
+                                  disabled={busy}
+                                  onClick={() =>
+                                    run(
+                                      () => action({ action: "cancel", id: item.id }),
+                                      "Campaign cancelled. Messages already in flight may finish.",
+                                    )
+                                  }
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </aside>
               </div>
             </div>
           )}
