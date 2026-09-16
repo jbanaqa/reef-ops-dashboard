@@ -91,6 +91,28 @@ async function action(body: unknown) {
   return result;
 }
 const title = (value: string) => value[0].toUpperCase() + value.slice(1);
+const flowTemplateGroups = [
+  {
+    key: "welcome",
+    name: "Welcome Series",
+    description: "Emails sent after a visitor joins the mailing list.",
+  },
+  {
+    key: "b2b-welcome",
+    name: "B2B Welcome",
+    description: "The wholesale introduction for staff-tagged B2B contacts.",
+  },
+  {
+    key: "delivery-upsell",
+    name: "24-hour Add-on Notice",
+    description: "The delivery-date reminder for adding to an existing order.",
+  },
+  {
+    key: "abandoned-cart",
+    name: "Abandoned Cart",
+    description: "Cart recovery emails, including the two purchase-history outcomes.",
+  },
+] as const;
 export default function MarketingDashboard({ tab }: { tab: string }) {
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
@@ -121,6 +143,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
         ...data.resources.filter((r) => r.kind === "TEMPLATE"),
       ]
     : [];
+  const reusableTemplates = templates.filter((template) => !template.sourceFlow);
   const load = useCallback(async () => {
     const r = await fetch("/api/marketing", { cache: "no-store" });
     const d = await r.json();
@@ -638,30 +661,78 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
             />
           )}
           {tab === "templates" && (
-            <>
+            <div className="mk-template-library">
               <p className="mk-muted">
-                Flow emails stay linked to their saved flows. Open one to preview it or save
-                a separate, reusable copy.
+                Flow emails stay linked to their saved flows. Choose one to preview the
+                exact email, or save a separate reusable copy.
               </p>
-              <div className="mk-grid">
-                {templates.map((r) => (
-                    <article className="mk-panel" key={r.id}>
+              {flowTemplateGroups.map((group) => {
+                const groupTemplates = templates.filter(
+                  (template) => template.sourceFlow === group.key,
+                );
+                if (!groupTemplates.length) return null;
+                return (
+                  <section className="mk-template-group" key={group.key}>
+                    <div className="mk-template-group-heading">
+                      <div>
+                        <p className="mk-eyebrow">FLOW EMAILS</p>
+                        <h2>{group.name}</h2>
+                        <p>{group.description}</p>
+                      </div>
                       <span className="mk-status">
-                        {r.sourceFlow ? "From flow" : "Reusable"}
+                        {groupTemplates.length} email{groupTemplates.length === 1 ? "" : "s"}
                       </span>
-                      <h2>{r.name}</h2>
-                      <p>{r.subject || "Corals Anonymous email layout"}</p>
-                      <button
-                        onClick={() => {
-                          setResource(r);
-                        }}
-                      >
-                        {r.sourceFlow ? "Preview and make a copy" : "Review and edit"}
-                      </button>
-                    </article>
-                  ))}
-              </div>
-            </>
+                    </div>
+                    <div className="mk-template-grid">
+                      {groupTemplates.map((template) => (
+                        <article className="mk-template-card" key={template.id}>
+                          <div className="mk-template-card-topline">
+                            <span>{template.name}</span>
+                            <span className="mk-status">From flow</span>
+                          </div>
+                          <p className="mk-template-label">Subject line</p>
+                          <h3>{template.subject}</h3>
+                          <button onClick={() => setResource(template)}>
+                            Preview and make a copy
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+              <section className="mk-template-group">
+                <div className="mk-template-group-heading">
+                  <div>
+                    <p className="mk-eyebrow">STANDALONE TEMPLATES</p>
+                    <h2>Reusable templates</h2>
+                    <p>Saved layouts that are not tied to a specific flow.</p>
+                  </div>
+                  <span className="mk-status">
+                    {reusableTemplates.length} template{reusableTemplates.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                {reusableTemplates.length ? (
+                  <div className="mk-template-grid">
+                    {reusableTemplates.map((template) => (
+                      <article className="mk-template-card" key={template.id}>
+                        <div className="mk-template-card-topline">
+                          <span>{template.name}</span>
+                          <span className="mk-status">Reusable</span>
+                        </div>
+                        <p className="mk-template-label">Template layout</p>
+                        <h3>{template.subject || "Corals Anonymous email layout"}</h3>
+                        <button onClick={() => setResource(template)}>Review and edit</button>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mk-template-empty">
+                    No standalone templates yet. Save a copy from a flow email to start one.
+                  </div>
+                )}
+              </section>
+            </div>
           )}
           {tab === "forms" && (
             <article className="mk-panel">
