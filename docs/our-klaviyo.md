@@ -140,15 +140,23 @@ Footer editing is available in the email workspace Footer panel: heading, messag
 
 ## Audience workspace
 
-The Audiences tab has two views: **Contacts** for all known customers and **Saved audiences** for reusable email campaign groups. Contacts supports server-side name/email/phone search, email-status filters, a B2B shortcut, and 25-row pages with Previous/Next controls. The list scrolls within a bounded area.
+The Audiences tab has three views: **Contacts** for all known customers, **Saved audiences** for reusable email campaign groups, and **Pending flows** for profiles with at least one queued, in-flight, or uncertain flow message. Contacts supports server-side name/email/phone search, email-status filters, a B2B shortcut, and 25-row pages with Previous/Next controls. The list scrolls within a bounded area.
 
 Open a contact to view a side panel without losing the list position. Overview shows subscriptions and tags; Messages shows scheduled, sent, and skipped messages with reasons; Activity translates events into readable history. Refresh in the panel retrieves current state. Marketing blocking is behind an explicit per-channel confirmation, and subscriptions cannot be restored here. Internal preview emails are not associated with a contact. History currently shows up to 100 messages and 100 events, with a visible limit notice.
 
 Saved audiences display their rules in plain language. View contacts applies the same consent and segmentation rules used for email delivery; blocked or unsubscribed contacts are excluded. Creating/editing a group does not send email or change consent. The editor keeps input after a save error and asks before discarding unsaved changes. The original saved audience keys are retained on edits.
 
+Pending flows supports profile search and an individual-flow filter. Each profile row groups all active flow work and shows the next subject and due time, upcoming-step count, and whether the flow is active, paused, or needs staff review. Opening the profile uses the same detailed Messages panel. This view is read-only and does not advance, cancel, or deliver messages.
+
 Design references: [Klaviyo profiles](https://help.klaviyo.com/hc/en-us/articles/115005247088), [Mailchimp contact profiles](https://mailchimp.com/help/about-contact-profile-pages/), and [Mailchimp saved segments](https://mailchimp.com/help/save-and-manage-segments/).
 
 Validation: `node scripts/audiences.browser.test.cjs` exercises the actual component in an isolated local browser fixture; no production data or email provider is contacted. Directory integration tests use the disposable marketing test database.
+
+## Analytics workspace
+
+Analytics reports 7-, 30-, 90-, or 365-day results separately for automated flows and one-time campaigns. Sent, delivered, unique opened, unique clicked, attributed orders, order rate, and gross attributed revenue are calculated from activity that occurred in the selected period. A conversion near the start of a period remains attached to the earlier message that earned it. Currencies are reported separately rather than converted.
+
+An order is attributed to the most recent Reef Ops click in the preceding five days, or otherwise the most recent Reef Ops open in the preceding day. This is message attribution rather than proof that the message alone caused the sale. Gross order value is shown before refunds; privacy-proxy opens may inflate opens. Total tracked order revenue and attributed share are shown for context. Campaign detail reports remain available for recipient and skip-reason inspection.
 
 ## Settings workspace
 

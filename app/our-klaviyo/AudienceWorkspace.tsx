@@ -23,6 +23,16 @@ type Contact = {
   createdAt: string;
   lastOpenedAt: string | null;
   lastOrderAt: string | null;
+  pendingFlows?: {
+    key: string;
+    name: string;
+    enabled: boolean;
+    messages: number;
+    nextSubject: string;
+    nextAt: string;
+    status: string;
+    reason: string | null;
+  }[];
 };
 type Group = { id?: string; key: string; name: string; data: Segment };
 type Message = {
@@ -57,6 +67,7 @@ type Detail = Contact & {
 type Directory = {
   profiles: Contact[];
   groups: Group[];
+  flows: { key: string; name: string; enabled: boolean }[];
   total: number;
   nextCursor: string | null;
 };
@@ -1115,6 +1126,7 @@ export default function AudienceWorkspace({
   const [status, setStatus] = useState("all");
   const [b2b, setB2b] = useState(false);
   const [groupKey, setGroupKey] = useState("");
+  const [pendingFlow, setPendingFlow] = useState("all");
   const [pages, setPages] = useState<string[]>([""]);
   const [data, setData] = useState<Directory | null>(null);
   const [loadedKey, setLoadedKey] = useState("");
@@ -1130,6 +1142,7 @@ export default function AudienceWorkspace({
     status,
     b2b: String(b2b),
     group: groupKey,
+    pendingFlow: view === "pending" ? pendingFlow : "",
     cursor,
     refresh: String(version),
   }).toString();
@@ -1161,7 +1174,16 @@ export default function AudienceWorkspace({
     setStatus("all");
     setB2b(false);
     setGroupKey("");
+    setPendingFlow("all");
     setPages([""]);
+  }
+  function changeView(next: string) {
+    setView(next);
+    setPages([""]);
+    setQuery("");
+    setStatus("all");
+    setB2b(false);
+    setGroupKey("");
   }
   const group = data?.groups.find((g) => g.key === groupKey);
   return (
@@ -1170,25 +1192,33 @@ export default function AudienceWorkspace({
         <nav className="aw-tabs" aria-label="Audience views">
           <button
             aria-current={view === "contacts" ? "page" : undefined}
-            onClick={() => setView("contacts")}
+            onClick={() => changeView("contacts")}
           >
             Contacts
           </button>
           <button
             aria-current={view === "groups" ? "page" : undefined}
-            onClick={() => setView("groups")}
+            onClick={() => changeView("groups")}
           >
             Lists & segments
           </button>
+          <button
+            aria-current={view === "pending" ? "page" : undefined}
+            onClick={() => changeView("pending")}
+          >
+            Pending flows
+          </button>
         </nav>
-        <button
-          className="aw-primary"
-          onClick={() =>
-            setEditor({ key: crypto.randomUUID(), name: "", data: {} })
-          }
-        >
-          + Create segment
-        </button>
+        {view !== "pending" && (
+          <button
+            className="aw-primary"
+            onClick={() =>
+              setEditor({ key: crypto.randomUUID(), name: "", data: {} })
+            }
+          >
+            + Create segment
+          </button>
+        )}
       </div>
       {notice && (
         <p role="status" className="aw-success">
@@ -1402,7 +1432,7 @@ export default function AudienceWorkspace({
             </div>
           </footer>
         </section>
-      ) : (
+      ) : view === "groups" ? (
         <section className="aw-groups">
           <div className="aw-directory-heading">
             <div>
@@ -1469,6 +1499,159 @@ export default function AudienceWorkspace({
             Campaign delivery always applies current email consent and suppression.
             Creating a segment or importing a list does not change anyone’s subscription.
           </p>
+        </section>
+      ) : (
+        <section className="aw-directory aw-pending-directory">
+          <div className="aw-directory-heading">
+            <div>
+              <p className="aw-eyebrow">ACTIVE AUTOMATIONS</p>
+              <h2>Profiles with pending flows</h2>
+              <p>
+                See who has an upcoming flow message, what comes next, and
+                whether the flow can currently send.
+              </p>
+            </div>
+            <button disabled={loading} onClick={() => setVersion((v) => v + 1)}>
+              Refresh
+            </button>
+          </div>
+          <div className="aw-toolbar">
+            <label className="aw-search">
+              Search profiles
+              <input
+                type="search"
+                placeholder="Search name, email, or phone"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPages([""]);
+                }}
+              />
+            </label>
+            <label>
+              Flow
+              <select
+                value={pendingFlow}
+                onChange={(event) => {
+                  setPendingFlow(event.target.value);
+                  setPages([""]);
+                }}
+              >
+                <option value="all">All flows</option>
+                {data?.flows.map((flow) => (
+                  <option value={flow.key} key={flow.key}>
+                    {flow.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="aw-list-meta">
+            <span role="status">
+              {loading
+                ? "Loading pending flows…"
+                : data
+                  ? `${data.total.toLocaleString()} profile${data.total === 1 ? "" : "s"} with pending flows`
+                  : ""}
+            </span>
+            <span>Profiles may have more than one active flow</span>
+          </div>
+          {!error && (
+            <div
+              aria-busy={loading}
+              className={loading ? "aw-list aw-loading" : "aw-list"}
+            >
+              {data?.profiles.length ? (
+                <div className="aw-pending-list">
+                  {data.profiles.map((contact) => (
+                    <article className="aw-pending-profile" key={contact.id}>
+                      <button
+                        className="aw-contact-button"
+                        aria-label={`View ${title(contact)}`}
+                        disabled={loading}
+                        onClick={() => setSelected(contact.id)}
+                      >
+                        <span className="aw-avatar">
+                          {title(contact).slice(0, 1).toUpperCase()}
+                        </span>
+                        <span>
+                          <strong>{title(contact)}</strong>
+                          <small>{contact.email || contact.phone || "No contact details"}</small>
+                        </span>
+                      </button>
+                      <div className="aw-pending-flows">
+                        {contact.pendingFlows?.map((flow) => (
+                          <div className="aw-pending-flow" key={flow.key}>
+                            <div>
+                              <span className="aw-pending-flow-name">{flow.name}</span>
+                              <strong>{flow.nextSubject}</strong>
+                              <small>
+                                {flow.status === "UNKNOWN"
+                                  ? "Delivery needs review"
+                                  : flow.status === "SENDING"
+                                    ? "Sending now"
+                                    : `Scheduled for ${date(flow.nextAt)}`}
+                              </small>
+                              {flow.reason && <small>{flow.reason}</small>}
+                            </div>
+                            <div className="aw-pending-flow-state">
+                              <span className={`aw-badge ${flow.status === "UNKNOWN" ? "warning" : "current"}`}>
+                                {flow.status === "UNKNOWN"
+                                  ? "Needs review"
+                                  : flow.enabled
+                                    ? "Active"
+                                    : "Flow paused"}
+                              </span>
+                              {flow.messages > 1 && (
+                                <small>{flow.messages} upcoming steps</small>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                !loading && (
+                  <div className="aw-empty">
+                    <span className="aw-empty-symbol">✓</span>
+                    <h3>No profiles have pending flows</h3>
+                    <p>
+                      Try another flow or refresh after new customers enter an
+                      automation.
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+          <footer className="aw-pagination">
+            <span>
+              {data && !loading
+                ? data.total
+                  ? `Showing ${(pages.length - 1) * 25 + 1}–${(pages.length - 1) * 25 + data.profiles.length} of ${data.total}`
+                  : "0 profiles"
+                : "25 profiles per page"}
+            </span>
+            <div>
+              <button
+                disabled={loading || pages.length === 1}
+                onClick={() => setPages((value) => value.slice(0, -1))}
+              >
+                ← Previous
+              </button>
+              <button
+                disabled={loading || !!error || !data?.nextCursor}
+                onClick={() => {
+                  if (data?.nextCursor)
+                    setPages((value) => [...value, data.nextCursor!]);
+                }}
+              >
+                Next →
+              </button>
+            </div>
+          </footer>
         </section>
       )}
       {selected && (

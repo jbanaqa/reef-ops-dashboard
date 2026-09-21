@@ -19,16 +19,37 @@ export async function audienceDirectory(url: URL) {
     ].includes(status)
   )
     throw new Error("Choose a valid email status.");
-  const groups = await prisma.marketingResource.findMany({
-    where: { shop: shop(), kind: "SEGMENT" },
-    orderBy: { name: "asc" },
-    take: 200,
-  });
+  const [groups, flows] = await Promise.all([
+    prisma.marketingResource.findMany({
+      where: { shop: shop(), kind: "SEGMENT" },
+      orderBy: { name: "asc" },
+      take: 200,
+    }),
+    prisma.marketingResource.findMany({
+      where: { shop: shop(), kind: "FLOW" },
+      orderBy: { name: "asc" },
+      select: { key: true, name: true, enabled: true },
+      take: 100,
+    }),
+  ]);
   const groupKey = url.searchParams.get("group");
   const group = groupKey ? groups.find((g) => g.key === groupKey) : null;
   if (groupKey && !group)
     throw new Error("This saved audience is no longer available.");
   const and: Prisma.MarketingProfileWhereInput[] = [{ shop: shop() }];
+  const pendingFlow = url.searchParams.get("pendingFlow") || "";
+  if (pendingFlow && pendingFlow !== "all" && !flows.some((f) => f.key === pendingFlow))
+    throw new Error("Choose a valid pending flow.");
+  if (pendingFlow)
+    and.push({
+      messages: {
+        some: {
+          shop: shop(),
+          flowKey: pendingFlow === "all" ? { not: null } : pendingFlow,
+          status: { in: ["PENDING", "SENDING", "UNKNOWN"] },
+        },
+      },
+    });
   if (group) and.push(audienceWhere(segment(group.data)));
   if (query)
     and.push({
@@ -95,15 +116,84 @@ export async function audienceDirectory(url: URL) {
         lastOpenedAt: true,
         lastOrderAt: true,
         consents: true,
+        ...(pendingFlow
+          ? {
+              messages: {
+                where: {
+                  shop: shop(),
+                  flowKey: pendingFlow === "all" ? { not: null } : pendingFlow,
+                  status: { in: ["PENDING", "SENDING", "UNKNOWN"] },
+                },
+                orderBy: { dueAt: "asc" as const },
+                take: 100,
+                select: {
+                  id: true,
+                  flowKey: true,
+                  subject: true,
+                  status: true,
+                  dueAt: true,
+                  error: true,
+                },
+              },
+            }
+          : {}),
       },
     }),
     prisma.marketingProfile.count({ where }),
   ]);
   return {
-    profiles: rows.slice(0, 25),
+    profiles: rows.slice(0, 25).map((profile) => {
+      if (!("messages" in profile)) return profile;
+      const messages = profile.messages;
+      const byFlow = new Map<
+        string,
+        {
+          key: string;
+          name: string;
+          enabled: boolean;
+          messages: number;
+          nextSubject: string;
+          nextAt: Date;
+          status: string;
+          reason: string | null;
+        }
+      >();
+      for (const message of messages) {
+        const key = message.flowKey!;
+        const existing = byFlow.get(key);
+        if (existing) {
+          existing.messages++;
+          if (message.status === "UNKNOWN") {
+            existing.status = message.status;
+            existing.reason = message.error;
+          } else if (
+            message.status === "SENDING" &&
+            existing.status !== "UNKNOWN"
+          )
+            existing.status = message.status;
+          continue;
+        }
+        const flow = flows.find((candidate) => candidate.key === key);
+        byFlow.set(key, {
+          key,
+          name: flow?.name || "Automation",
+          enabled: flow?.enabled ?? false,
+          messages: 1,
+          nextSubject: message.subject,
+          nextAt: message.dueAt,
+          status: message.status,
+          reason: message.error,
+        });
+      }
+      const pendingFlows = [...byFlow.values()];
+      const { messages: _messages, ...publicProfile } = profile;
+      void _messages;
+      return { ...publicProfile, pendingFlows };
+    }),
     total,
     nextCursor: rows.length > 25 ? rows[24].id : null,
     groups: groups.map(({ id, key, name, data }) => ({ id, key, name, data })),
+    flows,
   };
 }
 

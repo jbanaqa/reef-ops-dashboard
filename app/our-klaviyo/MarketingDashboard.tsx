@@ -8,6 +8,7 @@ import "./flows.css";
 import "./stock.css";
 import AudienceWorkspace from "./AudienceWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
+import AnalyticsWorkspace from "./AnalyticsWorkspace";
 import "./settings.css";
 import "./audiences.css";
 import {
@@ -429,7 +430,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
               </button>
             </div>
           )}
-          {(tab === "overview" || tab === "analytics") && (
+          {tab === "overview" && (
             <>
               <div className="mk-metrics">
                 {Object.entries(data.counts).map(([k, v]) => (
@@ -512,6 +513,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
               </article>
             </>
           )}
+          {tab === "analytics" && <AnalyticsWorkspace />}
           {tab === "campaigns" && (
             <div className={`mk-campaign-workspace ${campaignOpen ? "is-editing" : "is-browsing"}`}>
               <div className="mk-campaign-intro">

@@ -1364,6 +1364,50 @@ test("audience directory searches all contacts, pages without duplicates, and ap
     1,
   );
   assert.equal((await audienceDirectory(url("&b2b=true"))).total, 15);
+  await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "audience-pending-flow",
+      profileId: "audience-test-01",
+      flowKey: "b2b-welcome",
+      flowStep: 0,
+      channel: "EMAIL",
+      subject: "Pending wholesale welcome",
+      content: defaultContent,
+      status: "PENDING",
+      dueAt: new Date(Date.now() + 3600000),
+    },
+  });
+  await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "audience-pending-flow-later",
+      profileId: "audience-test-01",
+      flowKey: "b2b-welcome",
+      flowStep: 1,
+      channel: "EMAIL",
+      subject: "Later wholesale follow-up",
+      content: defaultContent,
+      status: "PENDING",
+      dueAt: new Date(Date.now() + 7200000),
+    },
+  });
+  const pending = await audienceDirectory(url("&pendingFlow=all"));
+  assert.equal(pending.total, 1);
+  assert.equal(pending.profiles[0].id, "audience-test-01");
+  assert.ok("pendingFlows" in pending.profiles[0]);
+  if ("pendingFlows" in pending.profiles[0]) {
+    assert.equal(pending.profiles[0].pendingFlows[0].key, "b2b-welcome");
+    assert.equal(pending.profiles[0].pendingFlows[0].messages, 2);
+    assert.equal(
+      pending.profiles[0].pendingFlows[0].nextSubject,
+      "Pending wholesale welcome",
+    );
+  }
+  await assert.rejects(
+    () => audienceDirectory(url("&pendingFlow=missing")),
+    /valid pending flow/,
+  );
   const b2b = await audienceDirectory(url("&group=b2b"));
   assert.equal(b2b.total, 13);
   assert.ok(
@@ -2613,6 +2657,68 @@ test("cart reports count unique engagement and keep revenue currencies separate"
   assert.equal(after.orders - before.orders, 2);
   assert.equal(after.revenue.USD - (before.revenue.USD || 0), 12.5);
   assert.equal(after.revenue.CAD - (before.revenue.CAD || 0), 12.5);
+});
+
+test("marketing analytics separates campaign revenue and recipient rates", async () => {
+  const { marketingAnalytics } = await import("../lib/marketing/analytics");
+  const profile = await prisma.marketingProfile.findFirstOrThrow({
+    where: { shop, email: { not: null } },
+  });
+  const campaign = await prisma.marketingCampaign.create({
+    data: {
+      shop,
+      name: "Analytics fixture campaign",
+      subject: "Analytics fixture",
+      content: defaultContent,
+      audience: {},
+      status: "SENT",
+    },
+  });
+  const message = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "analytics-fixture-message",
+      profileId: profile.id,
+      campaignId: campaign.id,
+      channel: "EMAIL",
+      subject: "Analytics fixture",
+      content: defaultContent,
+      status: "SENT",
+      dueAt: new Date(),
+      sentAt: new Date(),
+    },
+  });
+  for (const [type, payload] of [
+    ["DELIVERED", {}],
+    ["OPENED", {}],
+    ["CLICKED", {}],
+    ["ORDER", { currency: "USD", revenue: "42.50" }],
+  ] as const)
+    await prisma.marketingEvent.create({
+      data: {
+        shop,
+        key: `analytics-fixture-${type}`,
+        type,
+        profileId: profile.id,
+        messageId: message.id,
+        payload,
+        occurredAt: new Date(),
+      },
+    });
+  const report = await marketingAnalytics(30);
+  const row = report.rows.find(
+    (candidate) =>
+      candidate.kind === "CAMPAIGN" && candidate.key === campaign.id,
+  );
+  assert.ok(row);
+  assert.equal(row.sent, 1);
+  assert.equal(row.delivered, 1);
+  assert.equal(row.opened, 1);
+  assert.equal(row.clicked, 1);
+  assert.equal(row.orders, 1);
+  assert.equal(row.revenue.USD, 42.5);
+  assert.ok(report.totals.trackedOrders >= report.totals.orders);
+  assert.ok(report.rows.some((candidate) => candidate.kind === "FLOW"));
 });
 
 test("cart tools require staff login and tracking download uses the configured origin", async () => {

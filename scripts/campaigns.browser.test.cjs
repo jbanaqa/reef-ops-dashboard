@@ -109,8 +109,9 @@ const { chromium } = require("playwright");
       messageCounts: [],
     };
     const writes = [];
-    await page.route("**/api/marketing", async (route) => {
+    await page.route("**/api/marketing**", async (route) => {
       const req = route.request();
+      const url = new URL(req.url());
       if (req.method() === "POST") {
         const body = req.postDataJSON();
         writes.push(body);
@@ -119,7 +120,51 @@ const { chromium } = require("playwright");
         if (body.action === "save-resource")
           data.resources[1] = { ...data.resources[1], ...body };
         await route.fulfill({ json: { id: body.id || "draft", ok: true } });
-      } else await route.fulfill({ json: data });
+      } else if (url.searchParams.get("view") === "analytics")
+        await route.fulfill({
+          json: {
+            days: Number(url.searchParams.get("days") || 30),
+            since: "2026-08-22T00:00:00Z",
+            totals: {
+              messages: 120,
+              sent: 100,
+              delivered: 96,
+              opened: 50,
+              clicked: 20,
+              orders: 8,
+              trackedOrders: 40,
+              revenue: { USD: 821.5 },
+              storeRevenue: { USD: 5000 },
+            },
+            rows: [
+              {
+                key: "welcome",
+                kind: "FLOW",
+                name: "Welcome Series",
+                messages: 60,
+                sent: 50,
+                delivered: 48,
+                opened: 30,
+                clicked: 12,
+                orders: 5,
+                revenue: { USD: 500 },
+              },
+              {
+                key: "campaign-sale",
+                kind: "CAMPAIGN",
+                name: "Weekend coral sale",
+                messages: 60,
+                sent: 50,
+                delivered: 48,
+                opened: 20,
+                clicked: 8,
+                orders: 3,
+                revenue: { USD: 321.5 },
+              },
+            ],
+          },
+        });
+      else await route.fulfill({ json: data });
     });
     await page.goto("http://127.0.0.1:" + server.address().port);
     await page.getByRole("button", { name: "Edit", exact: true }).click();
@@ -190,9 +235,26 @@ const { chromium } = require("playwright");
     }
     await page.keyboard.press("Escape");
     assert.equal(await page.getByRole("dialog").count(), 0);
+    await page.goto(
+      "http://127.0.0.1:" + server.address().port + "?tab=analytics",
+    );
+    await page.getByText("USD 821.50", { exact: true }).waitFor();
+    await page.getByText("Welcome Series", { exact: true }).waitFor();
+    await page.getByText("Weekend coral sale", { exact: true }).waitFor();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.screenshot({ path: path.join(output, "analytics-desktop.png") });
+    await page.setViewportSize({ width: 320, height: 900 });
+    assert.ok(
+      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      "Analytics page fits at 320px",
+    );
+    await page.screenshot({
+      path: path.join(output, "analytics-mobile-320.png"),
+      fullPage: true,
+    });
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: campaigns and templates share editor, address preview and save; desktop/mobile dialogs. Screenshots: " +
+      "PASS: campaigns/templates share the editor and analytics reports flow/campaign revenue at desktop/mobile. Screenshots: " +
         output,
     );
   } finally {

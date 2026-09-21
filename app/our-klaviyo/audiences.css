@@ -245,6 +245,61 @@
   display: flex;
   gap: 8px;
 }
+.aw-pending-list {
+  display: grid;
+}
+.aw-pending-profile {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.7fr) minmax(0, 1.7fr);
+  gap: 20px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--aw-line);
+}
+.aw-pending-profile:last-child {
+  border-bottom: 0;
+}
+.aw-pending-profile > .aw-contact-button {
+  align-self: start;
+}
+.aw-pending-flows {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.aw-pending-flow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--aw-line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  min-width: 0;
+}
+.aw-pending-flow > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.aw-pending-flow strong,
+.aw-pending-flow small {
+  overflow-wrap: anywhere;
+}
+.aw-pending-flow-name {
+  color: var(--aw-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.aw-pending-flow-state {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--aw-muted);
+}
 .aw-empty {
   text-align: center;
   padding: 48px 22px;
@@ -791,9 +846,23 @@
   cursor: not-allowed;
 }
 @media (max-width: 700px) {
+  .aw-pending-profile {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+  .aw-pending-flow {
+    flex-direction: column;
+  }
+  .aw-pending-flow-state {
+    justify-items: start;
+  }
   .aw-topline {
     align-items: flex-start;
     gap: 10px;
+    flex-wrap: wrap;
+  }
+  .aw-topline > .aw-tabs {
+    width: 100%;
     flex-wrap: wrap;
   }
   .aw-tabs button {

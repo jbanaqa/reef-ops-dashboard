@@ -301,6 +301,46 @@ const { chromium } = require("playwright");
         rows = rows.filter((p) => p.tags.includes("b2b"));
       if (url.searchParams.get("status") === "unsubscribed")
         rows = rows.filter((p) => p.consents[0].status === "UNSUBSCRIBED");
+      const pendingFlow = url.searchParams.get("pendingFlow");
+      if (pendingFlow) {
+        rows = rows
+          .filter((p) => Number(p.id) < 3)
+          .map((p) => ({
+            ...p,
+            pendingFlows: [
+              ...(pendingFlow === "all" || pendingFlow === "welcome"
+                ? [
+                    {
+                      key: "welcome",
+                      name: "Welcome Series",
+                      enabled: true,
+                      messages: 2,
+                      nextSubject: "Your welcome offer",
+                      nextAt: "2026-09-22T17:00:00Z",
+                      status: "PENDING",
+                      reason: null,
+                    },
+                  ]
+                : []),
+              ...(p.id === "0" &&
+              (pendingFlow === "all" || pendingFlow === "abandoned-cart")
+                ? [
+                    {
+                      key: "abandoned-cart",
+                      name: "Abandoned Cart",
+                      enabled: false,
+                      messages: 1,
+                      nextSubject: "Your cart is waiting",
+                      nextAt: "2026-09-21T20:00:00Z",
+                      status: "PENDING",
+                      reason: null,
+                    },
+                  ]
+                : []),
+            ],
+          }))
+          .filter((p) => p.pendingFlows.length);
+      }
       const total = rows.length;
       const cursor = url.searchParams.get("cursor");
       if (cursor) rows = rows.slice(rows.findIndex((p) => p.id === cursor) + 1);
@@ -310,6 +350,14 @@ const { chromium } = require("playwright");
           total,
           nextCursor: rows.length > 25 ? rows[24].id : null,
           groups,
+          flows: [
+            { key: "welcome", name: "Welcome Series", enabled: true },
+            {
+              key: "abandoned-cart",
+              name: "Abandoned Cart",
+              enabled: false,
+            },
+          ],
         },
       });
     });
@@ -371,7 +419,28 @@ const { chromium } = require("playwright");
       .click();
     await page.getByText("32 matching contacts").waitFor();
     await page
-      .getByRole("button", { name: "Saved audiences", exact: true })
+      .getByRole("button", { name: "Pending flows", exact: true })
+      .click();
+    await page.getByText("3 profiles with pending flows", { exact: true }).waitFor();
+    await page.getByText("Your welcome offer", { exact: true }).first().waitFor();
+    await page.getByText("Flow paused", { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, "pending-flows-desktop.png") });
+    await page.locator(".aw-pending-directory select").selectOption("welcome");
+    await page.getByText("3 profiles with pending flows", { exact: true }).waitFor();
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.screenshot({
+      path: path.join(output, "pending-flows-mobile-320.png"),
+      fullPage: true,
+    });
+    assert.ok(
+      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      "Pending flows fits at 320px",
+    );
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole("button", { name: "Contacts", exact: true }).click();
+    await page.getByText("32 matching contacts").waitFor();
+    await page
+      .getByRole("button", { name: "Lists & segments", exact: true })
       .click();
     await page.screenshot({ path: path.join(output, "saved-audiences.png") });
     await page

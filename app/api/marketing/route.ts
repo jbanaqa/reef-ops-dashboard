@@ -5,6 +5,7 @@ import {
 } from "@/lib/marketing/audience-backfill";
 import { cartReport } from "@/lib/marketing/cart-report";
 import { campaignReport } from "@/lib/marketing/campaign-report";
+import { marketingAnalytics } from "@/lib/marketing/analytics";
 import {
   engagementBackfillStatus,
   setEngagementBackfillRunning,
@@ -295,6 +296,11 @@ export async function GET(request: Request) {
     if (view === "campaign-report")
       return Response.json(
         await campaignReport(url.searchParams.get("id") || ""),
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    if (view === "analytics")
+      return Response.json(
+        await marketingAnalytics(Number(url.searchParams.get("days") || 30)),
         { headers: { "Cache-Control": "no-store" } },
       );
     if (view === "cart-history")
