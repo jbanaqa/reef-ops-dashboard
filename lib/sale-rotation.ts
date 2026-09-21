@@ -237,37 +237,40 @@ export async function listSaleProducts() {
     (!product.tracksInventory || (product.totalInventory ?? 0) > 0) &&
     product.variants.nodes.length > 0,
   );
-  await prisma.$transaction(async (database) => {
-    await database.saleRotationProduct.updateMany({ where: { shop }, data: { active: false } });
-    for (const product of inStock) {
-      const variant = product.variants.nodes[0];
-      await database.saleRotationProduct.upsert({
-        where: { shop_shopifyProductId: { shop, shopifyProductId: product.id } },
-        update: {
-          shopifyVariantId: variant.id,
-          title: product.title,
-          variantTitle: variant.title,
-          handle: product.handle,
-          imageUrl: product.featuredImage?.url ?? null,
-          regularPrice: standardPrice(variant.price, variant.compareAtPrice),
-          eligibleForRotation: true,
-          active: true,
-        },
-        create: {
-          shop,
-          shopifyProductId: product.id,
-          shopifyVariantId: variant.id,
-          title: product.title,
-          variantTitle: variant.title,
-          handle: product.handle,
-          imageUrl: product.featuredImage?.url ?? null,
-          regularPrice: standardPrice(variant.price, variant.compareAtPrice),
-          eligibleForRotation: true,
-          active: true,
-        },
-      });
-    }
-  });
+  await prisma.$transaction(
+    async (database) => {
+      await database.saleRotationProduct.updateMany({ where: { shop }, data: { active: false } });
+      for (const product of inStock) {
+        const variant = product.variants.nodes[0];
+        await database.saleRotationProduct.upsert({
+          where: { shop_shopifyProductId: { shop, shopifyProductId: product.id } },
+          update: {
+            shopifyVariantId: variant.id,
+            title: product.title,
+            variantTitle: variant.title,
+            handle: product.handle,
+            imageUrl: product.featuredImage?.url ?? null,
+            regularPrice: standardPrice(variant.price, variant.compareAtPrice),
+            eligibleForRotation: true,
+            active: true,
+          },
+          create: {
+            shop,
+            shopifyProductId: product.id,
+            shopifyVariantId: variant.id,
+            title: product.title,
+            variantTitle: variant.title,
+            handle: product.handle,
+            imageUrl: product.featuredImage?.url ?? null,
+            regularPrice: standardPrice(variant.price, variant.compareAtPrice),
+            eligibleForRotation: true,
+            active: true,
+          },
+        });
+      }
+    },
+    { maxWait: 10_000, timeout: 30_000 },
+  );
   return prisma.saleRotationProduct.findMany({ where: { shop }, orderBy: [{ active: "desc" }, { title: "asc" }] });
 }
 
