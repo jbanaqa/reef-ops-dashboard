@@ -453,6 +453,30 @@
 .aw-detail-section {
   margin: 24px 0;
 }
+.aw-drawer-body { --aw-muted: #526773; }
+.aw-drawer-body h3 { font-size: 17px; margin: 0 0 16px; }
+.aw-drawer-body .aw-detail-section + .aw-detail-section { padding-top: 24px; border-top: 1px solid var(--aw-line); }
+.aw-identity .aw-badge { display: table; margin-top: 8px; }
+.aw-profile-snapshot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 18px; background: var(--surface-muted); border-radius: 10px; }
+.aw-profile-snapshot strong { display: block; font-size: 24px; }
+.aw-profile-snapshot span { display: block; font-size: 13px; color: var(--aw-muted); margin-top: 4px; }
+.aw-profile-snapshot button { grid-column: 1 / -1; justify-self: start; }
+.aw-field-label { font-size: 13px; color: var(--aw-muted); margin: 18px 0 8px; font-weight: 500; }
+.aw-next-step { margin-top: 14px; padding-left: 12px; border-left: 3px solid var(--aw-accent); display: grid; gap: 4px; }
+.aw-next-step span, .aw-next-step time { color: var(--aw-muted); font-size: 13px; }
+.aw-next-step strong { font-size: 15px; }
+.aw-next-step p { margin: 4px 0 0; font-size: 13px; }
+.aw-flow-details { margin-top: 14px; border-top: 1px solid var(--aw-line); padding-top: 10px; }
+.aw-flow-details > summary, .aw-message-actions > summary { cursor: pointer; font-size: 13px; color: var(--aw-muted); line-height: 1.6; }
+.aw-drawer summary:focus-visible { outline: 2px solid var(--aw-accent); outline-offset: 4px; }
+.aw-flow-details .aw-flow-milestones { grid-template-columns: 1fr; }
+.aw-message-actions { margin-top: 10px; }
+.aw-drawer .aw-message-summary { display: flex; flex-wrap: wrap; gap: 6px; }
+.marketing .aw-drawer .aw-message-summary button { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 6px; }
+.aw-drawer .aw-message-summary strong { font-size: 14px; }
+.aw-drawer .aw-message-summary span { font-size: 13px; }
+.aw-drawer .aw-message-row .aw-eyebrow { letter-spacing: 0; font-size: 12px; }
+.aw-drawer .aw-message-row h4 { line-height: 1.5; font-weight: 600; }
 .aw-detail-section > p {
   font-size: 14px;
 }
@@ -1038,6 +1062,8 @@
   .aw-flow-card > .aw-split,
   .aw-message-row > .aw-split {
     align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
   .aw-flow-filter {
     align-items: stretch !important;

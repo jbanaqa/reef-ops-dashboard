@@ -536,6 +536,7 @@ const { chromium } = require("playwright");
     }
 
     testMessages = true;
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto("http://127.0.0.1:" + server.address().port + "?sending=1");
     await page
       .getByRole("button", { name: "View Jaden Banawa", exact: true })
@@ -561,6 +562,7 @@ const { chromium } = require("playwright");
       "completed flows are collapsed by default",
     );
     await page.getByText("Previous flow runs", { exact: false }).click();
+    await page.locator(".aw-history-group .aw-flow-details > summary").click();
     await page.getByText(/Last sent: Previous B2B email/).waitFor();
     await page.getByText("Previous flow runs", { exact: false }).click();
     await page
@@ -598,6 +600,10 @@ const { chromium } = require("playwright");
       .getByText(/Sending now bypasses its schedule only/)
       .waitFor();
     await welcomeCard.getByText("Welcome · EMAIL", { exact: true }).waitFor();
+    for (const card of [welcomeCard, firstCard, lastCard]) {
+      assert.equal(await card.getByRole("button", { name: "Send this step now", exact: true }).isVisible(), false);
+      await card.getByText("Message actions", { exact: true }).click();
+    }
     assert.equal(
       await welcomeCard
         .getByRole("button", { name: "Send this step now", exact: true })
@@ -652,10 +658,11 @@ const { chromium } = require("playwright");
       0,
     );
     assert.equal(earlySends, 1);
+    await page.locator(".aw-flow-card:not(.compact) .aw-flow-details > summary").click();
     await page.getByText("First reminder", { exact: true }).waitFor();
-    await page.getByText("Follow-up email", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Overview", exact: true }).click();
-    await page.getByText("First reminder", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "View messages →", exact: true }).waitFor();
+    assert.equal(await page.locator(".aw-flow-card").count(), 0, "Overview summarizes flows without repeating their history");
     await page.screenshot({
       path: path.join(output, "flow-progress-mobile.png"),
     });

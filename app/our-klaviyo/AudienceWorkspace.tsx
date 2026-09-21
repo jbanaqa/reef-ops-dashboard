@@ -228,19 +228,16 @@ function FlowProgressCard({
           {flow.state}
         </span>
       </div>
-      <div className="aw-flow-counts" aria-label="Message counts">
-        <span>
-          <strong>{flow.sentCount}</strong> sent
-        </span>
-        <span>
-          <strong>{flow.pendingCount}</strong> upcoming
-        </span>
-        {(flow.skippedCount > 0 || flow.failedCount > 0) && (
-          <span>
-            <strong>{flow.skippedCount + flow.failedCount}</strong> not sent
-          </span>
-        )}
-      </div>
+      {flow.next && (
+        <div className="aw-next-step">
+          <span>Next message</span>
+          <strong>{flow.next.label}</strong>
+          <time dateTime={flow.next.at}>{date(flow.next.at)}</time>
+          {flow.next.reason && <p>{flow.next.reason}</p>}
+        </div>
+      )}
+      <details className="aw-flow-details">
+      <summary>Run details · {flow.sentCount} sent · {flow.pendingCount} upcoming{flow.skippedCount + flow.failedCount > 0 ? ` · ${flow.skippedCount + flow.failedCount} not sent` : ""}</summary>
       {compact && flow.lastSent && (
         <p className="aw-flow-compact-last">
           Last sent: {flow.lastSent.subject} · {date(flow.lastSent.at)}
@@ -256,30 +253,16 @@ function FlowProgressCard({
               <time dateTime={flow.lastSent.at}>{date(flow.lastSent.at)}</time>
             </div>
           )}
-          {flow.next && (
-            <div>
-              <span>Next</span>
-              <strong>{flow.next.label}</strong>
-              <p>Scheduled for {date(flow.next.at)}</p>
-              {flow.next.branchPending && (
-                <small>Content is selected at send time from recent orders.</small>
-              )}
-              {flow.next.reason && <small>{flow.next.reason}</small>}
-            </div>
-          )}
+          {flow.next?.branchPending && <small>Next message content is selected at send time from recent orders.</small>}
         </div>
       )}
-      {flow.active && !sendingEnabled && (
-        <p className="aw-hint">
-          Sending is off. Upcoming messages will wait until it resumes.
-        </p>
-      )}
-      {!compact &&
-        flow.reasons.map((reason) => (
+      {flow.reasons.map((reason) => (
           <p className="aw-reason" key={reason}>
             {reason}
           </p>
         ))}
+      </details>
+      {flow.active && !sendingEnabled && <p className="aw-hint">Sending is off.</p>}
     </article>
   );
 }
@@ -553,11 +536,19 @@ function ContactPanel({
               Refresh
             </button>
           </nav>
-          {(section === "overview" || section === "emails") && (
+          {section === "overview" && (
+            <section className="aw-profile-snapshot" aria-label="Profile summary">
+              <div><strong>{activeFlows.length}</strong><span>Active flows</span></div>
+              <div><strong>{messageCounts.upcoming}</strong><span>Upcoming messages</span></div>
+              <div><strong>{messageCounts.attention}</strong><span>Need review</span></div>
+              <button type="button" onClick={() => setSection("emails")}>View messages →</button>
+            </section>
+          )}
+          {section === "emails" && (
             <section className="aw-detail-section" aria-label="Flow progress">
               <div className="aw-section-heading">
                 <div>
-                  <h3>{section === "emails" ? "Active flows" : "Flow progress"}</h3>
+                  <h3>Active flows</h3>
                   {section === "emails" && (
                     <p>Where this customer is now and what happens next.</p>
                   )}
@@ -568,14 +559,6 @@ function ContactPanel({
               </div>
               {!progress.length ? (
                 <p>No recorded flow enrollment yet.</p>
-              ) : section === "overview" ? (
-                progress.map((flow) => (
-                  <FlowProgressCard
-                    flow={flow}
-                    sendingEnabled={sendingEnabled}
-                    key={flow.id}
-                  />
-                ))
               ) : (
                 <>
                   {activeFlows.length ? (
@@ -617,20 +600,12 @@ function ContactPanel({
                   appear in these counts.
                 </p>
               )}
-              {section === "overview" && (
-                <small>
-                  Sent means the email provider accepted the message; it does
-                  not confirm the customer read it. Upcoming steps still
-                  require send-time checks.
-                </small>
-              )}
             </section>
           )}
           {section === "overview" && (
             <>
               <section className="aw-detail-section">
                 <h3>Marketing preferences</h3>
-                <p>Subscriptions are separate for email and text messages.</p>
                 {["EMAIL", "SMS_MARKETING"].map((channel) => {
                   const c = contact.consents.find((x) => x.channel === channel);
                   return (
@@ -656,13 +631,10 @@ function ContactPanel({
                     </div>
                   );
                 })}
-                <p className="aw-hint">
-                  A subscription alone does not send an email. Workflow rules
-                  and sending settings still apply.
-                </p>
               </section>
               <section className="aw-detail-section">
-                <h3>Tags</h3>
+                <h3>Lists & tags</h3>
+                <h4 className="aw-field-label">Shopify tags</h4>
                 <div className="aw-tags">
                   {contact.tags.length ? (
                     contact.tags.map((t) => <span key={t}>{t}</span>)
@@ -675,7 +647,7 @@ function ContactPanel({
                 </p>
                 {contact.lists.length > 0 && (
                   <>
-                    <h3>Lists</h3>
+                    <h4 className="aw-field-label">Audience lists</h4>
                     <div className="aw-tags">
                       {contact.lists.map((t) => (
                         <span key={t}>{t}</span>
@@ -746,7 +718,7 @@ function ContactPanel({
               <div className="aw-section-heading">
                 <div>
                   <h3>Message history</h3>
-                  <p>Upcoming emails first, with older results available by status.</p>
+                  <p>Select a status, then expand a message for actions.</p>
                 </div>
               </div>
               <div
@@ -881,6 +853,8 @@ function ContactPanel({
                       </span>
                     </div>
                     {m.testActions && (
+                      <details className="aw-message-actions">
+                      <summary>Message actions</summary>
                       <div className="aw-test-send">
                         <button
                           type="button"
@@ -910,6 +884,7 @@ function ContactPanel({
                           </button>
                         )}
                       </div>
+                      </details>
                     )}
                     {m.error && (
                       <p className="aw-reason">
