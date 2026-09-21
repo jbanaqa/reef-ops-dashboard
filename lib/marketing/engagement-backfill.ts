@@ -52,14 +52,19 @@ async function page(path: string): Promise<Page> {
     signal: AbortSignal.timeout(30000),
     redirect: "error",
   });
-  if (!response.ok)
+  if (!response.ok) {
+    const failure = (await response.json().catch(() => null)) as
+      | { errors?: { detail?: string; title?: string }[] }
+      | null;
+    const detail = failure?.errors?.[0]?.detail || failure?.errors?.[0]?.title;
     throw new Error(
       response.status === 429
         ? "Klaviyo is busy. Pause briefly, then continue the open-history backfill."
         : response.status === 403
           ? "The Klaviyo key needs events:read, metrics:read, and profiles:read access."
-          : `Klaviyo engagement request failed (${response.status}).`,
+          : `Klaviyo engagement request failed (${response.status})${detail ? `: ${detail}` : "."}`,
     );
+  }
   const result = (await response.json()) as Page;
   if (!Array.isArray(result.data))
     throw new Error("Invalid Klaviyo engagement response.");
@@ -170,7 +175,7 @@ export async function syncEngagementBackfill() {
         include: "profile",
         "fields[event]": "datetime",
         "fields[profile]": "email",
-        "page[size]": "1000",
+        "page[size]": "200",
         sort: "datetime",
       });
       const result = await page(state.next || `/api/events?${query}`);
