@@ -157,8 +157,7 @@ export async function syncEngagementBackfill() {
   });
   try {
     if (state.phase === "metric") {
-      const query = new URLSearchParams({ "page[size]": "100" });
-      const result = await page(state.next || `/api/metrics?${query}`);
+      const result = await page(state.next || "/api/metrics");
       const metric = result.data.find(
         (item) =>
           item.type === "metric" && item.attributes.name === "Opened Email",
