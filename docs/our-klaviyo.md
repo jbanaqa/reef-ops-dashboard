@@ -24,7 +24,7 @@ Webhook event keys and message keys are unique. Transactions use serializable re
 
 The audited mailable audience is subscribed, unsuppressed email AND an open within 365 days. Historical opens are critical to migrate. Apple/privacy proxy opens remain a limitation, just as with provider open reporting.
 
-Attribution is one message per order: last recorded click within five days, otherwise last open within one day. Browser checkout completion is never counted as an order. Revenue is gross order value, grouped by currency; it does not subtract refunds and will differ from Klaviyo. Late engagement arriving after an order does not retroactively reattribute it. The current dashboard caps attributed-order aggregation at 10,000 records and labels this when reached.
+Attribution is one email message per order using configurable Klaviyo-style last touch: the newest qualifying open or click wins, with five-day click and open defaults. Browser checkout completion is never counted as an order. Revenue is gross order value, grouped by currency; it does not subtract refunds. Analytics recalculates from recorded history, while the attribution saved on an individual order remains the result known when Shopify delivered that order event. The Overview diagnostic caps its attributed-order aggregation at 10,000 records and labels this when reached.
 
 ## Milestones implemented
 
@@ -154,9 +154,11 @@ Validation: `node scripts/audiences.browser.test.cjs` exercises the actual compo
 
 ## Analytics workspace
 
-Analytics reports 7-, 30-, 90-, or 365-day results separately for automated flows and one-time campaigns. Sent, delivered, unique opened, unique clicked, attributed orders, order rate, and gross attributed revenue are calculated from activity that occurred in the selected period. A conversion near the start of a period remains attached to the earlier message that earned it. Currencies are reported separately rather than converted.
+Analytics reports 7-, 30-, 90-, or 365-day results separately for automated flows and one-time campaigns. Like Klaviyo's flow and campaign reports, the selected period chooses messages by send date; engagement and qualifying conversions remain attached to those messages even if they occur later. Sent, delivered, unique opened, unique clicked, attributed orders, order rate, and gross attributed revenue are shown. Currencies are reported separately rather than converted.
 
-An order is attributed to the most recent Reef Ops click in the preceding five days, or otherwise the most recent Reef Ops open in the preceding day. This is message attribution rather than proof that the message alone caused the sale. Gross order value is shown before refunds; privacy-proxy opens may inflate opens. Total tracked order revenue and attributed share are shown for context. Campaign detail reports remain available for recipient and skip-reason inspection.
+Reef Ops uses Klaviyo-style email last touch. The most recent qualifying open or click receives the order, and the click/open windows are independently configurable from 1–90 days; both default to Klaviyo's current five-day email defaults. The window starts at confirmed delivery when recorded, falling back to provider-accepted send time, and Analytics recalculates historical results from recorded interactions when the settings change. This is message attribution rather than proof that the message alone caused the sale. Gross order value is shown before refunds, currencies stay separate, and total tracked order revenue is shown for context.
+
+Resend identifies the exact message for opens and clicks but does not label webhook events as Apple Mail Privacy Protection opens or bot clicks. Reef Ops therefore cannot reproduce Klaviyo's optional MPP/bot exclusion toggles with current provider data. SMS, push, WhatsApp, paid-channel cooperative attribution, linear attribution, currency conversion, and refund-adjusted revenue are also outside this email-only model.
 
 ## Settings workspace
 
@@ -259,7 +261,7 @@ The separate **Import Klaviyo email opens** task restores the previous 365 days 
 
 Refresh history after drafting the equivalent Klaviyo flow and before enabling Reef Ops. Recent imported email receipts postpone eligible cart and Welcome reminder emails until the 16-hour spacing window ends. Imports are staff-triggered snapshots, not continuous synchronization; missing metrics cannot be reconstructed. Email eligibility, SMS support and artwork are unchanged in this iteration.
 
-**View flow results** shows each cart step’s waiting, sent, delivered, unique opens/clicks, attributed orders/sales, skipped and attention counts for messages created in the last 30 days. Revenue stays separate by currency. Reporting uses existing Reef Ops attribution (last click within five days, otherwise last open within one day), so it is not exact Klaviyo attribution parity. Privacy-protected opens may inflate open measurements.
+**View flow results** shows each cart step’s waiting, sent, delivered, unique opens/clicks, attributed orders/sales, skipped and attention counts for messages created in the last 30 days. Revenue stays separate by currency. Its saved order associations reflect the attribution settings in effect when each Shopify order was processed; the main Analytics workspace recalculates Klaviyo-style last touch from recorded history. Privacy-protected opens may inflate open measurements.
 
 Additional verification covers paginated read-only imports and foreign-link rejection, the 90-day cart and 3-day popularity windows, overlapping history, queued content and wait edits, imported recent-email protection, report deduplication, staff authentication and production-specific tracking downloads. Browser checks cover these dialogs at desktop, 390px and 320px. Live API access, pixel installation and a controlled checkout still require verification before cutover.
 

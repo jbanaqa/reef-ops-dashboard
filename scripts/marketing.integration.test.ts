@@ -2717,8 +2717,104 @@ test("marketing analytics separates campaign revenue and recipient rates", async
   assert.equal(row.clicked, 1);
   assert.equal(row.orders, 1);
   assert.equal(row.revenue.USD, 42.5);
+  assert.deepEqual(report.attribution, {
+    emailClickDays: 5,
+    emailOpenDays: 5,
+  });
   assert.ok(report.totals.trackedOrders >= report.totals.orders);
   assert.ok(report.rows.some((candidate) => candidate.kind === "FLOW"));
+});
+
+test("email attribution uses the latest qualifying interaction like Klaviyo", async () => {
+  const { findEmailAttribution } = await import("../lib/marketing/attribution");
+  const profile = await prisma.marketingProfile.create({
+    data: {
+      id: "attribution-last-touch-profile",
+      shop,
+      email: "attribution-last-touch@example.com",
+      name: "Attribution Last Touch",
+    },
+  });
+  const clickedMessage = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "attribution-older-click-message",
+      profileId: profile.id,
+      flowKey: "welcome",
+      channel: "EMAIL",
+      subject: "Older clicked message",
+      content: defaultContent,
+      status: "SENT",
+      dueAt: new Date(Date.now() - 4 * 86400000),
+      sentAt: new Date(Date.now() - 4 * 86400000),
+    },
+  });
+  const openedMessage = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "attribution-newer-open-message",
+      profileId: profile.id,
+      campaignId: (
+        await prisma.marketingCampaign.create({
+          data: {
+            shop,
+            name: "Attribution last-touch fixture",
+            subject: "Newer opened message",
+            content: defaultContent,
+            audience: {},
+            status: "SENT",
+          },
+        })
+      ).id,
+      channel: "EMAIL",
+      subject: "Newer opened message",
+      content: defaultContent,
+      status: "SENT",
+      dueAt: new Date(Date.now() - 3 * 86400000),
+      sentAt: new Date(Date.now() - 3 * 86400000),
+    },
+  });
+  const convertedAt = new Date();
+  await prisma.marketingEvent.createMany({
+    data: [
+      {
+        shop,
+        key: "attribution-older-click",
+        type: "CLICKED",
+        profileId: profile.id,
+        messageId: clickedMessage.id,
+        occurredAt: new Date(+convertedAt - 3 * 86400000),
+      },
+      {
+        shop,
+        key: "attribution-newer-open",
+        type: "OPENED",
+        profileId: profile.id,
+        messageId: openedMessage.id,
+        occurredAt: new Date(+convertedAt - 2 * 86400000),
+      },
+    ],
+  });
+  assert.equal(
+    (
+      await findEmailAttribution(prisma, profile.id, convertedAt, {
+        emailClickDays: 5,
+        emailOpenDays: 5,
+      })
+    )?.messageId,
+    openedMessage.id,
+    "the newer open wins over an older click",
+  );
+  assert.equal(
+    (
+      await findEmailAttribution(prisma, profile.id, convertedAt, {
+        emailClickDays: 5,
+        emailOpenDays: 1,
+      })
+    )?.messageId,
+    clickedMessage.id,
+    "an interaction outside its configured window is ignored",
+  );
 });
 
 test("cart tools require staff login and tracking download uses the configured origin", async () => {

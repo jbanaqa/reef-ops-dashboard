@@ -1,13 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
-import { atomic, consent, identify, json, record, shop, Tx } from "./store";
-import { date, DAY } from "./rules";
+import { atomic, consent, identify, json, record, shop } from "./store";
+import { date } from "./rules";
 import { enroll } from "./flows";
 import {
   deliveryDateFromTags,
   deliveryUpsellDueAt,
 } from "./delivery-upsell-config";
 import { validateFlow } from "./flow-config";
+import { findEmailAttribution } from "./attribution";
 
 type Customer = {
   id?: string | number;
@@ -163,25 +164,6 @@ async function hydrateCustomerTagPayload(
         (error instanceof Error ? error.message : "lookup failed"),
     );
   }
-}
-async function attribute(tx: Tx, profileId: string, at: Date) {
-  for (const [type, window] of [
-    ["CLICKED", 5 * DAY],
-    ["OPENED", DAY],
-  ] as const) {
-    const event = await tx.marketingEvent.findFirst({
-      where: {
-        shop: shop(),
-        profileId,
-        type,
-        messageId: { not: null },
-        occurredAt: { gte: new Date(+at - window), lte: at },
-      },
-      orderBy: { occurredAt: "desc" },
-    });
-    if (event) return event.messageId!;
-  }
-  return undefined;
 }
 export async function ingestShopify(
   topic: string,
@@ -351,13 +333,13 @@ export async function ingestShopify(
           profileId: profile.id,
           messageId: historical
             ? undefined
-            : await attribute(tx, profile.id, orderAt),
+            : (await findEmailAttribution(tx, profile.id, orderAt))?.messageId,
           occurredAt: orderAt,
           payload: {
             orderId: String(p.id),
             revenue: String(p.total_price || "0"),
             currency: p.currency || "UNKNOWN",
-            model: "last-click-5d-else-open-1d",
+            model: "email-last-touch",
             historical,
           },
         });

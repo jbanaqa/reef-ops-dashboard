@@ -17,6 +17,10 @@ type AnalyticsRow = {
 type AnalyticsReport = {
   days: number;
   since: string;
+  attribution: {
+    emailClickDays: number;
+    emailOpenDays: number;
+  };
   totals: {
     messages: number;
     sent: number;
@@ -82,7 +86,7 @@ function PerformanceTable({
                 <tr key={`${row.kind}:${row.key}`}>
                   <td>
                     <strong>{row.name}</strong>
-                    <small>{row.messages.toLocaleString()} created messages</small>
+                    <small>{row.messages.toLocaleString()} messages sent in period</small>
                   </td>
                   <td>{row.sent.toLocaleString()}</td>
                   <td>{rate(row.opened, row.delivered || row.sent)}</td>
@@ -98,7 +102,7 @@ function PerformanceTable({
           </table>
         </div>
       ) : (
-        <p>No messages were created in this period.</p>
+        <p>No messages were sent in this period.</p>
       )}
     </section>
   );
@@ -110,6 +114,11 @@ export default function AnalyticsWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [attributionDraft, setAttributionDraft] = useState<{
+    emailClickDays: number;
+    emailOpenDays: number;
+  } | null>(null);
+  const [savingAttribution, setSavingAttribution] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     fetch(`/api/marketing?view=analytics&days=${days}`, {
@@ -141,6 +150,36 @@ export default function AnalyticsWorkspace() {
 
   const flows = report?.rows.filter((row) => row.kind === "FLOW") || [];
   const campaigns = report?.rows.filter((row) => row.kind === "CAMPAIGN") || [];
+  const attribution = attributionDraft || report?.attribution;
+  async function saveAttribution() {
+    if (!attribution) return;
+    setSavingAttribution(true);
+    setError("");
+    try {
+      const response = await fetch("/api/marketing", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "save-settings",
+          settings: { attribution },
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Could not save attribution settings.");
+      setAttributionDraft(null);
+      setLoading(true);
+      setRefresh((value) => value + 1);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not save attribution settings.",
+      );
+    } finally {
+      setSavingAttribution(false);
+    }
+  }
   return (
     <div className="mk-analytics-workspace">
       <header className="mk-analytics-heading">
@@ -213,13 +252,89 @@ export default function AnalyticsWorkspace() {
           </div>
           <PerformanceTable heading="Automated flows" rows={flows} />
           <PerformanceTable heading="Campaigns" rows={campaigns} />
+          <section className="mk-panel mk-attribution-settings">
+            <div>
+              <p className="mk-eyebrow">KLAVIYO-STYLE MODEL</p>
+              <h2>Attribution settings</h2>
+              <p>
+                The most recent qualifying email open or click receives the
+                order. The window begins at delivery when recorded. Changing
+                either window recalculates this report from the recorded history.
+              </p>
+            </div>
+            {attribution && (
+              <div className="mk-attribution-fields">
+                <label>
+                  Email click window
+                  <span>
+                    <input
+                      aria-label="Email click attribution days"
+                      type="number"
+                      min={1}
+                      max={90}
+                      value={attribution.emailClickDays}
+                      onChange={(event) =>
+                        setAttributionDraft({
+                          ...attribution,
+                          emailClickDays: Number(event.target.value),
+                        })
+                      }
+                    />
+                    days
+                  </span>
+                </label>
+                <label>
+                  Email open window
+                  <span>
+                    <input
+                      aria-label="Email open attribution days"
+                      type="number"
+                      min={1}
+                      max={90}
+                      value={attribution.emailOpenDays}
+                      onChange={(event) =>
+                        setAttributionDraft({
+                          ...attribution,
+                          emailOpenDays: Number(event.target.value),
+                        })
+                      }
+                    />
+                    days
+                  </span>
+                </label>
+                <button
+                  disabled={
+                    savingAttribution ||
+                    !attributionDraft ||
+                    !Number.isInteger(attribution.emailClickDays) ||
+                    attribution.emailClickDays < 1 ||
+                    attribution.emailClickDays > 90 ||
+                    !Number.isInteger(attribution.emailOpenDays) ||
+                    attribution.emailOpenDays < 1 ||
+                    attribution.emailOpenDays > 90
+                  }
+                  onClick={saveAttribution}
+                >
+                  {savingAttribution ? "Saving…" : "Save attribution settings"}
+                </button>
+              </div>
+            )}
+            <small>
+              Resend identifies the exact email that opened or was clicked, but
+              does not label Apple privacy opens or bot clicks in these webhook
+              events. Reef Ops cannot reproduce Klaviyo’s optional exclusion
+              toggles for those signals with the current provider data.
+            </small>
+          </section>
           <section className="mk-panel mk-analytics-notes">
             <h2>How revenue is attributed</h2>
             <p>
-              An order is credited to the most recent Reef Ops click within five
-              days, or otherwise the most recent open within one day. Revenue is
-              gross order value before refunds. Opens may include privacy-proxy
-              activity, and currencies remain separate instead of being converted.
+              An order is credited to the most recent qualifying Reef Ops email
+              interaction using the windows above. Like Klaviyo’s flow and
+              campaign reports, the selected period is based on when the message
+              was sent. Revenue is gross order value before refunds. Opens may
+              include privacy-proxy activity, and currencies remain separate
+              instead of being converted.
             </p>
             <p>
               Total tracked store revenue for this period: {money(report.totals.storeRevenue)}.

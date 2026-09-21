@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { DAY } from "./rules";
 import { shop } from "./store";
+import {
+  attributionConfiguration,
+  findEmailAttribution,
+} from "./attribution";
 
 const periods = new Set([7, 30, 90, 365]);
 
@@ -40,6 +44,7 @@ function money(target: Record<string, number>, payload: unknown) {
 export async function marketingAnalytics(requestedDays = 30) {
   const days = periods.has(requestedDays) ? requestedDays : 30;
   const since = new Date(Date.now() - days * DAY);
+  const attribution = await attributionConfiguration(prisma);
   const flows = await prisma.marketingResource.findMany({
     where: { shop: shop(), kind: "FLOW" },
     select: { key: true, name: true },
@@ -60,6 +65,7 @@ export async function marketingAnalytics(requestedDays = 30) {
       campaign: { name: string } | null;
     }
   >();
+  const engagementEvents: { messageId: string | null; type: string }[] = [];
   let cursor: string | undefined;
   for (;;) {
     const page = await prisma.marketingMessage.findMany({
@@ -79,47 +85,27 @@ export async function marketingAnalytics(requestedDays = 30) {
       },
     });
     for (const message of page) messages.set(message.id, message);
+    if (page.length)
+      engagementEvents.push(
+        ...(await prisma.marketingEvent.findMany({
+          where: {
+            shop: shop(),
+            type: { in: ["DELIVERED", "OPENED", "CLICKED"] },
+            messageId: { in: page.map((message) => message.id) },
+          },
+          distinct: ["messageId", "type"],
+          select: { messageId: true, type: true },
+        })),
+      );
     if (page.length < 500) break;
     cursor = page[page.length - 1].id;
   }
 
-  const engagementEvents = await prisma.marketingEvent.findMany({
-    where: {
-      shop: shop(),
-      type: { in: ["DELIVERED", "OPENED", "CLICKED"] },
-      occurredAt: { gte: since },
-      messageId: { not: null },
-    },
-    distinct: ["messageId", "type"],
-    select: { messageId: true, type: true },
-  });
   const orderEvents = await prisma.marketingEvent.findMany({
     where: { shop: shop(), type: "ORDER", occurredAt: { gte: since } },
-    select: { messageId: true, payload: true },
+    orderBy: { occurredAt: "asc" },
+    select: { profileId: true, occurredAt: true, payload: true },
   });
-  const missingIds = [
-    ...new Set(
-      [...engagementEvents, ...orderEvents]
-        .map((event) => event.messageId)
-        .filter((id): id is string => Boolean(id) && !messages.has(id!)),
-    ),
-  ];
-  for (let index = 0; index < missingIds.length; index += 500) {
-    const page = await prisma.marketingMessage.findMany({
-      where: {
-        shop: shop(),
-        id: { in: missingIds.slice(index, index + 500) },
-        OR: [{ flowKey: { not: null } }, { campaignId: { not: null } }],
-      },
-      select: {
-        id: true,
-        flowKey: true,
-        campaignId: true,
-        campaign: { select: { name: true } },
-      },
-    });
-    for (const message of page) messages.set(message.id, message);
-  }
 
   const rowFor = new Map<string, Row>();
   for (const message of messages.values()) {
@@ -139,15 +125,7 @@ export async function marketingAnalytics(requestedDays = 30) {
     row.messages++;
     rowFor.set(message.id, row);
   }
-  for (const message of await prisma.marketingMessage.findMany({
-    where: {
-      shop: shop(),
-      sentAt: { gte: since },
-      id: { in: [...messages.keys()] },
-    },
-    select: { id: true },
-  }))
-    rowFor.get(message.id)!.sent++;
+  for (const message of messages.values()) rowFor.get(message.id)!.sent++;
   for (const event of engagementEvents) {
     const row = event.messageId ? rowFor.get(event.messageId) : undefined;
     if (!row) continue;
@@ -158,13 +136,30 @@ export async function marketingAnalytics(requestedDays = 30) {
 
   const storeRevenue: Record<string, number> = {};
   const attributedRevenue: Record<string, number> = {};
-  for (const order of orderEvents) {
-    money(storeRevenue, order.payload);
-    const row = order.messageId ? rowFor.get(order.messageId) : undefined;
-    if (row) {
-      row.orders++;
-      money(row.revenue, order.payload);
-      money(attributedRevenue, order.payload);
+  for (let index = 0; index < orderEvents.length; index += 20) {
+    const batch = orderEvents.slice(index, index + 20);
+    const matches = await Promise.all(
+      batch.map((order) =>
+        order.profileId
+          ? findEmailAttribution(
+              prisma,
+              order.profileId,
+              order.occurredAt,
+              attribution,
+            )
+          : null,
+      ),
+    );
+    for (let offset = 0; offset < batch.length; offset++) {
+      const order = batch[offset];
+      const match = matches[offset];
+      money(storeRevenue, order.payload);
+      const row = match ? rowFor.get(match.messageId) : undefined;
+      if (row) {
+        row.orders++;
+        money(row.revenue, order.payload);
+        money(attributedRevenue, order.payload);
+      }
     }
   }
   const reportRows = [...rows.values()].sort(
@@ -177,6 +172,7 @@ export async function marketingAnalytics(requestedDays = 30) {
   return {
     days,
     since: since.toISOString(),
+    attribution,
     totals: {
       messages: reportRows.reduce((sum, row) => sum + row.messages, 0),
       sent: reportRows.reduce((sum, row) => sum + row.sent, 0),

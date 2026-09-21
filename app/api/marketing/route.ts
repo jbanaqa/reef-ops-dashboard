@@ -700,6 +700,7 @@ export async function POST(request: Request) {
             kind: "SETTINGS",
             key: "global",
             operations: s.operations,
+            attribution: s.attribution,
           },
         }),
       );

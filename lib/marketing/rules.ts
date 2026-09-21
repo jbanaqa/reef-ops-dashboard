@@ -60,6 +60,10 @@ export type MarketingSettings = {
   operations: MarketingOperations;
   popupDismissalDays: number;
   popupDelaySeconds: number;
+  attribution: {
+    emailClickDays: number;
+    emailOpenDays: number;
+  };
 };
 export const defaultMarketingSettings: MarketingSettings = {
   postalAddress: "",
@@ -67,6 +71,10 @@ export const defaultMarketingSettings: MarketingSettings = {
   branding: {},
   popupDismissalDays: 7,
   popupDelaySeconds: 10,
+  attribution: {
+    emailClickDays: 5,
+    emailOpenDays: 5,
+  },
   operations: {
     sendingEnabled: false,
     migrationConfirmed: false,
@@ -86,6 +94,13 @@ export function marketingSettings(
   const branding = (v.branding || {}) as Partial<EmailBranding>;
   const requestedDismissalDays = Number(v.popupDismissalDays ?? 7);
   const requestedDelaySeconds = Number(v.popupDelaySeconds ?? 10);
+  const requestedAttribution = (v.attribution || {}) as Partial<
+    MarketingSettings["attribution"]
+  >;
+  const attributionDays = (value: unknown, fallback: number) => {
+    const n = Number(value ?? fallback);
+    return Number.isInteger(n) && n >= 1 && n <= 90 ? n : fallback;
+  };
   const brandingImage = (value: unknown) =>
     value ? imageSource(value) : undefined;
   const brandingScale = (value: unknown) => {
@@ -111,6 +126,16 @@ export function marketingSettings(
       requestedDelaySeconds <= 300
         ? requestedDelaySeconds
         : 10,
+    attribution: {
+      emailClickDays: attributionDays(
+        requestedAttribution.emailClickDays,
+        defaultMarketingSettings.attribution.emailClickDays,
+      ),
+      emailOpenDays: attributionDays(
+        requestedAttribution.emailOpenDays,
+        defaultMarketingSettings.attribution.emailOpenDays,
+      ),
+    },
     branding: {
       ...(brandingImage(branding.logo)
         ? { logo: brandingImage(branding.logo) }

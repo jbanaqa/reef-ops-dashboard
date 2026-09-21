@@ -252,6 +252,6 @@ export function setup(
     couponReady: !!process.env.MARKETING_WELCOME_COUPON,
     storefrontOrigin: process.env.MARKETING_STOREFRONT_ORIGIN || "",
     attribution:
-      "Last recorded click within 5 days; otherwise open within 1 day. One message per order; currencies remain separate.",
+      "Klaviyo-style email last touch. One message per order; currencies remain separate.",
   };
 }

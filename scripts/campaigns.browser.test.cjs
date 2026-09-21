@@ -100,6 +100,7 @@ const { chromium } = require("playwright");
       settings: {
         organizationName: "Corals Anonymous",
         postalAddress: "123 Ocean Avenue",
+        attribution: { emailClickDays: 5, emailOpenDays: 5 },
         operations: {},
       },
       setup: { sendingEnabled: false },
@@ -119,12 +120,21 @@ const { chromium } = require("playwright");
           data.campaigns[0] = { ...data.campaigns[0], ...body };
         if (body.action === "save-resource")
           data.resources[1] = { ...data.resources[1], ...body };
-        await route.fulfill({ json: { id: body.id || "draft", ok: true } });
+        if (body.action === "save-settings")
+          data.settings = { ...data.settings, ...body.settings };
+        await route.fulfill({
+          json: {
+            id: body.id || "draft",
+            ok: true,
+            settings: data.settings,
+          },
+        });
       } else if (url.searchParams.get("view") === "analytics")
         await route.fulfill({
           json: {
             days: Number(url.searchParams.get("days") || 30),
             since: "2026-08-22T00:00:00Z",
+            attribution: data.settings.attribution,
             totals: {
               messages: 120,
               sent: 100,
@@ -241,6 +251,19 @@ const { chromium } = require("playwright");
     await page.getByText("USD 821.50", { exact: true }).waitFor();
     await page.getByText("Welcome Series", { exact: true }).waitFor();
     await page.getByText("Weekend coral sale", { exact: true }).waitFor();
+    await page.getByLabel("Email open attribution days").fill("4");
+    await page
+      .getByRole("button", { name: "Save attribution settings" })
+      .click();
+    await page.waitForFunction(() =>
+      document.body.textContent.includes("Revenue and engagement"),
+    );
+    assert.deepEqual(writes.at(-1), {
+      action: "save-settings",
+      settings: {
+        attribution: { emailClickDays: 5, emailOpenDays: 4 },
+      },
+    });
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.screenshot({ path: path.join(output, "analytics-desktop.png") });
     await page.setViewportSize({ width: 320, height: 900 });

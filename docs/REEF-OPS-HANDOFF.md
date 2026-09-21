@@ -379,7 +379,7 @@ Pixel source: `shopify/reef-marketing-custom-pixel.js`. Download control fills i
 - Queued test runs cannot become normal production runs when test restriction disappears.
 - Test restriction is cart-specific, not a global restriction on every campaign/flow.
 - Never expose unsubscribe tokens, raw provider payloads, secrets, or large embedded artwork in contact summaries.
-- General marketing reporting is not exact Klaviyo attribution: last click within 5 days, otherwise open within 1 day; gross order value grouped by currency; privacy-proxy opens can inflate counts.
+- Analytics uses configurable Klaviyo-style email last touch with five-day open/click defaults and send-date cohorts. Resend does not label bot clicks or Apple MPP opens, so Klaviyo's optional exclusion settings cannot be reproduced; gross revenue is grouped by currency and remains before refunds.
 
 ## 15. Source map
 
@@ -644,7 +644,9 @@ The original Klaviyo profile/list backfill does not supply historical open times
 
 ### Analytics and pending-flow directory — September 21, 2026
 
-The Analytics tab now provides selectable 7/30/90/365-day reporting for automated flows and campaigns. It shows sends, unique delivery/open/click counts, attributed orders, order rate, and gross revenue by currency. Attribution uses the existing ingestion rule: most recent click within five days, otherwise most recent open within one day. Metrics are bounded by when the send, engagement, or order happened; orders at the beginning of a range can still resolve to the earlier message that earned them. Total tracked order revenue is shown for context. Revenue is before refunds, currencies are not converted, and privacy opens remain a known limitation.
+The Analytics tab provides selectable 7/30/90/365-day reporting for automated flows and campaigns. It shows sends, unique delivery/open/click counts, attributed orders, order rate, and gross revenue by currency. A follow-up parity change replaced click-first/open-fallback attribution with Klaviyo-style email last touch: the chronologically newest qualifying open or click wins. Click and open windows are independently saved from Analytics (1–90 days) and default to five days each. The lookback starts at confirmed delivery when present and otherwise at provider-accepted send time. Analytics resolves attribution from recorded history on every report, so changing a window recalculates historical results without rewriting order records. Like Klaviyo flow/campaign reports, date selection is based on message send date and later qualifying engagement/conversions remain with that message. Revenue is before refunds and currencies are not converted.
+
+Resend's signed open/click webhook identifies the message but does not supply Klaviyo-equivalent bot-click or Apple MPP classification. The Analytics UI discloses that those optional exclusion toggles cannot be reproduced with current provider data. SMS is disabled and cross-channel/linear attribution is not implemented. Do not describe this as complete Klaviyo analytics parity beyond the current email last-touch model.
 
 Audiences now has a **Pending flows** view. It lists profiles with `PENDING`, `SENDING`, or `UNKNOWN` flow messages, supports search and flow filtering, groups active work per profile, and shows the next message/due time plus active, paused, or needs-review state. Rows open the existing profile panel. The view is read-only and cannot advance or deliver a flow.
 
