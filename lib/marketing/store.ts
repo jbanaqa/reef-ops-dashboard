@@ -168,11 +168,23 @@ export function audienceWhere(
   now = new Date(),
 ): Prisma.MarketingProfileWhereInput {
   return {
-    shop: shop(),
-    ...(channel === "EMAIL"
-      ? { email: { not: null } }
-      : { phone: { not: null } }),
-    consents: { some: { channel, status: "SUBSCRIBED", suppressed: false } },
+    AND: [
+      {
+        shop: shop(),
+        ...(channel === "EMAIL"
+          ? { email: { not: null } }
+          : { phone: { not: null } }),
+        consents: { some: { channel, status: "SUBSCRIBED", suppressed: false } },
+      },
+      segmentWhere(audience, now),
+    ],
+  };
+}
+export function segmentWhere(
+  audience: Segment,
+  now = new Date(),
+): Prisma.MarketingProfileWhereInput {
+  return {
     ...(audience.openedDays
       ? {
           lastOpenedAt: {

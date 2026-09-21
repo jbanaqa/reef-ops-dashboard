@@ -68,6 +68,8 @@ const { chromium } = require("playwright");
           subject: "Test subject",
           content,
           audience: {},
+          smartSendingHours: 16,
+          recipientMode: "SEND_TIME",
           status: "DRAFT",
           _count: { messages: 0 },
         },
@@ -79,6 +81,20 @@ const { chromium } = require("playwright");
           kind: "TEMPLATE",
           name: "Saved template",
           data: content,
+        },
+        {
+          id: "mailable",
+          kind: "SEGMENT",
+          key: "mailable",
+          name: "Mailable Subscribers · opened in 365 days",
+          data: { openedDays: 365 },
+        },
+        {
+          id: "list",
+          kind: "SEGMENT",
+          key: "klaviyo-list-newsletter",
+          name: "Newsletter",
+          data: { list: "Newsletter" },
         },
       ],
       settings: {
@@ -107,6 +123,9 @@ const { chromium } = require("playwright");
     });
     await page.goto("http://127.0.0.1:" + server.address().port);
     await page.getByRole("button", { name: "Edit", exact: true }).click();
+    assert.equal(await page.getByText("Dynamic segments", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Lists", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Newsletter", { exact: true }).count(), 1);
     await page.getByRole("button", { name: "Continue to email" }).click();
     await page.getByRole("button", { name: "Edit email and preview" }).click();
     await page.getByRole("dialog").waitFor();
@@ -131,6 +150,13 @@ const { chromium } = require("playwright");
     assert.equal(writes.at(-1).action, "save-campaign");
     assert.equal(writes.at(-1).content.showPostalAddress, true);
     await page.getByLabel("Back to campaign").click();
+    await page.getByRole("button", { name: "3. Review & schedule" }).click();
+    assert.equal(await page.getByLabel("16-hour Smart Sending").isChecked(), true);
+    assert.equal(await page.getByRole("button", { name: "Send now" }).count(), 1);
+    assert.equal(
+      await page.getByText("Determine recipients at send time", { exact: true }).count(),
+      1,
+    );
     await page.goto(
       "http://127.0.0.1:" + server.address().port + "?tab=templates",
     );

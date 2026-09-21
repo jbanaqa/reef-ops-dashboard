@@ -4,6 +4,12 @@ import {
   syncAudienceBackfill,
 } from "@/lib/marketing/audience-backfill";
 import { cartReport } from "@/lib/marketing/cart-report";
+import { campaignReport } from "@/lib/marketing/campaign-report";
+import {
+  campaignAudience,
+  resolveCampaignAudience,
+  resolvedAudienceWhere,
+} from "@/lib/marketing/campaign-audience";
 import { cartProducts } from "@/lib/marketing/cart";
 import { cartReadiness } from "@/lib/marketing/cart";
 import { readStock, lowStock } from "@/lib/marketing/stock";
@@ -78,6 +84,70 @@ async function saveDiscoveredBranding(value: unknown) {
     },
     update: { data: json(updated), enabled: true },
   });
+}
+
+const campaignOptions = (body: Record<string, unknown>) => ({
+  smartSendingHours: body.smartSending === false ? 0 : 16,
+  recipientMode:
+    body.recipientMode === "SCHEDULE_TIME" ? "SCHEDULE_TIME" : "SEND_TIME",
+});
+
+async function checkedCampaignAudience(value: unknown) {
+  const parsed = campaignAudience(value);
+  const resolved = await atomic((tx) => resolveCampaignAudience(tx, parsed));
+  if (resolved.missingKeys.length)
+    throw new Error(
+      `Selected audience no longer exists: ${resolved.missingKeys.join(", ")}`,
+    );
+  return { parsed, resolved };
+}
+
+async function scheduleCampaign(id: string, scheduledAt: Date) {
+  const campaign = await prisma.marketingCampaign.findFirst({
+    where: { id, shop: shop(), status: "DRAFT" },
+  });
+  if (!campaign) throw new Error("Only drafts can be scheduled.");
+  const { resolved } = await checkedCampaignAudience(campaign.audience);
+  if (campaign.recipientMode === "SCHEDULE_TIME") {
+    const profiles = await prisma.marketingProfile.findMany({
+      where: resolvedAudienceWhere(resolved, campaign.channel),
+      select: { id: true },
+      orderBy: { id: "asc" },
+    });
+    await prisma.marketingMessage.deleteMany({
+      where: { campaignId: campaign.id },
+    });
+    for (let offset = 0; offset < profiles.length; offset += 1000)
+      await prisma.marketingMessage.createMany({
+        data: profiles.slice(offset, offset + 1000).map((profile) => ({
+          shop: shop(),
+          key: `campaign:${campaign.id}:${profile.id}`,
+          campaignId: campaign.id,
+          profileId: profile.id,
+          channel: campaign.channel,
+          subject: campaign.subject,
+          content: json(campaign.content),
+          dueAt: scheduledAt,
+        })),
+        skipDuplicates: true,
+      });
+    const result = await prisma.marketingCampaign.updateMany({
+      where: { id: campaign.id, shop: shop(), status: "DRAFT" },
+      data: {
+        status: "SCHEDULED",
+        scheduledAt,
+        expandedAt: new Date(),
+      },
+    });
+    if (!result.count) throw new Error("Campaign scheduling changed; reload it.");
+    return profiles.length;
+  }
+  const result = await prisma.marketingCampaign.updateMany({
+    where: { id: campaign.id, shop: shop(), status: "DRAFT" },
+    data: { status: "SCHEDULED", scheduledAt, expandedAt: null },
+  });
+  if (!result.count) throw new Error("Only drafts can be scheduled.");
+  return null;
 }
 
 const SHOPIFY_MARKETING_WEBHOOK_TOPICS = [
@@ -218,6 +288,11 @@ export async function GET(request: Request) {
       return Response.json(await cartReport(), {
         headers: { "Cache-Control": "no-store" },
       });
+    if (view === "campaign-report")
+      return Response.json(
+        await campaignReport(url.searchParams.get("id") || ""),
+        { headers: { "Cache-Control": "no-store" } },
+      );
     if (view === "cart-history")
       return Response.json(await historyStatus(), {
         headers: { "Cache-Control": "no-store" },
@@ -616,12 +691,14 @@ export async function POST(request: Request) {
       );
       return Response.json({ ...result, settings: s });
     }
-    if (b.action === "audience-count")
+    if (b.action === "audience-count") {
+      const { resolved } = await checkedCampaignAudience(b.audience);
       return Response.json({
         count: await prisma.marketingProfile.count({
-          where: audienceWhere(segment(b.audience)),
+          where: resolvedAudienceWhere(resolved),
         }),
       });
+    }
     if (b.action === "suppress") {
       const p = await prisma.marketingProfile.findFirst({
         where: { id: b.id, shop: shop() },
@@ -645,11 +722,13 @@ export async function POST(request: Request) {
     if (b.action === "save-campaign") {
       if (!String(b.name || "").trim() || !String(b.subject || "").trim())
         throw new Error("Campaign name and subject are required.");
+      const { parsed } = await checkedCampaignAudience(b.audience);
       const data = {
         name: String(b.name).slice(0, 200),
         subject: String(b.subject).slice(0, 200),
         content: json(content(b.content)),
-        audience: json(segment(b.audience)),
+        audience: json(parsed),
+        ...campaignOptions(b),
       };
       await saveDiscoveredBranding(data.content);
       if (b.id) {
@@ -669,14 +748,20 @@ export async function POST(request: Request) {
       const scheduledAt = date(b.at);
       if (scheduledAt < new Date())
         throw new Error("Choose a future send time.");
-      const result = await prisma.marketingCampaign.updateMany({
-        where: { id: b.id, shop: shop(), status: "DRAFT" },
-        data: { status: "SCHEDULED", scheduledAt },
-      });
-      if (!result.count) throw new Error("Only drafts can be scheduled.");
+      const recipients = await scheduleCampaign(String(b.id), scheduledAt);
       const s = await loadMarketingSettings();
       return Response.json({
         ok: true,
+        recipients,
+        sendingEnabled: setup(s.operations, s.postalAddress).sendingEnabled,
+      });
+    }
+    if (b.action === "send-now") {
+      const recipients = await scheduleCampaign(String(b.id), new Date());
+      const s = await loadMarketingSettings();
+      return Response.json({
+        ok: true,
+        recipients,
         sendingEnabled: setup(s.operations, s.postalAddress).sendingEnabled,
       });
     }

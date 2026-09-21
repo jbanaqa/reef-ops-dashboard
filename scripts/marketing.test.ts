@@ -46,6 +46,49 @@ import {
   deliveryUpsellDueAt,
   deliveryUpsellDraft,
 } from "../lib/marketing/delivery-upsell-config";
+import {
+  campaignAudience,
+  resolvedAudienceMatches,
+} from "../lib/marketing/campaign-audience";
+
+test("campaign audiences combine included lists and segments with exclusions", () => {
+  assert.deepEqual(
+    campaignAudience({
+      version: 2,
+      includeKeys: ["mailable", "mailable", "klaviyo-list-vip"],
+      excludeKeys: ["b2b", "mailable"],
+    }),
+    {
+      version: 2,
+      includeKeys: ["mailable", "klaviyo-list-vip"],
+      excludeKeys: ["b2b"],
+    },
+  );
+  const profile = {
+    tags: ["customer"],
+    lists: ["VIP"],
+    lastOpenedAt: null,
+    lastOrderAt: null,
+  };
+  assert.equal(
+    resolvedAudienceMatches(profile, {
+      config: { version: 2, includeKeys: ["vip"], excludeKeys: ["b2b"] },
+      includes: [{ list: "VIP" }],
+      excludes: [{ tag: "b2b" }],
+      missingKeys: [],
+    }),
+    true,
+  );
+  assert.equal(
+    resolvedAudienceMatches({ ...profile, tags: ["b2b"] }, {
+      config: { version: 2, includeKeys: ["vip"], excludeKeys: ["b2b"] },
+      includes: [{ list: "VIP" }],
+      excludes: [{ tag: "b2b" }],
+      missingKeys: [],
+    }),
+    false,
+  );
+});
 
 test("delivery upsell accepts Shopify month tags and schedules across DST", () => {
   assert.deepEqual(deliveryDateFromTags(["VIP", "September 18 2026"]), {

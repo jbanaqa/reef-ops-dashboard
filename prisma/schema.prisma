@@ -86,6 +86,8 @@ model MarketingCampaign {
   channel String @default("EMAIL")
   content Json
   audience Json
+  smartSendingHours Int @default(16)
+  recipientMode String @default("SEND_TIME")
   status String @default("DRAFT")
   scheduledAt DateTime?
   expandedAt DateTime?

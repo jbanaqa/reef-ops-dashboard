@@ -9,15 +9,13 @@ import {
   cartCoupon,
 } from "./cart";
 import { prisma } from "@/lib/prisma";
-import { audienceWhere, atomic, json, record, shop } from "./store";
+import { atomic, json, record, shop } from "./store";
 import {
   Content,
   content,
   DAY,
   eligible,
   marketingSettings,
-  matches,
-  Segment,
 } from "./rules";
 import { DeliveryError, resendProvider, setup, smsProvider } from "./delivery";
 import { lowStock, stockStateKey } from "./stock";
@@ -31,6 +29,11 @@ import type { WelcomeConfig } from "./welcome-config";
 import type { DeliveryUpsellConfig } from "./delivery-upsell-config";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
 import { canConfirmEmailResubscription } from "./confirmation";
+import {
+  resolveCampaignAudience,
+  resolvedAudienceMatches,
+  resolvedAudienceWhere,
+} from "./campaign-audience";
 import {
   loadWelcome,
   welcomeHasOrderedSince,
@@ -133,10 +136,18 @@ export async function runMarketing(onlyMessageId?: string) {
         where: { id: campaign.id },
       });
       if (current?.status !== "SCHEDULED") return;
+      if (current.expandedAt) {
+        await tx.marketingCampaign.update({
+          where: { id: current.id },
+          data: { status: "SENDING" },
+        });
+        return;
+      }
+      const resolved = await resolveCampaignAudience(tx, current.audience);
       const profiles = await tx.marketingProfile.findMany({
         where: {
           AND: [
-            audienceWhere(campaign.audience as Segment, campaign.channel),
+            resolvedAudienceWhere(resolved, current.channel),
             { messages: { none: { campaignId: campaign.id } } },
           ],
         },
@@ -337,12 +348,15 @@ export async function runMarketing(onlyMessageId?: string) {
         )
           reason = "Confirmation expired, consumed, or suppressed";
       }
-      if (
-        m.campaign &&
-        (!["SENDING", "SCHEDULED"].includes(m.campaign.status) ||
-          !matches(m.profile, m.campaign.audience as Segment))
-      )
-        reason = "Campaign cancelled or audience changed";
+      if (m.campaign) {
+        if (!["SENDING", "SCHEDULED"].includes(m.campaign.status))
+          reason = "Campaign cancelled";
+        else if (m.campaign.recipientMode === "SEND_TIME") {
+          const resolved = await resolveCampaignAudience(tx, m.campaign.audience);
+          if (!resolvedAudienceMatches(m.profile, resolved))
+            reason = "No longer in the campaign audience";
+        }
+      }
       if (m.flowKey && !verification) {
         const f = await tx.marketingResource.findUnique({
           where: {
@@ -633,7 +647,8 @@ export async function runMarketing(onlyMessageId?: string) {
         }
       }
       if (
-        (cartRun ||
+        (m.campaign ||
+          cartRun ||
           welcomeRun ||
           liveDeliveryConfig ||
           m.flowKey === "b2b-welcome") &&
@@ -675,12 +690,19 @@ export async function runMarketing(onlyMessageId?: string) {
           },
         });
         if (reservation) deferred = "Another message delivery is being checked";
+        const campaignSmartSending =
+          !m.campaign || m.campaign.smartSendingHours > 0;
         if (
           !reservation &&
+          campaignSmartSending &&
           !intentBypassesRecentEmailSuppression &&
           !testBypassesRecentEmailSuppression
         ) {
-          const windowHours = m.channel === "EMAIL" ? 16 : 24;
+          const windowHours = m.campaign
+            ? m.campaign.smartSendingHours
+            : m.channel === "EMAIL"
+              ? 16
+              : 24;
           const recent = await tx.marketingMessage.findFirst({
             where: {
               shop: shop(),
@@ -712,7 +734,7 @@ export async function runMarketing(onlyMessageId?: string) {
                     shop: shop(),
                     type: "EXTERNAL_EMAIL_SENT",
                     occurredAt: {
-                      gte: new Date(Date.now() - 16 * 3600000),
+                      gte: new Date(Date.now() - windowHours * 3600000),
                       lte: new Date(),
                     },
                     OR: [
@@ -729,6 +751,16 @@ export async function runMarketing(onlyMessageId?: string) {
                 })
               : null;
           if (recent?.sentAt || externalEmail?.occurredAt) {
+            if (m.campaign) {
+              await tx.marketingMessage.update({
+                where: { id: m.id },
+                data: {
+                  status: "CANCELLED",
+                  error: `Smart Sending: received another email within ${windowHours} hours`,
+                },
+              });
+              return null;
+            }
             const latest = Math.max(
               recent?.sentAt?.getTime() || 0,
               externalEmail?.occurredAt.getTime() || 0,

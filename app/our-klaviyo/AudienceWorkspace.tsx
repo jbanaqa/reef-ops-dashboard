@@ -1178,7 +1178,7 @@ export default function AudienceWorkspace({
             aria-current={view === "groups" ? "page" : undefined}
             onClick={() => setView("groups")}
           >
-            Saved audiences
+            Lists & segments
           </button>
         </nav>
         <button
@@ -1187,7 +1187,7 @@ export default function AudienceWorkspace({
             setEditor({ key: crypto.randomUUID(), name: "", data: {} })
           }
         >
-          + Create audience
+          + Create segment
         </button>
       </div>
       {notice && (
@@ -1406,11 +1406,11 @@ export default function AudienceWorkspace({
         <section className="aw-groups">
           <div className="aw-directory-heading">
             <div>
-              <p className="aw-eyebrow">GROUPS THAT STAY UP TO DATE</p>
-              <h2>Saved audiences</h2>
+              <p className="aw-eyebrow">REUSABLE CAMPAIGN AUDIENCES</p>
+              <h2>Lists & segments</h2>
               <p>
-                Reusable groups for targeted email campaigns. Membership updates
-                automatically as customer details change.
+                Lists contain explicit Klaviyo memberships. Segments recalculate
+                automatically from rules as customer details and activity change.
               </p>
             </div>
           </div>
@@ -1418,6 +1418,7 @@ export default function AudienceWorkspace({
             {data?.groups.map((g) => (
               <article className="aw-group-card" key={g.key}>
                 <span className="aw-group-icon">◎</span>
+                <small>{g.key.startsWith("klaviyo-list-") ? "LIST" : "DYNAMIC SEGMENT"}</small>
                 <h3>{g.name}</h3>
                 <ul>
                   {audienceRules(g.data).map((r) => (
@@ -1435,12 +1436,14 @@ export default function AudienceWorkspace({
                   >
                     View contacts
                   </button>
-                  <button
-                    aria-label={"Edit " + g.name}
-                    onClick={() => setEditor(g)}
-                  >
-                    Edit rules
-                  </button>
+                  {!g.key.startsWith("klaviyo-list-") && (
+                    <button
+                      aria-label={"Edit " + g.name}
+                      onClick={() => setEditor(g)}
+                    >
+                      Edit rules
+                    </button>
+                  )}
                 </div>
               </article>
             ))}
@@ -1463,9 +1466,8 @@ export default function AudienceWorkspace({
             </div>
           )}
           <p className="aw-hint">
-            These groups include email subscribers only. Use Contacts to find
-            anyone, including unsubscribed customers. Creating or editing a
-            group does not change anyone’s subscription.
+            Campaign delivery always applies current email consent and suppression.
+            Creating a segment or importing a list does not change anyone’s subscription.
           </p>
         </section>
       )}

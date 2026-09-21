@@ -41,7 +41,7 @@ before(async () => {
   console.log("integration: applying migrations");
   const migrations = (await readdir("prisma/migrations"))
     .filter((x) =>
-      /baseline|add_product_inventory_state|add_our_klaviyo|marketing_flow_branch|marketing_webhook_inbox/.test(
+      /baseline|add_product_inventory_state|add_our_klaviyo|marketing_flow_branch|marketing_webhook_inbox|campaign_delivery_options/.test(
         x,
       ),
     )
@@ -3115,5 +3115,162 @@ test("send this test step now advances only the selected email and keeps deliver
       data: { data: store.json(settings.data) },
     });
   }
+});
+
+test("campaign segments, snapshot recipients, Smart Sending, and results stay consistent", async () => {
+  process.env.DASHBOARD_USERNAME = "staff";
+  process.env.DASHBOARD_PASSWORD = "test-password";
+  const api = await import("../app/api/marketing/route");
+  const request = (body: object) =>
+    new Request("https://app.example/api/marketing", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization:
+          "Basic " + Buffer.from("staff:test-password").toString("base64"),
+      },
+      body: JSON.stringify(body),
+    });
+  await prisma.marketingMessage.updateMany({
+    where: { shop, status: "PENDING" },
+    data: { status: "CANCELLED" },
+  });
+  const included = await prisma.marketingProfile.create({
+    data: {
+      shop,
+      email: "campaign-included@example.com",
+      name: "Included",
+      tags: ["campaign-sale"],
+      lists: ["Mailable Subscribers"],
+      consents: {
+        create: {
+          channel: "EMAIL",
+          status: "SUBSCRIBED",
+          suppressed: false,
+          source: "test",
+          occurredAt: new Date(),
+        },
+      },
+    },
+  });
+  await prisma.marketingProfile.create({
+    data: {
+      shop,
+      email: "campaign-excluded@example.com",
+      name: "Excluded",
+      tags: ["campaign-sale"],
+      lists: ["Campaign Exclusions"],
+      consents: {
+        create: {
+          channel: "EMAIL",
+          status: "SUBSCRIBED",
+          suppressed: false,
+          source: "test",
+          occurredAt: new Date(),
+        },
+      },
+    },
+  });
+  await prisma.marketingResource.createMany({
+    data: [
+      {
+        shop,
+        kind: "SEGMENT",
+        key: "campaign-sale-segment",
+        name: "Campaign sale segment",
+        data: { tag: "campaign-sale" },
+      },
+      {
+        shop,
+        kind: "SEGMENT",
+        key: "klaviyo-list-campaign-exclusions",
+        name: "Campaign Exclusions",
+        data: { list: "Campaign Exclusions" },
+      },
+    ],
+  });
+  const audience = {
+    version: 2,
+    includeKeys: ["campaign-sale-segment"],
+    excludeKeys: ["klaviyo-list-campaign-exclusions"],
+  };
+  const countResponse = await api.POST(
+    request({ action: "audience-count", audience }),
+  );
+  assert.equal(countResponse.status, 200);
+  assert.equal((await countResponse.json()).count, 1);
+  const saved = await api.POST(
+    request({
+      action: "save-campaign",
+      name: "Snapshot campaign test",
+      subject: "Campaign test",
+      content: defaultContent,
+      audience,
+      smartSending: true,
+      recipientMode: "SCHEDULE_TIME",
+    }),
+  );
+  assert.equal(saved.status, 200);
+  const campaignId = (await saved.json()).id as string;
+  const scheduled = await api.POST(
+    request({
+      action: "schedule",
+      id: campaignId,
+      at: new Date(Date.now() + 3600000).toISOString(),
+    }),
+  );
+  assert.equal(scheduled.status, 200);
+  assert.equal((await scheduled.json()).recipients, 1);
+  assert.equal(
+    await prisma.marketingMessage.count({ where: { campaignId } }),
+    1,
+  );
+  await prisma.marketingProfile.update({
+    where: { id: included.id },
+    data: { tags: [] },
+  });
+  const campaignMessage = await prisma.marketingMessage.findFirstOrThrow({
+    where: { campaignId },
+  });
+  await prisma.marketingCampaign.update({
+    where: { id: campaignId },
+    data: { status: "SENDING" },
+  });
+  await prisma.marketingMessage.update({
+    where: { id: campaignMessage.id },
+    data: { dueAt: new Date(Date.now() - 1000) },
+  });
+  await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: "campaign-smart-prior",
+      profileId: included.id,
+      channel: "EMAIL",
+      subject: "Prior email",
+      content: store.json(defaultContent),
+      status: "SENT",
+      dueAt: new Date(Date.now() - 3600000),
+      sentAt: new Date(Date.now() - 3600000),
+    },
+  });
+  await worker.runMarketing();
+  const skipped = await prisma.marketingMessage.findUniqueOrThrow({
+    where: { id: campaignMessage.id },
+  });
+  assert.equal(skipped.status, "CANCELLED");
+  assert.match(skipped.error || "", /Smart Sending/);
+  const report = await api.GET(
+    new Request(
+      `https://app.example/api/marketing?view=campaign-report&id=${campaignId}`,
+      {
+        headers: {
+          authorization:
+            "Basic " + Buffer.from("staff:test-password").toString("base64"),
+        },
+      },
+    ),
+  );
+  assert.equal(report.status, 200);
+  assert.equal((await report.json()).totals.skipped, 1);
 });
 registerWelcomeTests(() => ({ prisma, store, worker }));

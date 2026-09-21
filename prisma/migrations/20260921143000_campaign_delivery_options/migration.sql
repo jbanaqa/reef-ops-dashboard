@@ -1,0 +1,3 @@
+ALTER TABLE "MarketingCampaign"
+ADD COLUMN "smartSendingHours" INTEGER NOT NULL DEFAULT 16,
+ADD COLUMN "recipientMode" TEXT NOT NULL DEFAULT 'SEND_TIME';

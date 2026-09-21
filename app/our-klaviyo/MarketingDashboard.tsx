@@ -48,7 +48,40 @@ type Campaign = {
   createdAt?: string;
   content: Content;
   audience: Record<string, unknown>;
+  smartSendingHours: number;
+  recipientMode: string;
   _count: { messages: number };
+};
+type CampaignAudience = {
+  version: 2;
+  includeKeys: string[];
+  excludeKeys: string[];
+};
+type CampaignForm = {
+  id?: string;
+  name: string;
+  subject: string;
+  content: Content;
+  audience: CampaignAudience;
+  smartSending: boolean;
+  recipientMode: "SEND_TIME" | "SCHEDULE_TIME";
+};
+type CampaignReport = {
+  campaign: { id: string; name: string; status: string; scheduledAt: string | null };
+  totals: {
+    messages: number;
+    queued: number;
+    sent: number;
+    delivered: number;
+    opened: number;
+    clicked: number;
+    ordered: number;
+    skipped: number;
+    failed: number;
+    needsAttention: number;
+    revenue: Record<string, number>;
+  };
+  reasons: { reason: string; count: number }[];
 };
 type Data = {
   health?: {
@@ -118,27 +151,53 @@ const newCampaign = () => ({
   name: "",
   subject: "",
   content: defaultContent,
-  audience: { openedDays: 365 },
+  audience: { version: 2 as const, includeKeys: ["mailable"], excludeKeys: [] },
+  smartSending: true,
+  recipientMode: "SEND_TIME" as const,
 });
+const sameRules = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const campaignForm = (item: Campaign, resources: Resource[]): CampaignForm => {
+  const saved = item.audience as Partial<CampaignAudience>;
+  const audience =
+    saved.version === 2
+      ? {
+          version: 2 as const,
+          includeKeys: Array.isArray(saved.includeKeys) ? saved.includeKeys : [],
+          excludeKeys: Array.isArray(saved.excludeKeys) ? saved.excludeKeys : [],
+        }
+      : {
+          version: 2 as const,
+          includeKeys: resources
+            .filter((resource) => resource.kind === "SEGMENT" && sameRules(resource.data, item.audience))
+            .map((resource) => resource.key)
+            .slice(0, 1),
+          excludeKeys: [],
+        };
+  return {
+    id: item.id,
+    name: item.name,
+    subject: item.subject,
+    content: item.content,
+    audience,
+    smartSending: item.smartSendingHours > 0,
+    recipientMode:
+      item.recipientMode === "SCHEDULE_TIME" ? "SCHEDULE_TIME" : "SEND_TIME",
+  };
+};
 export default function MarketingDashboard({ tab }: { tab: string }) {
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
 
-  const [campaign, setCampaign] = useState<{
-    id?: string;
-    name: string;
-    subject: string;
-    content: Content;
-    audience: Record<string, unknown>;
-  }>(newCampaign());
+  const [campaign, setCampaign] = useState<CampaignForm>(newCampaign());
   const [at, setAt] = useState(""),
     [editingEmail, setEditingEmail] = useState(false),
     [audienceCount, setAudienceCount] = useState<number | null>(null);
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [campaignStep, setCampaignStep] = useState(0);
   const [campaignSearch, setCampaignSearch] = useState("");
+  const [campaignReport, setCampaignReport] = useState<CampaignReport | null>(null);
   const [dismissalDraft, setDismissalDraft] = useState<boolean | null>(null);
   const [popupDelayDraft, setPopupDelayDraft] = useState<string | null>(null);
   const [resource, setResource] = useState<Resource | null>(null);
@@ -149,6 +208,36 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
       ]
     : [];
   const reusableTemplates = templates.filter((template) => !template.sourceFlow);
+  const campaignAudiences = (data?.resources || []).filter(
+    (item) => item.kind === "SEGMENT",
+  );
+  const campaignLists = campaignAudiences.filter((item) =>
+    item.key.startsWith("klaviyo-list-"),
+  );
+  const campaignSegments = campaignAudiences.filter(
+    (item) => !item.key.startsWith("klaviyo-list-"),
+  );
+  const toggleAudience = (
+    field: "includeKeys" | "excludeKeys",
+    key: string,
+  ) => {
+    setCampaign((current) => {
+      const selected = current.audience[field];
+      const next = selected.includes(key)
+        ? selected.filter((item) => item !== key)
+        : [...selected, key];
+      const other = field === "includeKeys" ? "excludeKeys" : "includeKeys";
+      return {
+        ...current,
+        audience: {
+          ...current.audience,
+          [field]: next,
+          [other]: current.audience[other].filter((item) => item !== key),
+        },
+      };
+    });
+    setAudienceCount(null);
+  };
   const load = useCallback(async () => {
     const r = await fetch("/api/marketing", { cache: "no-store" });
     const d = await r.json();
@@ -483,31 +572,77 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                         }
                       />
                     </label>
-                    <label>
-                      Audience
-                      <select
-                        value={JSON.stringify(campaign.audience)}
-                        onChange={(e) => {
-                          setCampaign({
-                            ...campaign,
-                            audience: JSON.parse(e.target.value),
-                          });
-                          setAudienceCount(null);
-                        }}
-                      >
-                        <option value={JSON.stringify({ openedDays: 365 })}>
-                          Mailable Subscribers · opened in 365 days
-                        </option>
-                        <option value="{}">All eligible email subscribers</option>
-                        {data.resources
-                          .filter((r) => r.kind === "SEGMENT")
-                          .map((r) => (
-                            <option key={r.id} value={JSON.stringify(r.data)}>
-                              {r.name}
-                            </option>
+                    <div className="mk-audience-builder">
+                      <div className="mk-audience-builder-heading">
+                        <div>
+                          <strong>Send to</strong>
+                          <span>Recipients who belong to any selected group are included.</span>
+                        </div>
+                        <span className="mk-status">
+                          {campaign.audience.includeKeys.length || "All"} selected
+                        </span>
+                      </div>
+                      {!campaign.audience.includeKeys.length && (
+                        <p className="mk-audience-warning">
+                          All eligible email subscribers are selected. Choose a segment for a more focused campaign.
+                        </p>
+                      )}
+                      <div className="mk-audience-kind">
+                        <div>
+                          <strong>Dynamic segments</strong>
+                          <span>Rule-based groups that update as customer activity changes.</span>
+                        </div>
+                        <div className="mk-audience-options">
+                          {campaignSegments.map((item) => (
+                            <label key={item.id}>
+                              <input
+                                type="checkbox"
+                                checked={campaign.audience.includeKeys.includes(item.key)}
+                                onChange={() => toggleAudience("includeKeys", item.key)}
+                              />
+                              <span>{item.name}</span>
+                            </label>
                           ))}
-                      </select>
-                    </label>
+                        </div>
+                      </div>
+                      <div className="mk-audience-kind">
+                        <div>
+                          <strong>Lists</strong>
+                          <span>Explicit profile memberships imported from Klaviyo.</span>
+                        </div>
+                        <div className="mk-audience-options">
+                          {campaignLists.map((item) => (
+                            <label key={item.id}>
+                              <input
+                                type="checkbox"
+                                checked={campaign.audience.includeKeys.includes(item.key)}
+                                onChange={() => toggleAudience("includeKeys", item.key)}
+                              />
+                              <span>{item.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <details className="mk-audience-exclusions">
+                        <summary>Don’t send to ({campaign.audience.excludeKeys.length})</summary>
+                        <p>Anyone in any selected exclusion group is removed from this send.</p>
+                        <div className="mk-audience-options">
+                          {campaignAudiences.map((item) => (
+                            <label key={item.id}>
+                              <input
+                                type="checkbox"
+                                checked={campaign.audience.excludeKeys.includes(item.key)}
+                                onChange={() => toggleAudience("excludeKeys", item.key)}
+                              />
+                              <span>
+                                {item.name}
+                                <small>{item.key.startsWith("klaviyo-list-") ? "List" : "Segment"}</small>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
                     <div className="mk-campaign-audience-check">
                       <button
                         disabled={busy}
@@ -626,6 +761,46 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                         <p>Scheduling never bypasses your sending and audience safeguards.</p>
                       </div>
                     </div>
+                    <div className="mk-delivery-options">
+                      <fieldset>
+                        <legend>Recipient timing</legend>
+                        <label>
+                          <input
+                            type="radio"
+                            name="recipientMode"
+                            checked={campaign.recipientMode === "SEND_TIME"}
+                            onChange={() => setCampaign({ ...campaign, recipientMode: "SEND_TIME" })}
+                          />
+                          <span>
+                            <strong>Determine recipients at send time</strong>
+                            <small>The segment is recalculated when delivery begins. Best for dynamic campaign segments.</small>
+                          </span>
+                        </label>
+                        <label>
+                          <input
+                            type="radio"
+                            name="recipientMode"
+                            checked={campaign.recipientMode === "SCHEDULE_TIME"}
+                            onChange={() => setCampaign({ ...campaign, recipientMode: "SCHEDULE_TIME" })}
+                          />
+                          <span>
+                            <strong>Freeze recipients when scheduled</strong>
+                            <small>Keeps the current audience snapshot even if segment membership changes later.</small>
+                          </span>
+                        </label>
+                      </fieldset>
+                      <label className="mk-smart-sending">
+                        <input
+                          type="checkbox"
+                          checked={campaign.smartSending}
+                          onChange={(event) => setCampaign({ ...campaign, smartSending: event.target.checked })}
+                        />
+                        <span>
+                          <strong>16-hour Smart Sending</strong>
+                          <small>Skip recipients who received another marketing email in the previous 16 hours.</small>
+                        </span>
+                      </label>
+                    </div>
                     <label>
                       Send time (your device’s local timezone)
                       <input
@@ -634,25 +809,43 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                         onChange={(e) => setAt(e.target.value)}
                       />
                     </label>
-                    <button
-                      disabled={busy || !at}
-                      onClick={() =>
-                        run(async () => {
-                          const id = await save();
-                          await action({
-                            action: "schedule",
-                            id,
-                            at: new Date(at).toISOString(),
-                          });
-                          setCampaign(newCampaign());
-                          setAt("");
-                          setAudienceCount(null);
-                          setCampaignOpen(false);
-                        }, "Campaign scheduled. Sending requires completed setup and an active worker.")
-                      }
-                    >
-                      Save and schedule
-                    </button>
+                    <div className="mk-schedule-actions">
+                      <button
+                        disabled={busy || !at}
+                        onClick={() =>
+                          run(async () => {
+                            const id = await save();
+                            await action({
+                              action: "schedule",
+                              id,
+                              at: new Date(at).toISOString(),
+                            });
+                            setCampaign(newCampaign());
+                            setAt("");
+                            setAudienceCount(null);
+                            setCampaignOpen(false);
+                          }, "Campaign scheduled. Sending requires completed setup and an active worker.")
+                        }
+                      >
+                        Save and schedule
+                      </button>
+                      <button
+                        className="mk-campaign-primary"
+                        disabled={busy}
+                        onClick={() =>
+                          run(async () => {
+                            const id = await save();
+                            await action({ action: "send-now", id });
+                            setCampaign(newCampaign());
+                            setAt("");
+                            setAudienceCount(null);
+                            setCampaignOpen(false);
+                          }, "Campaign queued to send now. Delivery begins on the next worker run.")
+                        }
+                      >
+                        Send now
+                      </button>
+                    </div>
                   </section>
                   <div className="mk-campaign-navigation">
                     <button disabled={campaignStep === 0} onClick={() => setCampaignStep((step) => step - 1)}>Back</button>
@@ -667,6 +860,42 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                     </div>
                     <span className="mk-status">{data.campaigns.length}</span>
                   </div>
+                  {campaignReport && (
+                    <section className="mk-campaign-report" aria-label={`${campaignReport.campaign.name} results`}>
+                      <div className="mk-campaign-report-heading">
+                        <div>
+                          <p className="mk-eyebrow">CAMPAIGN RESULTS</p>
+                          <h3>{campaignReport.campaign.name}</h3>
+                        </div>
+                        <button onClick={() => setCampaignReport(null)}>Close</button>
+                      </div>
+                      <div className="mk-campaign-report-grid">
+                        {[
+                          ["Sent", campaignReport.totals.sent],
+                          ["Delivered", campaignReport.totals.delivered],
+                          ["Opened", campaignReport.totals.opened],
+                          ["Clicked", campaignReport.totals.clicked],
+                          ["Ordered", campaignReport.totals.ordered],
+                          ["Skipped", campaignReport.totals.skipped],
+                          ["Failed", campaignReport.totals.failed],
+                          ["Needs review", campaignReport.totals.needsAttention],
+                        ].map(([label, value]) => (
+                          <div key={String(label)}><span>{label}</span><strong>{Number(value).toLocaleString()}</strong></div>
+                        ))}
+                      </div>
+                      {!!Object.keys(campaignReport.totals.revenue).length && (
+                        <p className="mk-campaign-revenue">
+                          Attributed revenue: {Object.entries(campaignReport.totals.revenue).map(([currency, amount]) => `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`).join(" · ")}
+                        </p>
+                      )}
+                      {!!campaignReport.reasons.length && (
+                        <details>
+                          <summary>Why messages were skipped or need attention</summary>
+                          <ul>{campaignReport.reasons.map((item) => <li key={item.reason}><span>{item.reason}</span><b>{item.count}</b></li>)}</ul>
+                        </details>
+                      )}
+                    </section>
+                  )}
                   {!!data.campaigns.length && <label>Search campaigns<input type="search" placeholder="Search by campaign name or subject" value={campaignSearch} onChange={(event) => setCampaignSearch(event.target.value)} /></label>}
                   {!data.campaigns.length ? (
                     <div className="mk-campaign-empty">
@@ -709,7 +938,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                               {item.status === "DRAFT" && (
                                 <button
                                   onClick={() => {
-                                    setCampaign(item);
+                                    setCampaign(campaignForm(item, data.resources));
                                     setCampaignOpen(true);
                                     setCampaignStep(0);
                                     setAt("");
@@ -727,7 +956,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                     name: `${item.name} copy`,
                                     subject: item.subject,
                                     content: item.content,
-                                    audience: item.audience,
+                                    audience: campaignForm(item, data.resources).audience,
+                                    smartSending: item.smartSendingHours > 0,
+                                    recipientMode: item.recipientMode === "SCHEDULE_TIME" ? "SCHEDULE_TIME" : "SEND_TIME",
                                   });
                                   setAt("");
                                   setAudienceCount(null);
@@ -735,6 +966,21 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                               >
                                 Duplicate
                               </button>
+                              {item._count.messages > 0 && (
+                                <button
+                                  disabled={busy}
+                                  onClick={() =>
+                                    run(async () => {
+                                      const response = await fetch(`/api/marketing?view=campaign-report&id=${encodeURIComponent(item.id)}`, { cache: "no-store" });
+                                      const report = await response.json();
+                                      if (!response.ok) throw new Error(report.error);
+                                      setCampaignReport(report);
+                                    }, "Campaign results loaded")
+                                  }
+                                >
+                                  View results
+                                </button>
+                              )}
                               {["DRAFT", "SCHEDULED", "SENDING"].includes(item.status) && (
                                 <button
                                   disabled={busy}
