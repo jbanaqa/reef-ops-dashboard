@@ -1046,6 +1046,100 @@
   flex-wrap: wrap;
   margin-top: 14px;
 }
+
+/* Profile sections and message states remain distinguishable by labels as well as color. */
+.aw-drawer-body {
+  background: #f0f4f7;
+}
+.aw-drawer .aw-tabs {
+  background: #f0f4f7;
+}
+.marketing .aw-drawer .aw-tabs button[aria-current] {
+  background: #dceeea;
+  color: #17594e;
+  border-bottom-color: #287d6c;
+}
+.aw-drawer-body .aw-detail-section,
+.aw-drawer-body .aw-detail-section + .aw-detail-section {
+  background: #fff;
+  border: 1px solid #d2dde5;
+  border-radius: 12px;
+  padding: 18px;
+  margin: 20px 0;
+}
+.aw-drawer-body .aw-detail-section > h3 {
+  color: #243d55;
+  background: #eaf0f7;
+  border-left: 4px solid #637d9b;
+  margin: -18px -18px 18px;
+  padding: 15px 18px;
+  border-radius: 11px 11px 0 0;
+}
+.aw-drawer-body .aw-section-heading {
+  margin: -18px -18px 18px;
+  padding: 16px 18px;
+  background: #def0e9;
+  border-left: 4px solid #287d6c;
+  border-radius: 11px 11px 0 0;
+}
+.aw-drawer-body .aw-section-heading h3 { color: #17594e; }
+.aw-drawer-body .aw-message-history .aw-section-heading {
+  background: #e1edfb;
+  border-left-color: #3976b8;
+}
+.aw-drawer-body .aw-message-history .aw-section-heading h3 { color: #245787; }
+.aw-drawer .aw-flow-card { border-color: #bcd9ce; }
+.aw-drawer .aw-next-step {
+  padding: 12px;
+  background: #edf7f2;
+  border-radius: 0 6px 6px 0;
+  border-left-color: #287d6c;
+}
+.aw-drawer .aw-badge.current { color: #17594e; background: #def0e9; border-color: #b4d8ca; }
+.aw-drawer .aw-badge.good { color: #21613f; background: #e0f2e5; border-color: #afd3bc; }
+.aw-drawer .aw-badge.warning { color: #874319; background: #fff0dc; border-color: #e8bf86; }
+.aw-drawer .aw-history-group { background: #eef1f5; }
+.aw-drawer .aw-test-tools, .aw-drawer .aw-status-help { background: #f5f6f8; }
+.aw-drawer .aw-message-list { border: 0; background: transparent; display: grid; gap: 12px; }
+.aw-drawer .aw-message-row {
+  border: 1px solid #d5dde5;
+  border-left: 4px solid #8a97a5;
+  border-radius: 8px;
+  background: #f5f6f8;
+}
+.aw-drawer .aw-message-row[data-status="PENDING"],
+.aw-drawer .aw-message-row[data-status="PROCESSING"],
+.aw-drawer .aw-message-row[data-status="SENDING"] {
+  background: #f0f6ff;
+  border-color: #c6d9ef;
+  border-left-color: #3976b8;
+}
+.aw-drawer .aw-message-row[data-status="PENDING"] .aw-badge,
+.aw-drawer .aw-message-row[data-status="PROCESSING"] .aw-badge,
+.aw-drawer .aw-message-row[data-status="SENDING"] .aw-badge {
+  background: #dceafd; border-color: #b1ccea; color: #245787;
+}
+.aw-drawer .aw-message-row[data-status="SENT"] {
+  background: #f0f8f2; border-color: #c3ddcb; border-left-color: #38835b;
+}
+.aw-drawer .aw-message-row[data-status="FAILED"],
+.aw-drawer .aw-message-row[data-status="UNKNOWN"] {
+  background: #fff6e9; border-color: #ebcea5; border-left-color: #ad6826;
+}
+.marketing .aw-drawer .aw-message-summary button[aria-pressed="true"] {
+  background: #285e93; border-color: #285e93; color: #fff;
+}
+.marketing .aw-drawer .aw-message-summary button[aria-pressed="true"] span { color: #fff; }
+.aw-drawer .aw-profile-snapshot { background: #e1edfb; border: 1px solid #c3d7ed; }
+.aw-drawer .aw-profile-snapshot strong { color: #245787; }
+@media (max-width: 420px) {
+  .aw-drawer-body { padding: 16px; }
+  .aw-drawer .aw-tabs { top: -16px; }
+  .aw-drawer-body .aw-detail-section,
+  .aw-drawer-body .aw-detail-section + .aw-detail-section { padding: 14px; }
+  .aw-drawer-body .aw-section-heading,
+  .aw-drawer-body .aw-detail-section > h3 { margin: -14px -14px 14px; padding: 14px; }
+}
 .aw-test-send p {
   flex-basis: 100%;
   margin: 8px 0 0;

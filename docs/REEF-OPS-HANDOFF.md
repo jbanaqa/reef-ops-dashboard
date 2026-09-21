@@ -2,6 +2,8 @@
 
 ### Profile drawer readability — September 21, 2026
 
+Follow-up after user visual feedback: the profile drawer now uses a gray canvas, white section panels, teal active-flow headers, blue message-history headers and scheduled rows, green sent rows, amber failed/uncertain rows, and neutral cancelled rows. Status text remains visible so color is supplemental. Selected filters use a solid blue background. Overview sections have tinted header bands. Desktop and 320px screenshots reviewed; browser suite, TypeScript and targeted lint passed. Presentation only.
+
 Overview now summarizes active flows, upcoming messages, and messages needing review, with a direct link to Messages. Full flow history no longer crowds out consent, lists/tags, and profile dates. Messages keeps the next step visible on active runs, collapses run details and previous runs, uses compact status filters, and places existing test-send/cancel controls behind each message's **Message actions** disclosure. Historical run reasons remain available when expanded. Typography, secondary text contrast, and narrow-screen stacking were refined using NN/g progressive-disclosure and scanning guidance. No delivery, consent, or enrollment behavior changed. TypeScript, targeted ESLint, and the isolated Audiences browser suite pass, including disclosure behavior, existing test actions, focus restoration, and 320/390px layouts. No live messages were sent.
 
 **Snapshot date: September 10, 2026 (America/Los_Angeles).**  

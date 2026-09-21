@@ -821,7 +821,7 @@ function ContactPanel({
               ) : (
                 <div className="aw-message-list">
                   {visibleMessages.map((m) => (
-                  <article className="aw-message-row" key={m.id}>
+                  <article className="aw-message-row" data-status={m.status} key={m.id}>
                     <div className="aw-split">
                       <div className="aw-message-copy">
                         <span className="aw-eyebrow">
