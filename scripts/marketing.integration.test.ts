@@ -15,7 +15,8 @@ let store: typeof import("../lib/marketing/store"),
   ingest: typeof import("../lib/marketing/ingest"),
   inbox: typeof import("../lib/marketing/inbox"),
   worker: typeof import("../lib/marketing/worker"),
-  audienceBackfill: typeof import("../lib/marketing/audience-backfill");
+  audienceBackfill: typeof import("../lib/marketing/audience-backfill"),
+  engagementBackfill: typeof import("../lib/marketing/engagement-backfill");
 const shop = "audit.myshopify.com",
   at = new Date(),
   sent: Record<string, unknown>[] = [];
@@ -92,6 +93,7 @@ before(async () => {
   inbox = await import("../lib/marketing/inbox");
   worker = await import("../lib/marketing/worker");
   audienceBackfill = await import("../lib/marketing/audience-backfill");
+  engagementBackfill = await import("../lib/marketing/engagement-backfill");
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     if (url.startsWith("https://a.klaviyo.com/api/")) {
@@ -367,6 +369,70 @@ test("Klaviyo audience backfill imports consent, lists, suppressions, and Shopif
   assert.equal(blocked.consents[0]?.suppressed, true);
   assert.equal(blocked.messages.length, 0);
   assert.equal(klaviyoPages.length, 0);
+});
+
+test("Klaviyo open-history backfill restores the 365-day segment input", async () => {
+  const profile = await prisma.marketingProfile.findUniqueOrThrow({
+    where: {
+      shop_email: { shop, email: "klaviyo-subscriber@example.com" },
+    },
+  });
+  assert.equal(profile.lastOpenedAt, null);
+  const openedAt = new Date(Date.now() - 7 * 86400000).toISOString();
+  klaviyoPages = [
+    {
+      data: [
+        {
+          type: "metric",
+          id: "opened-email-metric",
+          attributes: { name: "Opened Email" },
+        },
+      ],
+      links: { next: null },
+    },
+    {
+      data: [
+        {
+          type: "event",
+          id: "opened-event",
+          attributes: { datetime: openedAt },
+          relationships: {
+            profile: { data: { type: "profile", id: "klaviyo-subscriber" } },
+          },
+        },
+      ],
+      included: [
+        {
+          type: "profile",
+          id: "klaviyo-subscriber",
+          attributes: { email: "klaviyo-subscriber@example.com" },
+        },
+      ],
+      links: { next: null },
+    },
+  ];
+  assert.equal(
+    (await engagementBackfill.syncEngagementBackfill()).phase,
+    "events",
+  );
+  const complete = await engagementBackfill.syncEngagementBackfill();
+  assert.equal(complete.phase, "complete");
+  assert.equal(complete.events, 1);
+  assert.equal(complete.profiles, 1);
+  assert.equal(
+    (
+      await prisma.marketingProfile.findUniqueOrThrow({
+        where: { id: profile.id },
+      })
+    ).lastOpenedAt?.toISOString(),
+    openedAt,
+  );
+  assert.equal(
+    await prisma.marketingProfile.count({
+      where: store.audienceWhere({ openedDays: 365 }),
+    }),
+    1,
+  );
 });
 
 test("Shopify delivery-date order tag schedules one upsell notice", async () => {

@@ -310,7 +310,7 @@ export async function seed() {
   for (const [key, name, data] of [
     [
       "mailable",
-      "Mailable Subscribers · opened in 365 days",
+      "2025 Mailable Subscribers",
       { openedDays: 365 },
     ],
     ["b2b", "B2B Customers", { tag: "b2b" }],
@@ -318,7 +318,7 @@ export async function seed() {
     await prisma.marketingResource.upsert({
       where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key } },
       create: { shop: shop(), kind: "SEGMENT", key, name, data: json(data) },
-      update: {},
+      update: key === "mailable" ? { name } : {},
     });
   await prisma.marketingResource.upsert({
     where: {

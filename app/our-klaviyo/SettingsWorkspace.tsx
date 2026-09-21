@@ -34,6 +34,16 @@ type AudienceBackfill = {
   error?: string;
   issues: { profile: string; phase: string; error: string }[];
 };
+type EngagementBackfill = {
+  configured: boolean;
+  phase: string;
+  since?: string;
+  events: number;
+  profiles: number;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+};
 export type SettingsData = {
   settings: MarketingSettings;
   setup: Record<string, unknown>;
@@ -155,7 +165,10 @@ export default function SettingsWorkspace({
   const [imported, setImported] = useState(false);
   const [audienceBackfill, setAudienceBackfill] =
     useState<AudienceBackfill | null>(null);
+  const [engagementBackfill, setEngagementBackfill] =
+    useState<EngagementBackfill | null>(null);
   const stopBackfill = useRef(false);
+  const stopEngagementBackfill = useRef(false);
   const feedback = useRef<HTMLDivElement>(null);
   const reviewRef = useRef<HTMLDivElement>(null);
   const businessDirty = !same(business, {
@@ -179,12 +192,23 @@ export default function SettingsWorkspace({
   }, [review]);
   useEffect(() => {
     let active = true;
-    fetch("/api/marketing?view=audience-backfill")
-      .then(async (response) => {
-        const result = await response.json();
-        if (!response.ok)
-          throw new Error(result.error || "Could not load the Klaviyo backfill.");
-        if (active) setAudienceBackfill(result);
+    Promise.all([
+      fetch("/api/marketing?view=audience-backfill"),
+      fetch("/api/marketing?view=engagement-backfill"),
+    ])
+      .then(async ([audienceResponse, engagementResponse]) => {
+        const [audienceResult, engagementResult] = await Promise.all([
+          audienceResponse.json(),
+          engagementResponse.json(),
+        ]);
+        if (!audienceResponse.ok)
+          throw new Error(audienceResult.error || "Could not load the Klaviyo backfill.");
+        if (!engagementResponse.ok)
+          throw new Error(engagementResult.error || "Could not load Klaviyo open history.");
+        if (active) {
+          setAudienceBackfill(audienceResult);
+          setEngagementBackfill(engagementResult);
+        }
       })
       .catch((reason) => {
         if (active)
@@ -197,6 +221,7 @@ export default function SettingsWorkspace({
     return () => {
       active = false;
       stopBackfill.current = true;
+      stopEngagementBackfill.current = true;
     };
   }, []);
   const setup = data.setup;
@@ -303,6 +328,39 @@ export default function SettingsWorkspace({
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Audience backfill paused.",
+      );
+    } finally {
+      setBusy("");
+      feedback.current?.focus();
+    }
+  }
+  async function runEngagementBackfill() {
+    setBusy("engagement-backfill");
+    setError("");
+    setNotice("");
+    stopEngagementBackfill.current = false;
+    try {
+      let result: EngagementBackfill;
+      do {
+        result = await action<EngagementBackfill>({
+          action: "sync-klaviyo-opens",
+        });
+        setEngagementBackfill(result);
+        if (result.error) throw new Error(result.error);
+        if (result.phase === "complete") break;
+        await new Promise((resolve) => window.setTimeout(resolve, 125));
+      } while (!stopEngagementBackfill.current);
+      setNotice(
+        result!.phase === "complete"
+          ? `Klaviyo open history finished: ${result!.events.toLocaleString()} events updated ${result!.profiles.toLocaleString()} profile records.`
+          : "Klaviyo open-history backfill paused. You can continue from this point.",
+      );
+      if (result!.phase === "complete") await refresh();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Klaviyo open-history backfill paused.",
       );
     } finally {
       setBusy("");
@@ -1059,6 +1117,72 @@ export default function SettingsWorkspace({
                   </>
                 )}
               </div>
+            </section>
+            <section className="sw-card">
+              <div className="sw-card-heading">
+                <div>
+                  <p className="sw-eyebrow">ENGAGEMENT HISTORY</p>
+                  <h3>Import Klaviyo email opens</h3>
+                </div>
+                <Tag active={engagementBackfill?.phase === "complete"}>
+                  {engagementBackfill?.phase === "complete"
+                    ? "Complete"
+                    : engagementBackfill?.phase === "events"
+                      ? "In progress"
+                      : "Not imported"}
+                </Tag>
+              </div>
+              <p>
+                Imports the latest Opened Email event from the previous 365 days
+                for each profile. This makes the 2025 Mailable Subscribers segment
+                match its Klaviyo engagement rule.
+              </p>
+              {engagementBackfill && (
+                <>
+                  <dl className="sw-stats">
+                    <div>
+                      <dt>Open events processed</dt>
+                      <dd>{engagementBackfill.events.toLocaleString()}</dd>
+                    </div>
+                    <div>
+                      <dt>Profile updates applied</dt>
+                      <dd>{engagementBackfill.profiles.toLocaleString()}</dd>
+                    </div>
+                    <div>
+                      <dt>History begins</dt>
+                      <dd>{date(engagementBackfill.since)}</dd>
+                    </div>
+                  </dl>
+                  {engagementBackfill.completedAt && (
+                    <p>Last completed {date(engagementBackfill.completedAt)}.</p>
+                  )}
+                  <div className="sw-import-actions">
+                    <button
+                      className="sw-primary"
+                      disabled={!!busy || !engagementBackfill.configured}
+                      onClick={() => void runEngagementBackfill()}
+                    >
+                      {busy === "engagement-backfill"
+                        ? "Importing opens…"
+                        : engagementBackfill.phase === "complete"
+                          ? "Refresh open history"
+                          : engagementBackfill.phase === "not-started"
+                            ? "Import open history"
+                            : "Continue open history"}
+                    </button>
+                    {busy === "engagement-backfill" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          stopEngagementBackfill.current = true;
+                        }}
+                      >
+                        Pause after this batch
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </section>
             <section className="sw-card">
               <details>

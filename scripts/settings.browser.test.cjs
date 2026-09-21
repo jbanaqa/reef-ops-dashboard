@@ -122,6 +122,29 @@ const { chromium } = require("playwright");
         }
         throw Error("Unexpected settings action: " + body.action);
       }
+      if (req.url().includes("view=engagement-backfill"))
+        return route.fulfill({
+          json: {
+            configured: true,
+            phase: "not-started",
+            events: 0,
+            profiles: 0,
+          },
+        });
+      if (req.url().includes("view=audience-backfill"))
+        return route.fulfill({
+          json: {
+            configured: true,
+            phase: "complete",
+            profiles: 100,
+            memberships: 50,
+            suppressed: 10,
+            ignored: 0,
+            errors: 0,
+            lists: [],
+            issues: [],
+          },
+        });
       return route.fulfill({
         json: {
           settings,

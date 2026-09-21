@@ -6,6 +6,10 @@ import {
 import { cartReport } from "@/lib/marketing/cart-report";
 import { campaignReport } from "@/lib/marketing/campaign-report";
 import {
+  engagementBackfillStatus,
+  syncEngagementBackfill,
+} from "@/lib/marketing/engagement-backfill";
+import {
   campaignAudience,
   resolveCampaignAudience,
   resolvedAudienceWhere,
@@ -299,6 +303,10 @@ export async function GET(request: Request) {
       });
     if (view === "audience-backfill")
       return Response.json(await audienceBackfillStatus(), {
+        headers: { "Cache-Control": "no-store" },
+      });
+    if (view === "engagement-backfill")
+      return Response.json(await engagementBackfillStatus(), {
         headers: { "Cache-Control": "no-store" },
       });
     if (view === "tracking-pixel") {
@@ -786,6 +794,8 @@ export async function POST(request: Request) {
       return Response.json(await syncHistory());
     if (b.action === "sync-klaviyo-audience")
       return Response.json(await syncAudienceBackfill());
+    if (b.action === "sync-klaviyo-opens")
+      return Response.json(await syncEngagementBackfill());
     if (b.action === "preview-cart-products") {
       const address = email(b.email);
       const p = await prisma.marketingProfile.findUnique({

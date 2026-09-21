@@ -67,7 +67,7 @@ const { chromium } = require("playwright");
           name: "Test campaign",
           subject: "Test subject",
           content,
-          audience: {},
+          audience: { openedDays: 365 },
           smartSendingHours: 16,
           recipientMode: "SEND_TIME",
           status: "DRAFT",
@@ -86,7 +86,7 @@ const { chromium } = require("playwright");
           id: "mailable",
           kind: "SEGMENT",
           key: "mailable",
-          name: "Mailable Subscribers · opened in 365 days",
+          name: "2025 Mailable Subscribers",
           data: { openedDays: 365 },
         },
         {
@@ -124,6 +124,16 @@ const { chromium } = require("playwright");
     await page.goto("http://127.0.0.1:" + server.address().port);
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     assert.equal(await page.getByText("Dynamic segments", { exact: true }).count(), 1);
+    assert.equal(
+      await page
+        .getByRole("checkbox", {
+          name: "2025 Mailable Subscribers",
+          exact: true,
+        })
+        .first()
+        .isChecked(),
+      true,
+    );
     assert.equal(await page.getByText("Lists", { exact: true }).count(), 1);
     assert.equal(await page.getByText("Newsletter", { exact: true }).count(), 1);
     await page.getByRole("button", { name: "Continue to email" }).click();

@@ -76,8 +76,15 @@ test("settings presents the resumable Klaviyo audience backfill", async () => {
   const testing = await import("@testing-library/react");
   cleanup = testing.cleanup;
   const original = globalThis.fetch;
-  globalThis.fetch = async () =>
-    Response.json({
+  globalThis.fetch = async (input) => {
+    if (String(input).includes("view=engagement-backfill"))
+      return Response.json({
+        configured: true,
+        phase: "not-started",
+        events: 0,
+        profiles: 0,
+      });
+    return Response.json({
       configured: true,
       phase: "memberships",
       profiles: 120,
@@ -95,6 +102,7 @@ test("settings presents the resumable Klaviyo audience backfill", async () => {
         },
       ],
     });
+  };
   try {
     const view = testing.render(
       <SettingsWorkspace
