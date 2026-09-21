@@ -18,3 +18,14 @@ export function isDashboardRequestAuthorized(request: Request) {
     return equal(decoded.slice(0, separator), expectedUser) && equal(decoded.slice(separator + 1), expectedPassword);
   } catch { return false; }
 }
+
+export function isDashboardMutationAuthorized(request: Request) {
+  if (!isDashboardRequestAuthorized(request)) return false;
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}

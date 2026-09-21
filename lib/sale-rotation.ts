@@ -3,9 +3,15 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { macroalgaeGraphql } from "@/lib/macroalgae-shopify";
 import { assertSpeciesLibraryShop } from "@/lib/species-library";
+import {
+  buildSaleSelection,
+  SALE_ROTATION_DISCOUNTS,
+  shuffleValues,
+  type SaleRotationDiscount,
+} from "@/lib/sale-rotation-plan";
 
-export const SALE_DISCOUNTS = [5, 10, 15, 20] as const;
-export type SaleDiscount = (typeof SALE_DISCOUNTS)[number];
+export const SALE_DISCOUNTS = SALE_ROTATION_DISCOUNTS;
+export type SaleDiscount = SaleRotationDiscount;
 const SALE_TAG = "sale-rotator";
 
 type Gql<T> = { data?: T; errors?: Array<{ message: string }> };
@@ -26,6 +32,7 @@ function money(value: number) {
 
 function standardPrice(price: string, compareAtPrice: string | null) {
   const current = Number(price);
+  if (!Number.isFinite(current)) throw new Error(`Invalid Shopify price: ${price}.`);
   const compare = compareAtPrice ? Number(compareAtPrice) : 0;
   return money(Number.isFinite(compare) && compare > current ? compare : current);
 }
@@ -36,7 +43,9 @@ function salePrice(price: number, discount: number | null) {
 
 function normalizeGid(value: string, type: "Collection" | "Product" | "ProductVariant") {
   const trimmed = value.trim();
-  if (trimmed.startsWith("gid://shopify/")) return trimmed;
+  const prefix = `gid://shopify/${type}/`;
+  if (trimmed.startsWith(prefix) && /^\d+$/.test(trimmed.slice(prefix.length))) return trimmed;
+  if (trimmed.startsWith("gid://shopify/")) throw new Error(`Invalid Shopify ${type} ID.`);
   if (!/^\d+$/.test(trimmed)) throw new Error(`Invalid Shopify ${type} ID.`);
   return `gid://shopify/${type}/${trimmed}`;
 }
@@ -81,6 +90,14 @@ export async function updateSaleSettings(input: {
     : String(input.saleCollectionId || "").trim()
       ? normalizeGid(String(input.saleCollectionId), "Collection")
       : null;
+  const rotationIntervalHours = numberField(input.rotationIntervalHours, current.rotationIntervalHours, 1, 720);
+  const discountCount5 = numberField(input.discountCount5, current.discountCount5, 0, 500);
+  const discountCount10 = numberField(input.discountCount10, current.discountCount10, 0, 500);
+  const discountCount15 = numberField(input.discountCount15, current.discountCount15, 0, 500);
+  const discountCount20 = numberField(input.discountCount20, current.discountCount20, 0, 500);
+  if (discountCount5 + discountCount10 + discountCount15 + discountCount20 !== 60) {
+    throw new Error("Discount category counts must add up to exactly 60 products.");
+  }
 
   return prisma.saleRotationSettings.update({
     where: { id: current.id },
@@ -88,11 +105,11 @@ export async function updateSaleSettings(input: {
       saleCollectionId,
       enabled: typeof input.enabled === "boolean" ? input.enabled : current.enabled,
       dryRun: typeof input.dryRun === "boolean" ? input.dryRun : current.dryRun,
-      rotationIntervalHours: numberField(input.rotationIntervalHours, current.rotationIntervalHours, 1, 720),
-      discountCount5: numberField(input.discountCount5, current.discountCount5, 0, 500),
-      discountCount10: numberField(input.discountCount10, current.discountCount10, 0, 500),
-      discountCount15: numberField(input.discountCount15, current.discountCount15, 0, 500),
-      discountCount20: numberField(input.discountCount20, current.discountCount20, 0, 500),
+      rotationIntervalHours,
+      discountCount5,
+      discountCount10,
+      discountCount15,
+      discountCount20,
     },
   });
 }
@@ -127,6 +144,7 @@ export async function searchSaleCatalog(search = "") {
 
 export async function importSaleProducts(items: unknown) {
   if (!Array.isArray(items) || items.length === 0) throw new Error("Select at least one Shopify product.");
+  if (items.length > 50) throw new Error("A maximum of 50 Shopify products can be imported at once.");
   const requested = items.map((item) => {
     const value = item as Record<string, unknown>;
     const discount = Number(value.discountPercent);
@@ -219,35 +237,37 @@ export async function listSaleProducts() {
     (!product.tracksInventory || (product.totalInventory ?? 0) > 0) &&
     product.variants.nodes.length > 0,
   );
-  await prisma.saleRotationProduct.updateMany({ where: { shop }, data: { active: false } });
-  for (const product of inStock) {
-    const variant = product.variants.nodes[0];
-    await prisma.saleRotationProduct.upsert({
-      where: { shop_shopifyProductId: { shop, shopifyProductId: product.id } },
-      update: {
-        shopifyVariantId: variant.id,
-        title: product.title,
-        variantTitle: variant.title,
-        handle: product.handle,
-        imageUrl: product.featuredImage?.url ?? null,
-        regularPrice: standardPrice(variant.price, variant.compareAtPrice),
-        eligibleForRotation: true,
-        active: true,
-      },
-      create: {
-        shop,
-        shopifyProductId: product.id,
-        shopifyVariantId: variant.id,
-        title: product.title,
-        variantTitle: variant.title,
-        handle: product.handle,
-        imageUrl: product.featuredImage?.url ?? null,
-        regularPrice: standardPrice(variant.price, variant.compareAtPrice),
-        eligibleForRotation: true,
-        active: true,
-      },
-    });
-  }
+  await prisma.$transaction(async (database) => {
+    await database.saleRotationProduct.updateMany({ where: { shop }, data: { active: false } });
+    for (const product of inStock) {
+      const variant = product.variants.nodes[0];
+      await database.saleRotationProduct.upsert({
+        where: { shop_shopifyProductId: { shop, shopifyProductId: product.id } },
+        update: {
+          shopifyVariantId: variant.id,
+          title: product.title,
+          variantTitle: variant.title,
+          handle: product.handle,
+          imageUrl: product.featuredImage?.url ?? null,
+          regularPrice: standardPrice(variant.price, variant.compareAtPrice),
+          eligibleForRotation: true,
+          active: true,
+        },
+        create: {
+          shop,
+          shopifyProductId: product.id,
+          shopifyVariantId: variant.id,
+          title: product.title,
+          variantTitle: variant.title,
+          handle: product.handle,
+          imageUrl: product.featuredImage?.url ?? null,
+          regularPrice: standardPrice(variant.price, variant.compareAtPrice),
+          eligibleForRotation: true,
+          active: true,
+        },
+      });
+    }
+  });
   return prisma.saleRotationProduct.findMany({ where: { shop }, orderBy: [{ active: "desc" }, { title: "asc" }] });
 }
 
@@ -255,17 +275,21 @@ export async function updateSaleProduct(id: string, input: Record<string, unknow
   const shop = assertSpeciesLibraryShop();
   const existing = await prisma.saleRotationProduct.findFirst({ where: { id, shop } });
   if (!existing) throw new Error("Sale product not found.");
-  const discount = input.discountPercent === undefined ? existing.discountPercent : Number(input.discountPercent);
-  if (discount !== null && !SALE_DISCOUNTS.includes(discount as SaleDiscount)) throw new Error("Discount must be 5, 10, 15, or 20 percent.");
-  const twentyPercentCandidate = typeof input.twentyPercentCandidate === "boolean" ? input.twentyPercentCandidate : existing.twentyPercentCandidate;
+  const requestedDiscount = input.discountPercent === undefined ? undefined : Number(input.discountPercent);
+  if (requestedDiscount !== undefined && !SALE_DISCOUNTS.includes(requestedDiscount as SaleDiscount)) throw new Error("Discount must be 5, 10, 15, or 20 percent.");
+  const twentyPercentCandidate = typeof input.twentyPercentCandidate === "boolean"
+    ? input.twentyPercentCandidate
+    : requestedDiscount !== undefined
+      ? requestedDiscount === 20
+      : existing.twentyPercentCandidate;
   const fixedInSale = twentyPercentCandidate
     ? (typeof input.fixedInSale === "boolean" ? input.fixedInSale : existing.fixedInSale)
     : false;
   return prisma.saleRotationProduct.update({
     where: { id },
     data: {
-      discountPercent: discount,
-      eligibleForRotation: typeof input.eligibleForRotation === "boolean" ? input.eligibleForRotation : existing.eligibleForRotation,
+      discountPercent: twentyPercentCandidate ? 20 : null,
+      eligibleForRotation: existing.active,
       twentyPercentCandidate,
       fixedInSale: twentyPercentCandidate ? fixedInSale : false,
       active: typeof input.active === "boolean" ? input.active : existing.active,
@@ -291,75 +315,38 @@ export async function getSaleCollectionSnapshot(): Promise<CollectionSnapshot> {
     `, { id: settings.saleCollectionId, after });
     const collection = gqlData(response, "Shopify did not return the Sale collection.").collection;
     if (!collection) throw new Error("The configured Shopify Sale collection was not found.");
-    const rules = collection.ruleSet?.rules ?? [];
+    const ruleSet = collection.ruleSet;
+    const rules = ruleSet?.rules ?? [];
     const compareAtRule = rules.some((rule) => rule.column === "VARIANT_COMPARE_AT_PRICE" && rule.relation === "GREATER_THAN" && Number(rule.condition) === 0);
     const tagRule = rules.some((rule) => (rule.column === "TAG" || rule.column === "PRODUCT_TAG") && rule.relation === "EQUALS" && rule.condition.trim().toLowerCase() === SALE_TAG);
-    const compatible = !collection.ruleSet ||
-      (rules.length === 1 && compareAtRule) ||
-      (rules.length === 2 && compareAtRule && tagRule && !collection.ruleSet.appliedDisjunctively);
-    snapshot = { id: collection.id, title: collection.title, handle: collection.handle, automated: Boolean(collection.ruleSet), compatible };
+    const compatible = (rules.length === 1 && compareAtRule) ||
+      (ruleSet !== null && rules.length === 2 && compareAtRule && tagRule && !ruleSet.appliedDisjunctively);
+    snapshot = { id: collection.id, title: collection.title, handle: collection.handle, automated: Boolean(ruleSet), compatible };
     productIds.push(...collection.products.nodes.map((product) => product.id));
     after = collection.products.pageInfo.hasNextPage ? collection.products.pageInfo.endCursor : null;
   } while (after);
   return { ...snapshot!, productIds };
 }
 
-function shuffled<T>(values: T[]) {
-  const result = [...values];
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const other = Math.floor(Math.random() * (index + 1));
-    [result[index], result[other]] = [result[other], result[index]];
-  }
-  return result;
-}
-
-async function historyAwareSelection<T extends { id: string }>(products: T[], count: number) {
+async function getProductLastSaleHistory(productIds: string[]) {
   const history = await prisma.saleRotationItem.groupBy({
     by: ["productId"],
     where: {
-      productId: { in: products.map((product) => product.id) },
+      productId: { in: productIds },
       action: { in: ["ADD", "KEEP"] },
       run: { status: "Completed" },
     },
     _max: { createdAt: true },
   });
-  const lastSale = new Map(history.map((item) => [item.productId, item._max.createdAt?.getTime() ?? 0]));
-  return products
-    .map((product) => ({ product, lastSale: lastSale.get(product.id) ?? -1, tieBreaker: Math.random() }))
-    .sort((left, right) => left.lastSale - right.lastSale || left.tieBreaker - right.tieBreaker)
-    .slice(0, count)
-    .map((entry) => entry.product);
+  return new Map(history.map((item) => [item.productId, item._max.createdAt?.getTime() ?? 0]));
 }
 
 export async function buildSaleRotationPreview() {
   const [settings, products, collection] = await Promise.all([getSaleSettings(), listSaleProducts(), getSaleCollectionSnapshot()]);
   const current = new Set(collection.productIds);
-  const active = products.filter((product) => product.active);
-  const selected = new Map<string, SaleDiscount>();
-  const fixed = active.filter((p) => p.twentyPercentCandidate && p.fixedInSale);
-  if (fixed.length > settings.discountCount20) {
-    throw new Error(`There are ${fixed.length} fixed 20% products, but settings provide only ${settings.discountCount20} 20% slots.`);
-  }
-  fixed.forEach((product) => selected.set(product.id, 20));
-  const rotatingTwentyCount = settings.discountCount20 - fixed.length;
-  const rotatingTwentyPool = active.filter((p) => p.twentyPercentCandidate && !p.fixedInSale);
-  if (rotatingTwentyPool.length < rotatingTwentyCount) {
-    throw new Error(`The sale requires ${rotatingTwentyCount} rotating 20% products, but only ${rotatingTwentyPool.length} are available.`);
-  }
-  const rotatingTwenty = await historyAwareSelection(rotatingTwentyPool, rotatingTwentyCount);
-  rotatingTwenty.forEach((product) => selected.set(product.id, 20));
-
-  const standardPool = active.filter((product) => !product.twentyPercentCandidate);
-  const standardCount = settings.discountCount5 + settings.discountCount10 + settings.discountCount15;
-  if (standardPool.length < standardCount) {
-    throw new Error(`The sale requires ${standardCount} standard products, but only ${standardPool.length} are available.`);
-  }
-  const randomizedStandard = shuffled(await historyAwareSelection(standardPool, standardCount));
-  let offset = 0;
-  for (const [discount, count] of [[5, settings.discountCount5], [10, settings.discountCount10], [15, settings.discountCount15]] as const) {
-    randomizedStandard.slice(offset, offset + count).forEach((product) => selected.set(product.id, discount));
-    offset += count;
-  }
+  const lastSale = await getProductLastSaleHistory(products.map((product) => product.id));
+  const plan = buildSaleSelection(products, settings, lastSale);
+  const selected = plan.selected;
 
   const actions = products.map((product) => {
     const isCurrent = current.has(product.shopifyProductId);
@@ -376,7 +363,12 @@ export async function buildSaleRotationPreview() {
     settings,
     collection: { ...collection, productCount: collection.productIds.length },
     selectedCount: selected.size,
+    nextSaleProductIds: [
+      ...plan.nextSale,
+    ].map((product) => product.shopifyProductId),
+    twentyPercentProductIds: plan.twentyPercentProducts.map((product) => product.shopifyProductId),
     actions,
+    warnings: [] as string[],
     shortages: SALE_DISCOUNTS.map((discount) => ({
       discount,
       requested: settings[`discountCount${discount}` as const],
@@ -419,11 +411,10 @@ async function assertSaleWriteReadiness(collection: CollectionSnapshot) {
 
 async function applyMembership(collection: CollectionSnapshot, add: string[], remove: string[], selected = add) {
   if (!collection.compatible) {
-    throw new Error(`Shopify collection "${collection.title}" is not compatible with Sale Rotation. Use a manual collection, or an automated collection with compare-at price greater than 0 and an optional ${SALE_TAG} tag rule.`);
+    throw new Error(`Shopify collection "${collection.title}" is not compatible with Sale Rotation. Use an automated collection with compare-at price greater than 0, optionally plus product tag equals ${SALE_TAG} with all conditions required.`);
   }
   if (collection.automated) {
-    for (const productId of selected) await productMutation(`mutation($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { message } } }`, { id: productId, tags: [SALE_TAG] }, "Could not tag a sale product.");
-    for (const productId of remove) await productMutation(`mutation($id: ID!, $tags: [String!]!) { tagsRemove(id: $id, tags: $tags) { userErrors { message } } }`, { id: productId, tags: [SALE_TAG] }, "Could not remove a sale product tag.");
+    await updateSaleTags({ add: selected, remove });
     return;
   }
   if (add.length) await productMutation(`mutation($id: ID!, $products: [ID!]!) { collectionAddProducts(id: $id, productIds: $products) { userErrors { message } } }`, { id: collection.id, products: add }, "Could not add products to the Sale collection.");
@@ -462,7 +453,6 @@ async function getExplicitSelectionSnapshot(collection: CollectionSnapshot): Pro
     const types = new Set(source.inclusion.conditions.map((condition) => condition.__typename));
     return types.has("CollectionSourceInclusionConditionVariantCompareAtPrice") && types.has("CollectionSourceInclusionConditionProductTag");
   });
-  if (!matching.length) return null;
   if (matching.length !== 1) throw new Error(`Expected one Sale Rotator condition source, but found ${matching.length}.`);
   const source = matching[0];
   if (!source.inclusion) return null;
@@ -519,11 +509,11 @@ async function shuffleSaleCollection(collection: CollectionSnapshot, pinnedProdu
   const shuffleable = uniqueIds.filter((id) => !pinnedSet.has(id));
   const firstRowSize = Math.min(6, Math.floor(shuffleable.length / 2));
   const previousFirstRow = shuffleable.slice(0, firstRowSize);
-  const lowerProducts = shuffled(shuffleable.slice(firstRowSize));
+  const lowerProducts = shuffleValues(shuffleable.slice(firstRowSize));
   const order = [
     ...pinned,
     ...lowerProducts.slice(0, firstRowSize),
-    ...shuffled([...lowerProducts.slice(firstRowSize), ...previousFirstRow]),
+    ...shuffleValues([...lowerProducts.slice(firstRowSize), ...previousFirstRow]),
   ];
   const response = await macroalgaeGraphql<Gql<{ collectionReorderProducts: { job: { id: string; done: boolean } | null; userErrors: Array<{ message: string }> } }>>(`
     mutation ReorderSaleCollection($id: ID!, $moves: [MoveInput!]!) {
@@ -537,17 +527,99 @@ async function shuffleSaleCollection(collection: CollectionSnapshot, pinnedProdu
 }
 
 type PriceSnapshot = { productId: string; variantId: string; price: string; compareAtPrice: string | null; hadSaleTag: boolean };
+type VariantUpdate = { productId: string; variants: Array<{ id: string; price: string; compareAtPrice: string | null }> };
+
+async function getAllProductVariants(productId: string) {
+  const variants: Array<{ id: string; price: string; compareAtPrice: string | null }> = [];
+  let after: string | null = null;
+  do {
+    const response: Gql<{ product: null | { variants: { nodes: Array<{ id: string; price: string; compareAtPrice: string | null }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } }> = await macroalgaeGraphql(`
+      query AllSaleVariants($id: ID!, $after: String) {
+        product(id: $id) { variants(first: 250, after: $after) { nodes { id price compareAtPrice } pageInfo { hasNextPage endCursor } } }
+      }
+    `, { id: productId, after });
+    const product = gqlData(response, `Shopify product ${productId} could not be loaded.`).product;
+    if (!product) throw new Error(`Shopify product ${productId} was not found while preparing variant pricing.`);
+    variants.push(...product.variants.nodes);
+    after = product.variants.pageInfo.hasNextPage ? product.variants.pageInfo.endCursor : null;
+    if (product.variants.pageInfo.hasNextPage && !after) throw new Error(`Shopify product ${productId} reported more variants without a cursor.`);
+  } while (after);
+  if (!variants.length) throw new Error(`Shopify product ${productId} has no variants to price.`);
+  variants.forEach((variant) => standardPrice(variant.price, variant.compareAtPrice));
+  return variants;
+}
+
+async function capturePrices(actions: Awaited<ReturnType<typeof buildSaleRotationPreview>>["actions"]): Promise<PriceSnapshot[]> {
+  const productIds = [...new Set(actions.map((item) => item.product.shopifyProductId))];
+  const snapshots: PriceSnapshot[] = [];
+  for (let offset = 0; offset < productIds.length; offset += 9) {
+    const batch = productIds.slice(offset, offset + 9);
+    const declarations = batch.map((_, index) => `$id${index}: ID!`);
+    const fields = batch.map((_, index) => `p${index}: product(id: $id${index}) { id tags variants(first: 100) { nodes { id price compareAtPrice } pageInfo { hasNextPage } } }`);
+    const variables = Object.fromEntries(batch.map((id, index) => [`id${index}`, id]));
+    const response = await macroalgaeGraphql<Gql<Record<string, null | { id: string; tags: string[]; variants: { nodes: Array<{ id: string; price: string; compareAtPrice: string | null }>; pageInfo: { hasNextPage: boolean } } }>>>(
+      `query CaptureSalePrices(${declarations.join(", ")}) { ${fields.join("\n")} }`,
+      variables,
+    );
+    const data = gqlData(response, "Shopify could not capture current prices before rotation.");
+    for (let index = 0; index < batch.length; index += 1) {
+      const productId = batch[index];
+      const product = data[`p${index}`];
+      if (!product) throw new Error(`Shopify product ${productId} was not found while preparing variant pricing.`);
+      const variants = product.variants.pageInfo.hasNextPage ? await getAllProductVariants(productId) : product.variants.nodes;
+      if (!variants.length) throw new Error(`Shopify product ${productId} has no variants to price.`);
+      const hadSaleTag = product.tags.some((tag) => tag.toLowerCase() === SALE_TAG);
+      for (const variant of variants) {
+        standardPrice(variant.price, variant.compareAtPrice);
+        snapshots.push({ productId, variantId: variant.id, price: variant.price, compareAtPrice: variant.compareAtPrice, hadSaleTag });
+      }
+    }
+  }
+  return snapshots;
+}
+
+async function updateVariantPrices(updates: VariantUpdate[]) {
+  const operations = updates.flatMap((update) => {
+    const chunks: VariantUpdate[] = [];
+    for (let offset = 0; offset < update.variants.length; offset += 100) {
+      chunks.push({ productId: update.productId, variants: update.variants.slice(offset, offset + 100) });
+    }
+    return chunks;
+  });
+  for (let offset = 0; offset < operations.length; offset += 12) {
+    const batch = operations.slice(offset, offset + 12);
+    const declarations: string[] = [];
+    const fields: string[] = [];
+    const variables: Record<string, unknown> = {};
+    batch.forEach((update, index) => {
+      declarations.push(`$productId${index}: ID!`, `$variants${index}: [ProductVariantsBulkInput!]!`);
+      fields.push(`u${index}: productVariantsBulkUpdate(productId: $productId${index}, variants: $variants${index}, allowPartialUpdates: false) { userErrors { message } }`);
+      variables[`productId${index}`] = update.productId;
+      variables[`variants${index}`] = update.variants.map((variant) => ({
+        id: variant.id,
+        price: Number(variant.price).toFixed(2),
+        compareAtPrice: variant.compareAtPrice === null ? null : Number(variant.compareAtPrice).toFixed(2),
+      }));
+    });
+    const response = await macroalgaeGraphql<Gql<Record<string, { userErrors: Array<{ message: string }> }>>>(
+      `mutation BatchedSalePrices(${declarations.join(", ")}) { ${fields.join("\n")} }`,
+      variables,
+    );
+    const data = gqlData(response, "Shopify did not return variant update results.");
+    batch.forEach((update, index) => {
+      const result = data[`u${index}`];
+      if (!result) throw new Error(`Shopify returned no pricing result for ${update.productId}.`);
+      if (result.userErrors.length) throw new Error(`Shopify variant update failed for ${update.productId}: ${result.userErrors.map((error) => error.message).join("; ")}`);
+    });
+  }
+}
 
 async function writePrices(actions: Awaited<ReturnType<typeof buildSaleRotationPreview>>["actions"], snapshots: PriceSnapshot[]) {
-  for (const item of actions) {
+  const updates: VariantUpdate[] = actions.map((item) => {
     const onSale = item.assignedDiscountPercent !== null;
     const variants = snapshots.filter((snapshot) => snapshot.productId === item.product.shopifyProductId);
     if (!variants.length) throw new Error(`Shopify returned no variants for ${item.product.title}.`);
-    await productMutation(`
-      mutation UpdateSaleVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-        productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { message } }
-      }
-    `, {
+    return {
       productId: item.product.shopifyProductId,
       variants: variants.map((variant) => {
         const regularPrice = standardPrice(variant.price, variant.compareAtPrice);
@@ -557,46 +629,54 @@ async function writePrices(actions: Awaited<ReturnType<typeof buildSaleRotationP
           compareAtPrice: onSale ? String(regularPrice) : null,
         };
       }),
-    }, `Could not update ${item.product.title}.`);
-  }
-}
-
-async function capturePrices(actions: Awaited<ReturnType<typeof buildSaleRotationPreview>>["actions"]): Promise<PriceSnapshot[]> {
-  const response = await macroalgaeGraphql<Gql<{ nodes: Array<null | { id: string; tags: string[]; variants: { nodes: Array<{ id: string; price: string; compareAtPrice: string | null }> } }> }>>(`
-    query CaptureSalePrices($ids: [ID!]!) {
-      nodes(ids: $ids) {
-        ... on Product { id tags variants(first: 250) { nodes { id price compareAtPrice } } }
-      }
-    }
-  `, { ids: actions.map((item) => item.product.shopifyProductId) });
-  return gqlData(response, "Shopify could not capture current prices before rotation.").nodes
-    .filter((node): node is NonNullable<typeof node> => Boolean(node))
-    .flatMap((node) => node.variants.nodes.map((variant) => ({
-      productId: node.id,
-      variantId: variant.id,
-      price: variant.price,
-      compareAtPrice: variant.compareAtPrice,
-      hadSaleTag: node.tags.some((tag) => tag.toLowerCase() === SALE_TAG),
-    })));
+    };
+  });
+  await updateVariantPrices(updates);
 }
 
 async function restorePrices(snapshots: PriceSnapshot[]) {
+  const byProduct = new Map<string, VariantUpdate>();
   for (const snapshot of snapshots) {
-    await productMutation(`
-      mutation RestoreSaleVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-        productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { message } }
-      }
-    `, { productId: snapshot.productId, variants: [{ id: snapshot.variantId, price: snapshot.price, compareAtPrice: snapshot.compareAtPrice }] }, "Could not restore a Shopify price after a failed rotation.");
+    const update = byProduct.get(snapshot.productId) ?? { productId: snapshot.productId, variants: [] };
+    update.variants.push({ id: snapshot.variantId, price: snapshot.price, compareAtPrice: snapshot.compareAtPrice });
+    byProduct.set(snapshot.productId, update);
+  }
+  await updateVariantPrices([...byProduct.values()]);
+}
+
+async function updateSaleTags(input: { add: string[]; remove: string[] }) {
+  const add = [...new Set(input.add)];
+  const addSet = new Set(add);
+  const operations = [
+    ...add.map((productId) => ({ productId, action: "add" as const })),
+    ...[...new Set(input.remove)].filter((productId) => !addSet.has(productId)).map((productId) => ({ productId, action: "remove" as const })),
+  ];
+  for (let offset = 0; offset < operations.length; offset += 20) {
+    const batch = operations.slice(offset, offset + 20);
+    const declarations = [`$tags: [String!]!`, ...batch.map((_, index) => `$id${index}: ID!`)];
+    const fields = batch.map((operation, index) => `t${index}: ${operation.action === "add" ? "tagsAdd" : "tagsRemove"}(id: $id${index}, tags: $tags) { userErrors { message } }`);
+    const variables: Record<string, unknown> = { tags: [SALE_TAG] };
+    batch.forEach((operation, index) => { variables[`id${index}`] = operation.productId; });
+    const response = await macroalgaeGraphql<Gql<Record<string, { userErrors: Array<{ message: string }> }>>>(
+      `mutation BatchedSaleTags(${declarations.join(", ")}) { ${fields.join("\n")} }`,
+      variables,
+    );
+    const data = gqlData(response, "Shopify did not return tag update results.");
+    batch.forEach((operation, index) => {
+      const result = data[`t${index}`];
+      if (!result) throw new Error(`Shopify returned no tag result for ${operation.productId}.`);
+      if (result.userErrors.length) throw new Error(`Shopify tag ${operation.action} failed for ${operation.productId}: ${result.userErrors.map((error) => error.message).join("; ")}`);
+    });
   }
 }
 
 async function restoreTags(snapshots: PriceSnapshot[]) {
   const states = new Map<string, boolean>();
   snapshots.forEach((snapshot) => states.set(snapshot.productId, snapshot.hadSaleTag));
-  for (const [productId, hadSaleTag] of states) {
-    const field = hadSaleTag ? "tagsAdd" : "tagsRemove";
-    await productMutation(`mutation($id: ID!, $tags: [String!]!) { update: ${field}(id: $id, tags: $tags) { userErrors { message } } }`, { id: productId, tags: [SALE_TAG] }, "Could not restore Sale Rotator tags.");
-  }
+  await updateSaleTags({
+    add: [...states].filter(([, hadTag]) => hadTag).map(([productId]) => productId),
+    remove: [...states].filter(([, hadTag]) => !hadTag).map(([productId]) => productId),
+  });
 }
 
 export async function runSaleRotation(triggerType: "Manual" | "Scheduled" = "Manual") {
@@ -612,6 +692,7 @@ export async function runSaleRotation(triggerType: "Manual" | "Scheduled" = "Man
   let preview: Awaited<ReturnType<typeof buildSaleRotationPreview>> | null = null;
   let priceSnapshots: PriceSnapshot[] = [];
   let explicitSelections: ExplicitSelectionSnapshot | null = null;
+  let mutationsStarted = false;
   try {
     preview = await buildSaleRotationPreview();
     await prisma.saleRotationItem.createMany({ data: preview.actions.map((item) => ({
@@ -626,6 +707,7 @@ export async function runSaleRotation(triggerType: "Manual" | "Scheduled" = "Man
       await assertSaleWriteReadiness(preview.collection);
       priceSnapshots = await capturePrices(preview.actions);
       explicitSelections = await getExplicitSelectionSnapshot(preview.collection);
+      mutationsStarted = true;
       await writePrices(preview.actions, priceSnapshots);
       const productsToAdd = preview.actions.filter((item) => item.action === "ADD").map((item) => item.product.shopifyProductId);
       const productsToRemove = preview.actions.filter((item) => item.action === "REMOVE").map((item) => item.product.shopifyProductId);
@@ -639,14 +721,25 @@ export async function runSaleRotation(triggerType: "Manual" | "Scheduled" = "Man
       if (explicitSelections?.productIds.length) {
         await updateExplicitSelections(preview.collection.id, explicitSelections.sourceId, { remove: explicitSelections.productIds });
       }
-      const finalCollection = await waitForCollectionMembership(productsToAdd, productsToRemove);
-      const pinnedTwenty = preview.actions
-        .filter((item) => item.assignedDiscountPercent === 20)
-        .map((item) => item.product.shopifyProductId);
+      const selectedSet = new Set(selectedProducts);
+      const productsExpectedToLeave = [...new Set([
+        ...productsToRemove,
+        ...(explicitSelections?.productIds ?? []).filter((productId) => !selectedSet.has(productId)),
+      ])];
+      const finalCollection = await waitForCollectionMembership(productsToAdd, productsExpectedToLeave);
+      const finalIds = new Set(finalCollection.productIds);
+      const stillPending = productsToAdd.filter((id) => !finalIds.has(id)).length + productsExpectedToLeave.filter((id) => finalIds.has(id)).length;
+      if (stillPending) {
+        const warning = `Shopify accepted the price and tag writes, but Sale collection indexing is still pending for ${stillPending} product(s).`;
+        preview.warnings.push(warning);
+        console.warn(warning);
+      }
       try {
-        await shuffleSaleCollection(finalCollection, pinnedTwenty);
+        await shuffleSaleCollection(finalCollection, preview.twentyPercentProductIds);
       } catch (error) {
-        console.warn("Sale rotation pricing completed, but collection ordering could not be shuffled:", error);
+        const warning = `Sale pricing completed, but collection ordering could not be shuffled: ${error instanceof Error ? error.message : "unknown error"}`;
+        preview.warnings.push(warning);
+        console.warn(warning);
       }
     }
     const message = settings.dryRun ? "Dry run completed; Shopify was not changed." : "Sale rotation completed successfully.";
@@ -662,25 +755,49 @@ export async function runSaleRotation(triggerType: "Manual" | "Scheduled" = "Man
     return { runId: run.id, executed: !settings.dryRun, message, preview };
   } catch (error) {
     let message = error instanceof Error ? error.message : "Sale rotation failed.";
-    if (!settings.dryRun && preview) {
+    if (!settings.dryRun && preview && mutationsStarted) {
+      const recoveryFailures: string[] = [];
+      try { await restorePrices(priceSnapshots); }
+      catch (recoveryError) { recoveryFailures.push(`pricing: ${recoveryError instanceof Error ? recoveryError.message : "unknown error"}`); }
       try {
-        await restorePrices(priceSnapshots);
-        if (preview.collection.automated) await restoreTags(priceSnapshots);
-        else await applyMembership(
+        if (preview.collection.automated) {
+          await restoreTags(priceSnapshots);
+        } else {
+          await applyMembership(
             preview.collection,
             preview.actions.filter((item) => item.action === "REMOVE").map((item) => item.product.shopifyProductId),
             preview.actions.filter((item) => item.action === "ADD").map((item) => item.product.shopifyProductId),
           );
-        if (explicitSelections) {
-          await updateExplicitSelections(preview.collection.id, explicitSelections.sourceId, { add: explicitSelections.productIds });
         }
-        message += " Shopify prices and collection membership were restored.";
       } catch (recoveryError) {
-        message += ` Automatic recovery also failed: ${recoveryError instanceof Error ? recoveryError.message : "unknown recovery error"}`;
+        recoveryFailures.push(`tags: ${recoveryError instanceof Error ? recoveryError.message : "unknown error"}`);
       }
+      if (explicitSelections) {
+        try {
+          const currentSelections = await getExplicitSelectionSnapshot(preview.collection);
+          const currentIds = new Set(currentSelections?.productIds ?? []);
+          const missingOriginals = explicitSelections.productIds.filter((id) => !currentIds.has(id));
+          await updateExplicitSelections(preview.collection.id, explicitSelections.sourceId, { add: missingOriginals });
+        } catch (recoveryError) {
+          recoveryFailures.push(`explicit selections: ${recoveryError instanceof Error ? recoveryError.message : "unknown error"}`);
+        }
+      }
+      try {
+        const originalIds = new Set(preview.collection.productIds);
+        const affectedIds = [...new Set(preview.actions.map((item) => item.product.shopifyProductId))];
+        await waitForCollectionMembership(
+          affectedIds.filter((id) => originalIds.has(id)),
+          affectedIds.filter((id) => !originalIds.has(id)),
+        );
+      } catch (recoveryError) {
+        recoveryFailures.push(`collection: ${recoveryError instanceof Error ? recoveryError.message : "unknown error"}`);
+      }
+      message += recoveryFailures.length
+        ? ` Automatic recovery was incomplete (${recoveryFailures.join("; ")}). Manual Shopify reconciliation is required.`
+        : " Automatic recovery restored original variant prices, Sale Rotator tags, explicit collection selections, and Sale collection membership.";
     }
     await prisma.saleRotationRun.update({ where: { id: run.id }, data: { status: "Failed", message, completedAt: new Date() } });
-    throw error;
+    throw new Error(message);
   } finally {
     await prisma.saleRotationSettings.updateMany({ where: { id: settings.id, lockToken }, data: { lockToken: null, lockExpiresAt: null } });
   }

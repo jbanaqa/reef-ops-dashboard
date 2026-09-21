@@ -15,7 +15,7 @@ type Product = {
 };
 type Run = { id: string; status: string; triggerType: string; dryRun: boolean; message: string | null; startedAt: string; _count: { items: number } };
 type CatalogProduct = { id: string; title: string; handle: string; featuredImage: { url: string } | null; alreadyImported: boolean; variants: Array<{ id: string; title: string; standardPrice: number }> };
-type Preview = { selectedCount: number; collection: { title: string; productCount: number; automated: boolean }; shortages: Array<{ discount: number; requested: number; actual: number; shortage: number }>; actions: Array<{ action: string; assignedDiscountPercent: number | null; salePrice: number | null; product: Product }> };
+type Preview = { selectedCount: number; collection: { title: string; productCount: number; automated: boolean }; shortages: Array<{ discount: number; requested: number; actual: number; shortage: number }>; actions: Array<{ action: string; assignedDiscountPercent: number | null; salePrice: number | null; product: Product }>; warnings: string[] };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
@@ -48,7 +48,10 @@ export default function SaleRotationManager() {
     load().catch((error) => setMessage({ kind: "error", text: error.message }));
   }, [load]);
 
-  const tierTotals = useMemo(() => [5, 10, 15, 20].map((tier) => ({ tier, count: products.filter((product) => product.active && (tier === 20 ? product.twentyPercentCandidate : product.eligibleForRotation && product.discountPercent === tier)).length })), [products]);
+  const tierTotals = useMemo(() => [5, 10, 15, 20].map((tier) => ({
+    tier,
+    count: settings?.[`discountCount${tier}` as keyof Settings] as number ?? 0,
+  })), [settings]);
 
   async function saveSettings(event: FormEvent) {
     event.preventDefault(); if (!settings) return;
@@ -103,8 +106,8 @@ export default function SaleRotationManager() {
     if (!settings || (!settings.dryRun && !window.confirm("This will change live Shopify prices and Sale collection membership. Continue?"))) return;
     setBusy("run"); setMessage(null);
     try {
-      const result = await api<{ message: string }>("/api/sale-rotation/run", { method: "POST" });
-      await load(); setPreview(null); setMessage({ kind: "success", text: result.message });
+      const result = await api<{ message: string; preview: Preview }>("/api/sale-rotation/run", { method: "POST" });
+      await load(); setPreview(null); setMessage({ kind: "success", text: [result.message, ...result.preview.warnings].join(" ") });
     } catch (error) { setMessage({ kind: "error", text: error instanceof Error ? error.message : "Sale rotation failed." }); }
     finally { setBusy(""); }
   }
@@ -113,7 +116,7 @@ export default function SaleRotationManager() {
   return <>
     {message ? <div className={`sale-alert sale-alert-${message.kind}`} role="status">{message.text}</div> : null}
     <section className="sale-metrics">
-      {tierTotals.map(({ tier, count }) => <div className="card sale-metric" key={tier}><span>{tier}% pool</span><strong>{count}</strong><small>configured products</small></div>)}
+      {tierTotals.map(({ tier, count }) => <div className="card sale-metric" key={tier}><span>{tier}% tier</span><strong>{count}</strong><small>slots per rotation</small></div>)}
       <div className="card sale-metric"><span>Protection</span><strong>{settings.dryRun ? "Dry run" : "Live"}</strong><small>{settings.enabled ? "automation enabled" : "automation paused"}</small></div>
     </section>
 
@@ -138,12 +141,12 @@ export default function SaleRotationManager() {
           <input type="checkbox" checked={Boolean(selected[product.id])} disabled={product.alreadyImported || !product.variants.length} onChange={() => toggleCatalog(product)} />
           {product.featuredImage ? <Image src={product.featuredImage.url} alt="" width={42} height={42} unoptimized /> : <span className="sale-image-empty" />}
           <div><strong>{product.title}</strong><small>{product.alreadyImported ? "Already imported" : product.variants[0] ? `${product.variants[0].title} · $${product.variants[0].standardPrice.toFixed(2)}` : "No variants"}</small></div>
-          {selected[product.id] ? <select className="form-select" value={selected[product.id].discountPercent} onChange={(event) => setSelected({ ...selected, [product.id]: { ...selected[product.id], discountPercent: Number(event.target.value) } })}>{[5,10,15,20].map((tier) => <option key={tier} value={tier}>{tier}% tier</option>)}</select> : null}
+          {selected[product.id] ? <select className="form-select" value={selected[product.id].discountPercent} onChange={(event) => setSelected({ ...selected, [product.id]: { ...selected[product.id], discountPercent: Number(event.target.value) } })}><option value={5}>Standard rotation</option><option value={20}>20% pool</option></select> : null}
         </div>)}
         <button type="button" className="button button-primary sale-import" disabled={!Object.keys(selected).length || busy === "import"} onClick={importSelected}>{busy === "import" ? "Importing…" : `Import ${Object.keys(selected).length} selected`}</button>
       </div> : null}
       <div className="sale-table-wrap"><table className="sale-table"><thead><tr><th>Product</th><th>Standard price</th><th>Tier</th><th>Rotating</th><th>20% pool</th><th>Fixed</th><th>Active</th></tr></thead><tbody>
-        {products.map((product) => <tr key={product.id} className={!product.active ? "is-muted" : ""}><td><div className="sale-product-cell">{product.imageUrl ? <Image src={product.imageUrl} alt="" width={42} height={42} unoptimized /> : <span className="sale-image-empty" />}<span><strong>{product.title}</strong><small>{product.variantTitle}</small></span></div></td><td>${product.regularPrice.toFixed(2)}</td><td><select className="form-select" value={product.discountPercent ?? ""} disabled={busy === product.id} onChange={(event) => patchProduct(product.id, { discountPercent: Number(event.target.value) })}>{[5,10,15,20].map((tier) => <option key={tier} value={tier}>{tier}%</option>)}</select></td>
+        {products.map((product) => <tr key={product.id} className={!product.active ? "is-muted" : ""}><td><div className="sale-product-cell">{product.imageUrl ? <Image src={product.imageUrl} alt="" width={42} height={42} unoptimized /> : <span className="sale-image-empty" />}<span><strong>{product.title}</strong><small>{product.variantTitle}</small></span></div></td><td>${product.regularPrice.toFixed(2)}</td><td>{product.twentyPercentCandidate ? "20%" : "Dynamic"}</td>
           <td><input type="checkbox" checked={product.eligibleForRotation} disabled={busy === product.id || product.twentyPercentCandidate} onChange={(event) => patchProduct(product.id, { eligibleForRotation: event.target.checked })} /></td>
           <td><input type="checkbox" checked={product.twentyPercentCandidate} disabled={busy === product.id} onChange={(event) => patchProduct(product.id, { twentyPercentCandidate: event.target.checked, discountPercent: event.target.checked ? 20 : 5, eligibleForRotation: !event.target.checked })} /></td>
           <td><input type="checkbox" checked={product.fixedInSale} disabled={busy === product.id || !product.twentyPercentCandidate} onChange={(event) => patchProduct(product.id, { fixedInSale: event.target.checked })} /></td>

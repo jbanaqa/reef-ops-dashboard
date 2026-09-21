@@ -2,13 +2,16 @@ import { assertSpeciesLibraryShop, normalizeShopDomain } from "./species-library
 
 const API_VERSION = "2026-07";
 
+let tokenCache: { accessToken: string; expiresAt: number } | null = null;
+let tokenRequest: Promise<string> | null = null;
+
 function required(name: string) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
 }
 
-async function getAccessToken() {
+async function requestAccessToken() {
   const shop = assertSpeciesLibraryShop();
   const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
@@ -20,9 +23,26 @@ async function getAccessToken() {
     }),
     cache: "no-store",
   });
-  const body = await response.json();
-  if (!response.ok || !body.access_token) throw new Error("Macroalgae Shopify access token request failed.");
-  return String(body.access_token);
+  const body = await response.json() as { access_token?: unknown; expires_in?: unknown };
+  if (!response.ok || typeof body.access_token !== "string" || !body.access_token) {
+    throw new Error(`Macroalgae Shopify access token request failed with status ${response.status}.`);
+  }
+  const expiresIn = Number(body.expires_in);
+  tokenCache = {
+    accessToken: body.access_token,
+    expiresAt: Date.now() + Math.max(60, (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3_600) - 300) * 1_000,
+  };
+  return tokenCache.accessToken;
+}
+
+async function getAccessToken() {
+  if (tokenCache && tokenCache.expiresAt > Date.now()) return tokenCache.accessToken;
+  if (!tokenRequest) {
+    tokenRequest = requestAccessToken().finally(() => {
+      tokenRequest = null;
+    });
+  }
+  return tokenRequest;
 }
 
 export async function macroalgaeGraphql<T>(query: string, variables?: Record<string, unknown>) {
@@ -30,14 +50,32 @@ export async function macroalgaeGraphql<T>(query: string, variables?: Record<str
   if (normalizeShopDomain(shop) !== normalizeShopDomain(required("SPECIES_LIBRARY_SHOP_DOMAIN"))) {
     throw new Error("Macroalgae Shopify boundary mismatch.");
   }
-  const response = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": await getAccessToken() },
-    body: JSON.stringify({ query, variables }),
-    cache: "no-store",
-  });
-  const body = await response.json();
-  if (!response.ok || body.errors) throw new Error("Macroalgae Shopify GraphQL request failed.");
+  const perform = async (accessToken: string) => {
+    const response = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": accessToken },
+      body: JSON.stringify({ query, variables }),
+      cache: "no-store",
+    });
+    let body: { errors?: Array<{ message?: string }> };
+    try {
+      body = await response.json() as typeof body;
+    } catch {
+      throw new Error(`Macroalgae Shopify GraphQL returned status ${response.status} with an invalid response body.`);
+    }
+    return { response, body };
+  };
+
+  let result = await perform(await getAccessToken());
+  if (result.response.status === 401) {
+    tokenCache = null;
+    result = await perform(await requestAccessToken());
+  }
+  const { response, body } = result;
+  if (!response.ok || body.errors?.length) {
+    const details = body.errors?.map((error) => error.message).filter(Boolean).join("; ");
+    throw new Error(details || `Macroalgae Shopify GraphQL request failed with status ${response.status}.`);
+  }
   return body as T;
 }
 

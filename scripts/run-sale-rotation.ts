@@ -14,8 +14,12 @@ async function main() {
   ]);
 
   try {
-    const result = await runScheduledSaleRotation();
-    console.log(`[sale-rotation] ${JSON.stringify(result)}`);
+    try {
+      const result = await runScheduledSaleRotation();
+      console.log(`[sale-rotation] ${JSON.stringify(result)}`);
+    } catch (error) {
+      console.error("[sale-rotation] Scheduled rotation failed:", error);
+    }
   } finally {
     await prisma.$disconnect();
   }
@@ -23,5 +27,4 @@ async function main() {
 
 main().catch((error) => {
   console.error("[sale-rotation] Scheduled runner failed:", error);
-  process.exitCode = 1;
 });
