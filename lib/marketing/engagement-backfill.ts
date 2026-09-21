@@ -174,7 +174,7 @@ export async function syncEngagementBackfill() {
         include: "profile",
         "fields[event]": "datetime",
         "fields[profile]": "email",
-        "page[size]": "200",
+        "page[size]": "1000",
         sort: "datetime",
       });
       const result = await page(state.next || `/api/events?${query}`);
