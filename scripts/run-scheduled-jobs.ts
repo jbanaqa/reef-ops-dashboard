@@ -59,6 +59,16 @@ async function main() {
     );
   }
 
+  console.log("[scheduled] Running sale rotation scheduler.");
+  try {
+    await run(process.execPath, [runner, "scripts/run-sale-rotation.ts"]);
+  } catch (error) {
+    const failure =
+      error instanceof Error ? error : new Error(String(error));
+    failures.push(failure);
+    console.error("[scheduled] Sale rotation scheduler failed:", failure.message);
+  }
+
   if (failures.length) {
     throw new Error(
       `${failures.length} scheduled job${failures.length === 1 ? "" : "s"} failed.`

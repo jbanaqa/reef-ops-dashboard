@@ -14,6 +14,7 @@
     "species-library:verify-webhook": "tsx scripts/verify-species-webhook.ts",
     "species-library:verify-validation": "tsx scripts/verify-species-validation.ts",
     "collection-rotation:scheduled": "tsx scripts/run-collection-rotations.ts",
+    "sale-rotation:scheduled": "tsx scripts/run-sale-rotation.ts",
     "marketing:scheduled": "tsx scripts/run-marketing.ts",
     "scheduled:all": "tsx scripts/run-scheduled-jobs.ts",
     "marketing:test": "node scripts/verify-marketing.cjs test",

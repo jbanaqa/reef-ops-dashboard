@@ -14,6 +14,7 @@ const navigation = [
   ] },
   { label: "Merchandising", items: [
     { href: "/collection-rotation", label: "Collection rotation", icon: "rotation" },
+    { href: "/sale-rotation", label: "Sale rotation", icon: "sale" },
     { href: "/species-library", label: "Species library", icon: "species" },
   ] },
   { label: "Customer insights", items: [{ href: "/feedback", label: "Customer intelligence", icon: "intelligence" }] },
@@ -23,6 +24,7 @@ const pageTitles: Record<string, string> = {
   "/": "Overview", "/receive-shipment": "Receive shipment", "/inventory-monitor": "Inventory monitor", "/restock-waitlist": "Restock alerts",
   "/reorder-planner": "Reorder planner", "/reorder-planner/upload": "Upload supplier inventory",
   "/reorder-planner/mappings": "Product mappings", "/collection-rotation": "Collection rotation",
+  "/sale-rotation": "Sale rotation",
   "/species-library": "Species library", "/feedback": "Customer intelligence", "/feedback/new": "Add customer signal", "/monitoring": "Brand monitoring",
 };
 export function AppShell({ children }: { children: React.ReactNode }) {

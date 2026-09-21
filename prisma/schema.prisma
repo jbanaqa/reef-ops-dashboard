@@ -699,6 +699,92 @@ model CollectionRotationScheduleRun {
   @@index([startedAt])
 }
 
+// -----------------------------------------------------------------------------
+// SALE ROTATION - Macroalgae Farms sale membership and price automation
+// -----------------------------------------------------------------------------
+
+model SaleRotationSettings {
+  id String @id @default(cuid())
+  shop String @unique
+  saleCollectionId String?
+  enabled Boolean @default(false)
+  dryRun Boolean @default(true)
+  rotationIntervalHours Int @default(72)
+  discountCount5 Int @default(30)
+  discountCount10 Int @default(17)
+  discountCount15 Int @default(9)
+  discountCount20 Int @default(4)
+  lastRotatedAt DateTime?
+  lockToken String?
+  lockExpiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+  @@index([lastRotatedAt])
+}
+
+model SaleRotationProduct {
+  id String @id @default(cuid())
+  shop String
+  shopifyProductId String
+  shopifyVariantId String
+  title String
+  variantTitle String?
+  handle String?
+  imageUrl String?
+  regularPrice Float
+  discountPercent Int?
+  eligibleForRotation Boolean @default(true)
+  twentyPercentCandidate Boolean @default(false)
+  fixedInSale Boolean @default(false)
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items SaleRotationItem[]
+
+  @@unique([shop, shopifyProductId])
+  @@unique([shop, shopifyVariantId])
+  @@index([shop, active, eligibleForRotation])
+  @@index([shop, twentyPercentCandidate, fixedInSale])
+  @@index([shopifyProductId])
+}
+
+model SaleRotationRun {
+  id String @id @default(cuid())
+  shop String
+  triggerType String @default("Manual")
+  status String @default("Running")
+  dryRun Boolean @default(true)
+  message String?
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items SaleRotationItem[]
+
+  @@index([shop, startedAt])
+  @@index([shop, status])
+}
+
+model SaleRotationItem {
+  id String @id @default(cuid())
+  runId String
+  run SaleRotationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  productId String
+  product SaleRotationProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  action String
+  assignedDiscountPercent Int?
+  regularPrice Float
+  salePrice Float?
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+  @@index([productId, createdAt])
+}
+
 // SPECIES LIBRARY - enabled only in the Macroalgae Farms deployment.
 model SpeciesLibraryCard {
   id                 String               @id @default(cuid())
