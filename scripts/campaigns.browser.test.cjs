@@ -107,6 +107,7 @@ const { chromium } = require("playwright");
     });
     await page.goto("http://127.0.0.1:" + server.address().port);
     await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("button", { name: "Continue to email" }).click();
     await page.getByRole("button", { name: "Edit email and preview" }).click();
     await page.getByRole("dialog").waitFor();
     await page.getByRole("button", { name: "Footer", exact: true }).click();

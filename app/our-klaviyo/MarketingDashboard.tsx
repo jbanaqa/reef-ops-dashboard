@@ -136,6 +136,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   const [at, setAt] = useState(""),
     [editingEmail, setEditingEmail] = useState(false),
     [audienceCount, setAudienceCount] = useState<number | null>(null);
+  const [campaignOpen, setCampaignOpen] = useState(false);
+  const [campaignStep, setCampaignStep] = useState(0);
+  const [campaignSearch, setCampaignSearch] = useState("");
   const [dismissalDraft, setDismissalDraft] = useState<boolean | null>(null);
   const [popupDelayDraft, setPopupDelayDraft] = useState<string | null>(null);
   const [resource, setResource] = useState<Resource | null>(null);
@@ -421,30 +424,36 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
             </>
           )}
           {tab === "campaigns" && (
-            <div className="mk-campaign-workspace">
+            <div className={`mk-campaign-workspace ${campaignOpen ? "is-editing" : "is-browsing"}`}>
               <div className="mk-campaign-intro">
                 <div>
                   <p className="mk-eyebrow">ONE-TIME EMAIL CAMPAIGNS</p>
-                  <h2>Plan a sale, collection drop, or announcement</h2>
+                  <h2>{campaignOpen ? campaign.name || "New campaign" : "Your campaigns"}</h2>
                   <p>
-                    Build the audience and email first, then schedule it. Each
-                    recipient is checked again before delivery.
+                    {campaignOpen ? "Choose your audience, design your email, then review the send time." : "Manage sale emails, new arrivals, and announcements in one place."}
                   </p>
                 </div>
-                {campaign.id && (
+                {campaignOpen ? <button onClick={() => setCampaignOpen(false)}>Back to campaigns</button> : (
                   <button
                     onClick={() => {
                       setCampaign(newCampaign());
                       setAt("");
                       setAudienceCount(null);
+                      setCampaignOpen(true);
+                      setCampaignStep(0);
                     }}
                   >
-                    New campaign
+                    Create campaign
                   </button>
                 )}
               </div>
               <div className="mk-campaign-layout">
-                <article className="mk-panel mk-campaign-composer">
+                {campaignOpen && <article className="mk-panel mk-campaign-composer">
+                  <nav className="mk-campaign-steps" aria-label="Campaign setup">
+                    {["Audience", "Email", "Review & schedule"].map((label, index) => (
+                      <button key={label} aria-current={campaignStep === index ? "step" : undefined} onClick={() => setCampaignStep(index)}>{index + 1}. {label}</button>
+                    ))}
+                  </nav>
                   <div className="mk-campaign-composer-heading">
                     <div>
                       <p className="mk-eyebrow">CAMPAIGN DRAFT</p>
@@ -456,7 +465,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       {campaign.id ? "Saved draft" : "New draft"}
                     </span>
                   </div>
-                  <section className="mk-campaign-section">
+                  <section className="mk-campaign-section" hidden={campaignStep !== 0}>
                     <div className="mk-campaign-section-heading">
                       <span>1</span>
                       <div>
@@ -527,7 +536,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       )}
                     </div>
                   </section>
-                  <section className="mk-campaign-section">
+                  <section className="mk-campaign-section" hidden={campaignStep !== 1}>
                     <div className="mk-campaign-section-heading">
                       <span>2</span>
                       <div>
@@ -603,7 +612,13 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       </button>
                     </div>
                   </section>
-                  <section className="mk-campaign-section">
+                  <section className="mk-campaign-section" hidden={campaignStep !== 2}>
+                    <div className="mk-campaign-review">
+                      <strong>{campaign.name || "Campaign name needed"}</strong>
+                      <p>Subject: {campaign.subject || "Subject line needed"}</p>
+                      <p>{audienceCount === null ? "Audience count has not been checked." : `${audienceCount.toLocaleString()} currently eligible recipients.`}</p>
+                      <button onClick={() => setEditingEmail(true)}>Review email</button>
+                    </div>
                     <div className="mk-campaign-section-heading">
                       <span>3</span>
                       <div>
@@ -632,14 +647,19 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                           setCampaign(newCampaign());
                           setAt("");
                           setAudienceCount(null);
+                          setCampaignOpen(false);
                         }, "Campaign scheduled. Sending requires completed setup and an active worker.")
                       }
                     >
                       Save and schedule
                     </button>
                   </section>
-                </article>
-                <aside className="mk-campaign-library">
+                  <div className="mk-campaign-navigation">
+                    <button disabled={campaignStep === 0} onClick={() => setCampaignStep((step) => step - 1)}>Back</button>
+                    {campaignStep < 2 && <button className="mk-campaign-primary" onClick={() => setCampaignStep((step) => step + 1)}>Continue to {campaignStep === 0 ? "email" : "review"} →</button>}
+                  </div>
+                </article>}
+                {!campaignOpen && <aside className="mk-campaign-library">
                   <div className="mk-campaign-library-heading">
                     <div>
                       <p className="mk-eyebrow">CAMPAIGN LIBRARY</p>
@@ -647,14 +667,16 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                     </div>
                     <span className="mk-status">{data.campaigns.length}</span>
                   </div>
+                  {!!data.campaigns.length && <label>Search campaigns<input type="search" placeholder="Search by campaign name or subject" value={campaignSearch} onChange={(event) => setCampaignSearch(event.target.value)} /></label>}
                   {!data.campaigns.length ? (
                     <div className="mk-campaign-empty">
                       <strong>No campaigns yet</strong>
-                      <span>Build your first sale or promotional email on the left.</span>
+                      <span>Create an email, choose your audience, and schedule your first campaign.</span>
+                      <button className="mk-campaign-primary" onClick={() => { setCampaign(newCampaign()); setAt(""); setAudienceCount(null); setCampaignStep(0); setCampaignOpen(true); }}>Create your first campaign</button>
                     </div>
                   ) : (
                     <div className="mk-campaign-list">
-                      {data.campaigns.map((item) => {
+                      {data.campaigns.filter((item) => `${item.name} ${item.subject}`.toLowerCase().includes(campaignSearch.toLowerCase())).map((item) => {
                         const statusCounts = data.messageCounts.filter(
                           (count) => count.campaignId === item.id,
                         );
@@ -688,6 +710,8 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                 <button
                                   onClick={() => {
                                     setCampaign(item);
+                                    setCampaignOpen(true);
+                                    setCampaignStep(0);
                                     setAt("");
                                     setAudienceCount(null);
                                   }}
@@ -697,6 +721,8 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                               )}
                               <button
                                 onClick={() => {
+                                  setCampaignOpen(true);
+                                  setCampaignStep(0);
                                   setCampaign({
                                     name: `${item.name} copy`,
                                     subject: item.subject,
@@ -728,7 +754,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       })}
                     </div>
                   )}
-                </aside>
+                </aside>}
               </div>
             </div>
           )}
