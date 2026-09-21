@@ -7,7 +7,7 @@ import { cartReport } from "@/lib/marketing/cart-report";
 import { campaignReport } from "@/lib/marketing/campaign-report";
 import {
   engagementBackfillStatus,
-  syncEngagementBackfill,
+  setEngagementBackfillRunning,
 } from "@/lib/marketing/engagement-backfill";
 import {
   campaignAudience,
@@ -794,8 +794,10 @@ export async function POST(request: Request) {
       return Response.json(await syncHistory());
     if (b.action === "sync-klaviyo-audience")
       return Response.json(await syncAudienceBackfill());
-    if (b.action === "sync-klaviyo-opens")
-      return Response.json(await syncEngagementBackfill());
+    if (b.action === "start-klaviyo-opens")
+      return Response.json(await setEngagementBackfillRunning(true));
+    if (b.action === "pause-klaviyo-opens")
+      return Response.json(await setEngagementBackfillRunning(false));
     if (b.action === "preview-cart-products") {
       const address = email(b.email);
       const p = await prisma.marketingProfile.findUnique({

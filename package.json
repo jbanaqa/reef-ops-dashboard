@@ -17,6 +17,7 @@
     "sale-rotation:scheduled": "tsx scripts/run-sale-rotation.ts",
     "sale-rotation:test": "tsx --test scripts/sale-rotation.test.ts",
     "marketing:scheduled": "tsx scripts/run-marketing.ts",
+    "marketing:engagement-backfill": "tsx scripts/run-engagement-backfill.ts",
     "scheduled:all": "tsx scripts/run-scheduled-jobs.ts",
     "marketing:test": "node scripts/verify-marketing.cjs test",
     "build:check": "node scripts/verify-marketing.cjs build",

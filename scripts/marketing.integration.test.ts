@@ -423,6 +423,8 @@ test("Klaviyo open-history backfill restores the 365-day segment input", async (
       links: { next: null },
     },
   ];
+  const queued = await engagementBackfill.setEngagementBackfillRunning(true);
+  assert.equal(queued.running, true);
   assert.equal(
     (await engagementBackfill.syncEngagementBackfill()).phase,
     "metric",
@@ -433,6 +435,7 @@ test("Klaviyo open-history backfill restores the 365-day segment input", async (
   );
   const complete = await engagementBackfill.syncEngagementBackfill();
   assert.equal(complete.phase, "complete");
+  assert.equal(complete.running, false);
   assert.equal(complete.events, 1);
   assert.equal(complete.profiles, 1);
   assert.equal(
@@ -449,6 +452,23 @@ test("Klaviyo open-history backfill restores the 365-day segment input", async (
     }),
     1,
   );
+});
+
+test("Klaviyo open-history backfill can be paused without losing its checkpoint", async () => {
+  await prisma.marketingResource.deleteMany({
+    where: { shop, kind: "AUDIENCE_SYNC", key: "klaviyo-opens" },
+  });
+  const started = await engagementBackfill.setEngagementBackfillRunning(true);
+  assert.equal(started.running, true);
+  assert.equal(started.events, 0);
+  const paused = await engagementBackfill.setEngagementBackfillRunning(false);
+  assert.equal(paused.running, false);
+  const idle = await engagementBackfill.runEngagementBackfillBatch({
+    maxPages: 2,
+    maxMilliseconds: 1000,
+  });
+  assert.equal(idle.pages, 0);
+  assert.equal(idle.events, 0);
 });
 
 test("Shopify delivery-date order tag schedules one upsell notice", async () => {

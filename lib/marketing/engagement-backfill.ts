@@ -16,6 +16,8 @@ type State = {
   leaseUntil?: string;
   leaseOwner?: string;
   error?: string;
+  running?: boolean;
+  lastBatchAt?: string;
 };
 type Item = {
   id: string;
@@ -85,7 +87,41 @@ export async function engagementBackfillStatus() {
     startedAt: state?.startedAt,
     completedAt: state?.completedAt,
     error: state?.error,
+    running: state?.running === true && state?.phase !== "complete",
+    lastBatchAt: state?.lastBatchAt,
   };
+}
+
+function initialState(): State {
+  return {
+    phase: "metric",
+    since: new Date(Date.now() - 365 * 86400000).toISOString(),
+    events: 0,
+    profiles: 0,
+    startedAt: new Date().toISOString(),
+    running: false,
+  };
+}
+
+/** Starts or pauses the durable import. The scheduled Railway worker does the work. */
+export async function setEngagementBackfillRunning(running: boolean) {
+  await atomic(async (tx) => {
+    const resource = await tx.marketingResource.findUnique({
+      where: { shop_kind_key: where() },
+    });
+    const old = resource?.data as State | undefined;
+    const next = !old || (running && old.phase === "complete")
+      ? initialState()
+      : { ...old };
+    next.running = running;
+    if (running) delete next.error;
+    await tx.marketingResource.upsert({
+      where: { shop_kind_key: where() },
+      create: { ...where(), name: "Klaviyo open-history backfill", data: json(next) },
+      update: { data: json(next) },
+    });
+  });
+  return engagementBackfillStatus();
 }
 
 async function importEvents(result: Page, state: State) {
@@ -134,17 +170,8 @@ export async function syncEngagementBackfill() {
     const old = resource?.data as State | undefined;
     if (old?.leaseUntil && new Date(old.leaseUntil) > new Date())
       throw new Error("The open-history backfill is already running.");
-    const startedAt = new Date().toISOString();
-    const next: State =
-      old && old.phase !== "complete"
-        ? old
-        : {
-            phase: "metric",
-            since: new Date(Date.now() - 365 * 86400000).toISOString(),
-            events: 0,
-            profiles: 0,
-            startedAt,
-          };
+    if (!old?.running || old.phase === "complete") return null;
+    const next: State = { ...old };
     next.leaseUntil = new Date(Date.now() + 300000).toISOString();
     next.leaseOwner = randomUUID();
     delete next.error;
@@ -155,6 +182,7 @@ export async function syncEngagementBackfill() {
     });
     return next;
   });
+  if (!state) return engagementBackfillStatus();
   try {
     if (state.phase === "metric") {
       const result = await page(state.next || "/api/metrics");
@@ -196,12 +224,18 @@ export async function syncEngagementBackfill() {
   } catch (error) {
     state.error =
       error instanceof Error ? error.message : "Klaviyo open-history backfill failed.";
+    state.running = false;
   }
   await atomic(async (tx) => {
     const current = await tx.marketingResource.findUniqueOrThrow({
       where: { shop_kind_key: where() },
     });
-    if ((current.data as State).leaseOwner !== state.leaseOwner) return;
+    const saved = current.data as State;
+    if (saved.leaseOwner !== state.leaseOwner) return;
+    // A staff pause can arrive while a Klaviyo page is in flight. Preserve it.
+    if (saved.running === false) state.running = false;
+    if (state.phase === "complete") state.running = false;
+    state.lastBatchAt = new Date().toISOString();
     delete state.leaseUntil;
     delete state.leaseOwner;
     await tx.marketingResource.update({
@@ -210,4 +244,25 @@ export async function syncEngagementBackfill() {
     });
   });
   return engagementBackfillStatus();
+}
+
+/** Processes bounded pages in the scheduled service, independent of a browser tab. */
+export async function runEngagementBackfillBatch(options?: {
+  maxPages?: number;
+  maxMilliseconds?: number;
+}) {
+  const maxPages = Math.max(1, Math.min(options?.maxPages ?? 75, 200));
+  const deadline = Date.now() + Math.max(1000, options?.maxMilliseconds ?? 90000);
+  let status = await engagementBackfillStatus();
+  let pages = 0;
+  while (
+    status.running &&
+    status.phase !== "complete" &&
+    pages < maxPages &&
+    Date.now() < deadline
+  ) {
+    status = await syncEngagementBackfill();
+    pages++;
+  }
+  return { ...status, pages };
 }

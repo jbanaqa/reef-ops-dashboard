@@ -83,6 +83,7 @@ const { chromium } = require("playwright");
     let syncRuns = 0;
     let deliveryRuns = 0;
     let imports = 0;
+    let engagementRunning = false;
     await page.route("**/api/marketing**", async (route) => {
       const req = route.request();
       if (req.method() === "POST") {
@@ -109,6 +110,30 @@ const { chromium } = require("playwright");
           syncRuns++;
           return route.fulfill({ json: { processed: 1, unresolved: 0 } });
         }
+        if (body.action === "start-klaviyo-opens") {
+          engagementRunning = true;
+          return route.fulfill({
+            json: {
+              configured: true,
+              phase: "events",
+              events: 107600,
+              profiles: 94749,
+              running: true,
+            },
+          });
+        }
+        if (body.action === "pause-klaviyo-opens") {
+          engagementRunning = false;
+          return route.fulfill({
+            json: {
+              configured: true,
+              phase: "events",
+              events: 107600,
+              profiles: 94749,
+              running: false,
+            },
+          });
+        }
         if (body.action === "import") {
           if (!body.dryRun) imports++;
           return route.fulfill({
@@ -129,6 +154,7 @@ const { chromium } = require("playwright");
             phase: "not-started",
             events: 0,
             profiles: 0,
+            running: false,
           },
         });
       if (req.url().includes("view=audience-backfill"))
@@ -253,6 +279,20 @@ const { chromium } = require("playwright");
     await page.screenshot({ path: path.join(output, "business-details.png") });
     await page.getByRole("button", { name: /Advanced/ }).click();
     assert.equal(await page.locator("pre").count(), 0);
+    await page
+      .getByRole("button", { name: "Import open history", exact: true })
+      .click();
+    await page
+      .getByText(/Railway will continue it in the background/)
+      .waitFor();
+    assert.equal(engagementRunning, true);
+    await page
+      .getByRole("button", { name: "Pause background import", exact: true })
+      .click();
+    await page
+      .getByText(/Completed updates and the saved checkpoint were preserved/)
+      .waitFor();
+    assert.equal(engagementRunning, false);
     await page.getByText("Import prepared contacts", { exact: true }).click();
     await page
       .getByLabel("Prepared contact data", { exact: true })

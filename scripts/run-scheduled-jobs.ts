@@ -46,6 +46,18 @@ async function main() {
     console.error("[scheduled] Marketing worker failed:", failure.message);
   }
 
+  console.log("[scheduled] Running Klaviyo open-history backfill batch.");
+  try {
+    await run(process.execPath, [runner, "scripts/run-engagement-backfill.ts"]);
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    failures.push(failure);
+    console.error(
+      "[scheduled] Klaviyo open-history backfill failed:",
+      failure.message
+    );
+  }
+
   console.log("[scheduled] Running collection rotation scheduler.");
   try {
     await run(process.execPath, [runner, "scripts/run-collection-rotations.ts"]);

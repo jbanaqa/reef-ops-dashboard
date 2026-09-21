@@ -43,6 +43,8 @@ type EngagementBackfill = {
   startedAt?: string;
   completedAt?: string;
   error?: string;
+  running: boolean;
+  lastBatchAt?: string;
 };
 export type SettingsData = {
   settings: MarketingSettings;
@@ -168,7 +170,6 @@ export default function SettingsWorkspace({
   const [engagementBackfill, setEngagementBackfill] =
     useState<EngagementBackfill | null>(null);
   const stopBackfill = useRef(false);
-  const stopEngagementBackfill = useRef(false);
   const feedback = useRef<HTMLDivElement>(null);
   const reviewRef = useRef<HTMLDivElement>(null);
   const businessDirty = !same(business, {
@@ -221,7 +222,6 @@ export default function SettingsWorkspace({
     return () => {
       active = false;
       stopBackfill.current = true;
-      stopEngagementBackfill.current = true;
     };
   }, []);
   const setup = data.setup;
@@ -335,37 +335,22 @@ export default function SettingsWorkspace({
     }
   }
   async function runEngagementBackfill() {
-    setBusy("engagement-backfill");
-    setError("");
-    setNotice("");
-    stopEngagementBackfill.current = false;
-    try {
-      let result: EngagementBackfill;
-      do {
-        result = await action<EngagementBackfill>({
-          action: "sync-klaviyo-opens",
+    return run(
+      "engagement-backfill",
+      async () => {
+        const result = await action<EngagementBackfill>({
+          action: engagementBackfill?.running
+            ? "pause-klaviyo-opens"
+            : "start-klaviyo-opens",
         });
         setEngagementBackfill(result);
-        if (result.error) throw new Error(result.error);
-        if (result.phase === "complete") break;
-        await new Promise((resolve) => window.setTimeout(resolve, 125));
-      } while (!stopEngagementBackfill.current);
-      setNotice(
-        result!.phase === "complete"
-          ? `Klaviyo open history finished: ${result!.events.toLocaleString()} events updated ${result!.profiles.toLocaleString()} profile records.`
-          : "Klaviyo open-history backfill paused. You can continue from this point.",
-      );
-      if (result!.phase === "complete") await refresh();
-    } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Klaviyo open-history backfill paused.",
-      );
-    } finally {
-      setBusy("");
-      feedback.current?.focus();
-    }
+        return result;
+      },
+      (result) =>
+        result.running
+          ? "Open-history import queued. Railway will continue it in the background; you can close this page."
+          : "Open-history import paused. Completed updates and the saved checkpoint were preserved.",
+    );
   }
   const navDirty = (key: string) =>
     key === "overview"
@@ -1127,15 +1112,18 @@ export default function SettingsWorkspace({
                 <Tag active={engagementBackfill?.phase === "complete"}>
                   {engagementBackfill?.phase === "complete"
                     ? "Complete"
-                    : engagementBackfill?.phase === "events"
-                      ? "In progress"
+                    : engagementBackfill?.running
+                      ? "Running in background"
+                      : engagementBackfill?.phase === "events"
+                        ? "Paused"
                       : "Not imported"}
                 </Tag>
               </div>
               <p>
                 Imports the latest Opened Email event from the previous 365 days
                 for each profile. This makes the 2025 Mailable Subscribers segment
-                match its Klaviyo engagement rule.
+                match its Klaviyo engagement rule. Railway processes it in the
+                background, so this page does not need to stay open.
               </p>
               {engagementBackfill && (
                 <>
@@ -1156,6 +1144,15 @@ export default function SettingsWorkspace({
                   {engagementBackfill.completedAt && (
                     <p>Last completed {date(engagementBackfill.completedAt)}.</p>
                   )}
+                  {!engagementBackfill.completedAt &&
+                    engagementBackfill.lastBatchAt && (
+                      <p>
+                        Last background batch {date(engagementBackfill.lastBatchAt)}.
+                      </p>
+                    )}
+                  {engagementBackfill.error && (
+                    <p>Paused: {engagementBackfill.error}</p>
+                  )}
                   <div className="sw-import-actions">
                     <button
                       className="sw-primary"
@@ -1163,23 +1160,15 @@ export default function SettingsWorkspace({
                       onClick={() => void runEngagementBackfill()}
                     >
                       {busy === "engagement-backfill"
-                        ? "Importing opens…"
+                        ? "Saving…"
+                        : engagementBackfill.running
+                          ? "Pause background import"
                         : engagementBackfill.phase === "complete"
                           ? "Refresh open history"
                           : engagementBackfill.phase === "not-started"
                             ? "Import open history"
                             : "Continue open history"}
                     </button>
-                    {busy === "engagement-backfill" && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          stopEngagementBackfill.current = true;
-                        }}
-                      >
-                        Pause after this batch
-                      </button>
-                    )}
                   </div>
                 </>
               )}
