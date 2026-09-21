@@ -177,7 +177,14 @@ export async function syncEngagementBackfill() {
         "page[size]": "1000",
         sort: "datetime",
       });
-      const result = await page(state.next || `/api/events?${query}`);
+      const eventPath = state.next
+        ? (() => {
+            const next = new URL(state.next);
+            next.searchParams.set("page[size]", "1000");
+            return next.toString();
+          })()
+        : `/api/events?${query}`;
+      const result = await page(eventPath);
       await importEvents(result, state);
       state.events += result.data.length;
       state.next = result.links?.next || undefined;
