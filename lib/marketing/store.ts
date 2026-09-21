@@ -60,14 +60,46 @@ export async function identify(
   const profiles = await tx.marketingProfile.findMany({
     where: { shop: shop(), OR: keys },
   });
-  if (profiles.length > 1)
-    throw new Error(
-      "Identity conflict: reconcile profiles before retrying. No consent was transferred.",
-    );
-  const existing = profiles[0];
+  let existing: (typeof profiles)[number] | undefined = profiles[0];
+  const updateIdentity = { ...identity };
+  if (profiles.length > 1) {
+    const emailProfile = identity.email
+      ? profiles.find((profile) => profile.email === identity.email)
+      : undefined;
+    const shopifyProfile = identity.shopifyId
+      ? profiles.find((profile) => profile.shopifyId === identity.shopifyId)
+      : undefined;
+    if (emailProfile && shopifyProfile && emailProfile.id !== shopifyProfile.id)
+      throw new Error(
+        "Identity conflict: email and Shopify customer belong to different profiles. No consent was transferred.",
+      );
+    existing = shopifyProfile || emailProfile;
+    if (!existing)
+      throw new Error(
+        "Identity conflict: reconcile profiles before retrying. No consent was transferred.",
+      );
+    const existingId = existing.id;
+    const onlyPhoneAlias = profiles
+      .filter((profile) => profile.id !== existingId)
+      .every(
+        (profile) =>
+          !!identity.phone &&
+          profile.phone === identity.phone &&
+          profile.email !== identity.email &&
+          profile.shopifyId !== identity.shopifyId,
+      );
+    if (!onlyPhoneAlias)
+      throw new Error(
+        "Identity conflict: reconcile profiles before retrying. No consent was transferred.",
+      );
+    // A phone number can remain attached to an older email profile after a
+    // customer changes addresses. Keep that phone and its SMS consent where
+    // they are; the verified email/Shopify profile can still receive the event.
+    delete updateIdentity.phone;
+  }
   if (
     existing &&
-    Object.entries(identity).some(
+    Object.entries(updateIdentity).some(
       ([k, v]) =>
         v &&
         existing[k as keyof typeof identity] &&
@@ -80,7 +112,7 @@ export async function identify(
   return existing
     ? tx.marketingProfile.update({
         where: { id: existing.id },
-        data: { ...identity, ...(input.name ? { name: input.name } : {}) },
+        data: { ...updateIdentity, ...(input.name ? { name: input.name } : {}) },
       })
     : tx.marketingProfile.create({
         data: { shop: shop(), ...identity, name: input.name || "" },

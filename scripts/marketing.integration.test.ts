@@ -1043,6 +1043,60 @@ test("anonymous checkout events do not block the ingestion queue", async () => {
   );
 });
 
+test("authoritative email identity ignores a phone owned by an older email profile", async () => {
+  const old = await store.atomic(async (tx) => {
+    const profile = await store.identify(tx, {
+      email: "old-address@example.com",
+      phone: "+15555550121",
+    });
+    await store.consent(
+      tx,
+      profile.id,
+      "SMS_MARKETING",
+      "SUBSCRIBED",
+      "test",
+      new Date(),
+    );
+    return profile;
+  });
+  const current = await store.atomic((tx) =>
+    store.identify(tx, {
+      email: "current-address@example.com",
+      shopifyId: "121",
+    }),
+  );
+  const resolved = await store.atomic((tx) =>
+    store.identify(tx, {
+      email: "current-address@example.com",
+      phone: "+15555550121",
+      shopifyId: "121",
+      name: "Current Customer",
+    }),
+  );
+  assert.equal(resolved.id, current.id);
+  assert.equal(resolved.phone, null);
+  assert.equal(resolved.name, "Current Customer");
+  assert.equal(
+    (
+      await prisma.marketingProfile.findUniqueOrThrow({ where: { id: old.id } })
+    ).phone,
+    "+15555550121",
+  );
+  assert.equal(
+    (
+      await prisma.marketingConsent.findUniqueOrThrow({
+        where: {
+          profileId_channel: {
+            profileId: old.id,
+            channel: "SMS_MARKETING",
+          },
+        },
+      })
+    ).status,
+    "SUBSCRIBED",
+  );
+});
+
 test("marketing identity conflicts remain retryable without blocking inventory claims", async () => {
   const route = await import("../app/api/webhooks/shopify/orders-create/route");
   const raw = JSON.stringify({
