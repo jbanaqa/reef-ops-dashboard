@@ -384,6 +384,18 @@ test("Klaviyo open-history backfill restores the 365-day segment input", async (
       data: [
         {
           type: "metric",
+          id: "placed-order-metric",
+          attributes: { name: "Placed Order" },
+        },
+      ],
+      links: {
+        next: "https://a.klaviyo.com/api/metrics?page%5Bcursor%5D=next",
+      },
+    },
+    {
+      data: [
+        {
+          type: "metric",
           id: "opened-email-metric",
           attributes: { name: "Opened Email" },
         },
@@ -411,6 +423,10 @@ test("Klaviyo open-history backfill restores the 365-day segment input", async (
       links: { next: null },
     },
   ];
+  assert.equal(
+    (await engagementBackfill.syncEngagementBackfill()).phase,
+    "metric",
+  );
   assert.equal(
     (await engagementBackfill.syncEngagementBackfill()).phase,
     "events",

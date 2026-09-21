@@ -157,18 +157,18 @@ export async function syncEngagementBackfill() {
   });
   try {
     if (state.phase === "metric") {
-      const query = new URLSearchParams({
-        filter: 'equals(name,"Opened Email")',
-        "page[size]": "100",
-      });
-      const result = await page(`/api/metrics?${query}`);
+      const query = new URLSearchParams({ "page[size]": "100" });
+      const result = await page(state.next || `/api/metrics?${query}`);
       const metric = result.data.find(
         (item) =>
           item.type === "metric" && item.attributes.name === "Opened Email",
       );
-      if (!metric) throw new Error("Klaviyo's Opened Email metric was not found.");
-      state.metricId = metric.id;
-      state.phase = "events";
+      if (metric) {
+        state.metricId = metric.id;
+        state.next = undefined;
+        state.phase = "events";
+      } else if (result.links?.next) state.next = result.links.next;
+      else throw new Error("Klaviyo's Opened Email metric was not found.");
     } else if (state.phase === "events") {
       const query = new URLSearchParams({
         filter: `and(equals(metric_id,"${state.metricId}"),greater-or-equal(datetime,${state.since}))`,
