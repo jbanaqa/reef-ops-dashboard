@@ -14,6 +14,8 @@ type CatalogNode = {
   title: string;
   handle: string;
   status: string;
+  totalInventory: number | null;
+  tracksInventory: boolean;
   featuredImage: { url: string } | null;
   variants: { nodes: Array<{ id: string; title: string; price: string; compareAtPrice: string | null }> };
 };
@@ -101,7 +103,7 @@ export async function searchSaleCatalog(search = "") {
     query SaleRotationCatalog($query: String!) {
       products(first: 50, query: $query, sortKey: TITLE) {
         nodes {
-          id title handle status featuredImage { url }
+          id title handle status totalInventory tracksInventory featuredImage { url }
           variants(first: 20) { nodes { id title price compareAtPrice } }
         }
       }
@@ -168,6 +170,7 @@ export async function importSaleProducts(items: unknown) {
         regularPrice: standardPrice(variant.price, variant.compareAtPrice),
         discountPercent: request.discount,
         twentyPercentCandidate: request.discount === 20,
+        fixedInSale: request.discount === 20 ? undefined : false,
         eligibleForRotation: request.discount !== 20,
         active: true,
       },
@@ -191,36 +194,61 @@ export async function importSaleProducts(items: unknown) {
 
 export async function listSaleProducts() {
   const shop = assertSpeciesLibraryShop();
-  const products = await prisma.saleRotationProduct.findMany({ where: { shop }, orderBy: [{ active: "desc" }, { title: "asc" }] });
-  if (!products.length) return products;
-  const response = await macroalgaeGraphql<Gql<{ nodes: Array<CatalogNode | null> }>>(`
-    query RefreshSaleProducts($ids: [ID!]!) {
-      nodes(ids: $ids) {
-        ... on Product {
-          id title handle status featuredImage { url }
-          variants(first: 100) { nodes { id title price compareAtPrice } }
+  const catalog: CatalogNode[] = [];
+  let after: string | null = null;
+  do {
+    const response: Gql<{ products: { nodes: CatalogNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }> = await macroalgaeGraphql(`
+      query SyncSaleProducts($after: String) {
+        products(first: 100, after: $after, query: "status:active", sortKey: TITLE) {
+          nodes {
+            id title handle status totalInventory tracksInventory featuredImage { url }
+            variants(first: 1) { nodes { id title price compareAtPrice } }
+          }
+          pageInfo { hasNextPage endCursor }
         }
       }
-    }
-  `, { ids: products.map((product) => product.shopifyProductId) });
-  const nodes = gqlData(response, "Shopify could not refresh the sale product pool.").nodes;
-  const refreshed = await Promise.all(products.map(async (product) => {
-    const node = nodes.find((candidate) => candidate?.id === product.shopifyProductId);
-    const variant = node?.variants.nodes.find((candidate) => candidate.id === product.shopifyVariantId);
-    if (!node || !variant) return product;
-    return prisma.saleRotationProduct.update({
-      where: { id: product.id },
-      data: {
-        title: node.title,
+    `, { after });
+    const connection = gqlData(response, "Shopify could not synchronize the sale product pool.").products;
+    catalog.push(...connection.nodes);
+    after = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+    if (connection.pageInfo.hasNextPage && !after) throw new Error("Shopify reported another product page without a cursor.");
+  } while (after);
+
+  const inStock = catalog.filter((product) =>
+    product.status === "ACTIVE" &&
+    (!product.tracksInventory || (product.totalInventory ?? 0) > 0) &&
+    product.variants.nodes.length > 0,
+  );
+  await prisma.saleRotationProduct.updateMany({ where: { shop }, data: { active: false } });
+  for (const product of inStock) {
+    const variant = product.variants.nodes[0];
+    await prisma.saleRotationProduct.upsert({
+      where: { shop_shopifyProductId: { shop, shopifyProductId: product.id } },
+      update: {
+        shopifyVariantId: variant.id,
+        title: product.title,
         variantTitle: variant.title,
-        handle: node.handle,
-        imageUrl: node.featuredImage?.url ?? null,
+        handle: product.handle,
+        imageUrl: product.featuredImage?.url ?? null,
         regularPrice: standardPrice(variant.price, variant.compareAtPrice),
-        active: node.status === "ACTIVE" ? product.active : false,
+        eligibleForRotation: true,
+        active: true,
+      },
+      create: {
+        shop,
+        shopifyProductId: product.id,
+        shopifyVariantId: variant.id,
+        title: product.title,
+        variantTitle: variant.title,
+        handle: product.handle,
+        imageUrl: product.featuredImage?.url ?? null,
+        regularPrice: standardPrice(variant.price, variant.compareAtPrice),
+        eligibleForRotation: true,
+        active: true,
       },
     });
-  }));
-  return refreshed.sort((a, b) => Number(b.active) - Number(a.active) || a.title.localeCompare(b.title));
+  }
+  return prisma.saleRotationProduct.findMany({ where: { shop }, orderBy: [{ active: "desc" }, { title: "asc" }] });
 }
 
 export async function updateSaleProduct(id: string, input: Record<string, unknown>) {
@@ -230,8 +258,9 @@ export async function updateSaleProduct(id: string, input: Record<string, unknow
   const discount = input.discountPercent === undefined ? existing.discountPercent : Number(input.discountPercent);
   if (discount !== null && !SALE_DISCOUNTS.includes(discount as SaleDiscount)) throw new Error("Discount must be 5, 10, 15, or 20 percent.");
   const twentyPercentCandidate = typeof input.twentyPercentCandidate === "boolean" ? input.twentyPercentCandidate : existing.twentyPercentCandidate;
-  const fixedInSale = typeof input.fixedInSale === "boolean" ? input.fixedInSale : existing.fixedInSale;
-  if (fixedInSale && !twentyPercentCandidate) throw new Error("Only products in the 20% pool can be fixed in the sale.");
+  const fixedInSale = twentyPercentCandidate
+    ? (typeof input.fixedInSale === "boolean" ? input.fixedInSale : existing.fixedInSale)
+    : false;
   return prisma.saleRotationProduct.update({
     where: { id },
     data: {
@@ -265,7 +294,9 @@ export async function getSaleCollectionSnapshot(): Promise<CollectionSnapshot> {
     const rules = collection.ruleSet?.rules ?? [];
     const compareAtRule = rules.some((rule) => rule.column === "VARIANT_COMPARE_AT_PRICE" && rule.relation === "GREATER_THAN" && Number(rule.condition) === 0);
     const tagRule = rules.some((rule) => (rule.column === "TAG" || rule.column === "PRODUCT_TAG") && rule.relation === "EQUALS" && rule.condition.trim().toLowerCase() === SALE_TAG);
-    const compatible = !collection.ruleSet || (compareAtRule && (rules.length === 1 || (tagRule && !collection.ruleSet.appliedDisjunctively)));
+    const compatible = !collection.ruleSet ||
+      (rules.length === 1 && compareAtRule) ||
+      (rules.length === 2 && compareAtRule && tagRule && !collection.ruleSet.appliedDisjunctively);
     snapshot = { id: collection.id, title: collection.title, handle: collection.handle, automated: Boolean(collection.ruleSet), compatible };
     productIds.push(...collection.products.nodes.map((product) => product.id));
     after = collection.products.pageInfo.hasNextPage ? collection.products.pageInfo.endCursor : null;
@@ -282,21 +313,53 @@ function shuffled<T>(values: T[]) {
   return result;
 }
 
+async function historyAwareSelection<T extends { id: string }>(products: T[], count: number) {
+  const history = await prisma.saleRotationItem.groupBy({
+    by: ["productId"],
+    where: {
+      productId: { in: products.map((product) => product.id) },
+      action: { in: ["ADD", "KEEP"] },
+      run: { status: "Completed" },
+    },
+    _max: { createdAt: true },
+  });
+  const lastSale = new Map(history.map((item) => [item.productId, item._max.createdAt?.getTime() ?? 0]));
+  return products
+    .map((product) => ({ product, lastSale: lastSale.get(product.id) ?? -1, tieBreaker: Math.random() }))
+    .sort((left, right) => left.lastSale - right.lastSale || left.tieBreaker - right.tieBreaker)
+    .slice(0, count)
+    .map((entry) => entry.product);
+}
+
 export async function buildSaleRotationPreview() {
   const [settings, products, collection] = await Promise.all([getSaleSettings(), listSaleProducts(), getSaleCollectionSnapshot()]);
   const current = new Set(collection.productIds);
   const active = products.filter((product) => product.active);
   const selected = new Map<string, SaleDiscount>();
-  const selectTier = (discount: SaleDiscount, count: number, candidates: typeof active) => {
-    const ordered = shuffled(candidates).sort((a, b) => Number(current.has(a.shopifyProductId)) - Number(current.has(b.shopifyProductId)));
-    ordered.slice(0, count).forEach((product) => selected.set(product.id, discount));
-  };
-  selectTier(5, settings.discountCount5, active.filter((p) => p.eligibleForRotation && !p.twentyPercentCandidate));
-  selectTier(10, settings.discountCount10, active.filter((p) => p.eligibleForRotation && !p.twentyPercentCandidate && !selected.has(p.id)));
-  selectTier(15, settings.discountCount15, active.filter((p) => p.eligibleForRotation && !p.twentyPercentCandidate && !selected.has(p.id)));
   const fixed = active.filter((p) => p.twentyPercentCandidate && p.fixedInSale);
+  if (fixed.length > settings.discountCount20) {
+    throw new Error(`There are ${fixed.length} fixed 20% products, but settings provide only ${settings.discountCount20} 20% slots.`);
+  }
   fixed.forEach((product) => selected.set(product.id, 20));
-  selectTier(20, Math.max(0, settings.discountCount20 - fixed.length), active.filter((p) => p.twentyPercentCandidate && !p.fixedInSale));
+  const rotatingTwentyCount = settings.discountCount20 - fixed.length;
+  const rotatingTwentyPool = active.filter((p) => p.twentyPercentCandidate && !p.fixedInSale);
+  if (rotatingTwentyPool.length < rotatingTwentyCount) {
+    throw new Error(`The sale requires ${rotatingTwentyCount} rotating 20% products, but only ${rotatingTwentyPool.length} are available.`);
+  }
+  const rotatingTwenty = await historyAwareSelection(rotatingTwentyPool, rotatingTwentyCount);
+  rotatingTwenty.forEach((product) => selected.set(product.id, 20));
+
+  const standardPool = active.filter((product) => !product.twentyPercentCandidate);
+  const standardCount = settings.discountCount5 + settings.discountCount10 + settings.discountCount15;
+  if (standardPool.length < standardCount) {
+    throw new Error(`The sale requires ${standardCount} standard products, but only ${standardPool.length} are available.`);
+  }
+  const randomizedStandard = shuffled(await historyAwareSelection(standardPool, standardCount));
+  let offset = 0;
+  for (const [discount, count] of [[5, settings.discountCount5], [10, settings.discountCount10], [15, settings.discountCount15]] as const) {
+    randomizedStandard.slice(offset, offset + count).forEach((product) => selected.set(product.id, discount));
+    offset += count;
+  }
 
   const actions = products.map((product) => {
     const isCurrent = current.has(product.shopifyProductId);
@@ -314,11 +377,12 @@ export async function buildSaleRotationPreview() {
     collection: { ...collection, productCount: collection.productIds.length },
     selectedCount: selected.size,
     actions,
-    shortages: SALE_DISCOUNTS.map((discount) => {
-      const requested = settings[`discountCount${discount}` as const];
-      const actual = [...selected.values()].filter((value) => value === discount).length;
-      return { discount, requested, actual, shortage: Math.max(0, requested - actual) };
-    }),
+    shortages: SALE_DISCOUNTS.map((discount) => ({
+      discount,
+      requested: settings[`discountCount${discount}` as const],
+      actual: [...selected.values()].filter((value) => value === discount).length,
+      shortage: 0,
+    })),
   };
 }
 
@@ -329,12 +393,36 @@ async function productMutation(query: string, variables: Record<string, unknown>
   if (errors.length) throw new Error(errors.map((error) => error.message).join("; "));
 }
 
-async function applyMembership(collection: CollectionSnapshot, add: string[], remove: string[]) {
+async function assertSaleWriteReadiness(collection: CollectionSnapshot) {
+  if (!collection.compatible) {
+    throw new Error(`Shopify collection "${collection.title}" is not compatible with Sale Rotation.`);
+  }
+  const response = await macroalgaeGraphql<Gql<{
+    currentAppInstallation: { accessScopes: Array<{ handle: string }> };
+    __type: { fields: Array<{ name: string }> } | null;
+  }>>(`
+    query SaleRotationWriteReadiness {
+      currentAppInstallation { accessScopes { handle } }
+      __type(name: "Mutation") { fields { name } }
+    }
+  `);
+  const data = gqlData(response, "Shopify write readiness could not be verified.");
+  const scopes = new Set(data.currentAppInstallation.accessScopes.map((scope) => scope.handle));
+  const mutations = new Set(data.__type?.fields.map((field) => field.name) ?? []);
+  const missing: string[] = [];
+  if (!scopes.has("read_products")) missing.push("read_products scope");
+  if (!scopes.has("write_products")) missing.push("write_products scope");
+  if (!mutations.has("productVariantsBulkUpdate")) missing.push("productVariantsBulkUpdate mutation");
+  if (!mutations.has("collectionUpdate")) missing.push("collectionUpdate mutation");
+  if (missing.length) throw new Error(`Shopify write readiness failed: missing ${missing.join(", ")}.`);
+}
+
+async function applyMembership(collection: CollectionSnapshot, add: string[], remove: string[], selected = add) {
   if (!collection.compatible) {
     throw new Error(`Shopify collection "${collection.title}" is not compatible with Sale Rotation. Use a manual collection, or an automated collection with compare-at price greater than 0 and an optional ${SALE_TAG} tag rule.`);
   }
   if (collection.automated) {
-    for (const productId of add) await productMutation(`mutation($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { message } } }`, { id: productId, tags: [SALE_TAG] }, "Could not tag a sale product.");
+    for (const productId of selected) await productMutation(`mutation($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { message } } }`, { id: productId, tags: [SALE_TAG] }, "Could not tag a sale product.");
     for (const productId of remove) await productMutation(`mutation($id: ID!, $tags: [String!]!) { tagsRemove(id: $id, tags: $tags) { userErrors { message } } }`, { id: productId, tags: [SALE_TAG] }, "Could not remove a sale product tag.");
     return;
   }
@@ -342,7 +430,113 @@ async function applyMembership(collection: CollectionSnapshot, add: string[], re
   if (remove.length) await productMutation(`mutation($id: ID!, $products: [ID!]!) { collectionRemoveProducts(id: $id, productIds: $products) { userErrors { message } } }`, { id: collection.id, products: remove }, "Could not remove products from the Sale collection.");
 }
 
-type PriceSnapshot = { productId: string; variantId: string; price: string; compareAtPrice: string | null };
+type ExplicitSelectionSnapshot = { sourceId: string; productIds: string[] };
+
+async function getExplicitSelectionSnapshot(collection: CollectionSnapshot): Promise<ExplicitSelectionSnapshot | null> {
+  if (!collection.automated) return null;
+  const response = await macroalgaeGraphql<Gql<{ collection: null | { sources: Array<{
+    __typename: string;
+    id: string;
+    inclusion?: {
+      conditions: Array<{ __typename: string }>;
+      selections: { nodes: Array<{ product: { id: string } }>; pageInfo: { hasNextPage: boolean } };
+    };
+  }> } }>>(`
+    query SaleRotationExplicitSelections($id: ID!) {
+      collection(id: $id) {
+        sources {
+          __typename id
+          ... on CollectionConditionsSource {
+            inclusion {
+              conditions { __typename }
+              selections(first: 250) { nodes { product { id } } pageInfo { hasNextPage } }
+            }
+          }
+        }
+      }
+    }
+  `, { id: collection.id });
+  const sources = gqlData(response, "Shopify could not inspect explicit Sale collection selections.").collection?.sources ?? [];
+  const matching = sources.filter((source) => {
+    if (source.__typename !== "CollectionConditionsSource" || !source.inclusion) return false;
+    const types = new Set(source.inclusion.conditions.map((condition) => condition.__typename));
+    return types.has("CollectionSourceInclusionConditionVariantCompareAtPrice") && types.has("CollectionSourceInclusionConditionProductTag");
+  });
+  if (!matching.length) return null;
+  if (matching.length !== 1) throw new Error(`Expected one Sale Rotator condition source, but found ${matching.length}.`);
+  const source = matching[0];
+  if (!source.inclusion) return null;
+  if (source.inclusion.selections.pageInfo.hasNextPage) throw new Error("The Sale collection has more than 250 explicit selections; cleanup stopped for safety.");
+  return { sourceId: source.id, productIds: [...new Set(source.inclusion.selections.nodes.map((item) => item.product.id))] };
+}
+
+async function updateExplicitSelections(collectionId: string, sourceId: string, input: { add?: string[]; remove?: string[] }) {
+  const add = [...new Set(input.add ?? [])];
+  const addSet = new Set(add);
+  const remove = [...new Set(input.remove ?? [])].filter((id) => !addSet.has(id));
+  if (!add.length && !remove.length) return;
+  const inclusion: Record<string, unknown> = {};
+  if (add.length) inclusion.selectionsToAdd = add.map((productId) => ({ productId }));
+  if (remove.length) inclusion.selectionsToRemove = remove.map((productId) => ({ productId }));
+  await productMutation(`
+    mutation UpdateSaleSelections($collection: CollectionUpdateInput!) {
+      collectionUpdate(collection: $collection) { userErrors { message } }
+    }
+  `, { collection: { id: collectionId, sourcesToUpdate: [{ condition: { id: sourceId, inclusion } }] } }, "Could not update explicit Sale collection selections.");
+}
+
+async function waitForCollectionMembership(add: string[], remove: string[]) {
+  let snapshot = await getSaleCollectionSnapshot();
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const ids = new Set(snapshot.productIds);
+    const complete = add.every((id) => ids.has(id)) && remove.every((id) => !ids.has(id));
+    if (complete || attempt === 6) return snapshot;
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    snapshot = await getSaleCollectionSnapshot();
+  }
+  return snapshot;
+}
+
+async function waitForShopifyJob(jobId: string) {
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    const response = await macroalgaeGraphql<Gql<{ job: { id: string; done: boolean } | null }>>(`
+      query SaleRotationJob($id: ID!) { job(id: $id) { id done } }
+    `, { id: jobId });
+    const job = gqlData(response, "Shopify did not return collection reorder status.").job;
+    if (!job) throw new Error(`Shopify job ${jobId} could not be read.`);
+    if (job.done) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`Shopify job ${jobId} did not finish within 30 seconds.`);
+}
+
+async function shuffleSaleCollection(collection: CollectionSnapshot, pinnedProductIds: string[]) {
+  const uniqueIds = [...new Set(collection.productIds)];
+  if (uniqueIds.length < 2) return 0;
+  const collectionSet = new Set(uniqueIds);
+  const pinned = [...new Set(pinnedProductIds)].filter((id) => collectionSet.has(id));
+  const pinnedSet = new Set(pinned);
+  const shuffleable = uniqueIds.filter((id) => !pinnedSet.has(id));
+  const firstRowSize = Math.min(6, Math.floor(shuffleable.length / 2));
+  const previousFirstRow = shuffleable.slice(0, firstRowSize);
+  const lowerProducts = shuffled(shuffleable.slice(firstRowSize));
+  const order = [
+    ...pinned,
+    ...lowerProducts.slice(0, firstRowSize),
+    ...shuffled([...lowerProducts.slice(firstRowSize), ...previousFirstRow]),
+  ];
+  const response = await macroalgaeGraphql<Gql<{ collectionReorderProducts: { job: { id: string; done: boolean } | null; userErrors: Array<{ message: string }> } }>>(`
+    mutation ReorderSaleCollection($id: ID!, $moves: [MoveInput!]!) {
+      collectionReorderProducts(id: $id, moves: $moves) { job { id done } userErrors { message } }
+    }
+  `, { id: collection.id, moves: order.map((id, newPosition) => ({ id, newPosition: String(newPosition) })) });
+  const result = gqlData(response, "Shopify did not accept the Sale collection reorder.").collectionReorderProducts;
+  if (result.userErrors.length) throw new Error(result.userErrors.map((error) => error.message).join("; "));
+  if (result.job && !result.job.done) await waitForShopifyJob(result.job.id);
+  return order.length;
+}
+
+type PriceSnapshot = { productId: string; variantId: string; price: string; compareAtPrice: string | null; hadSaleTag: boolean };
 
 async function writePrices(actions: Awaited<ReturnType<typeof buildSaleRotationPreview>>["actions"], snapshots: PriceSnapshot[]) {
   for (const item of actions) {
@@ -368,10 +562,10 @@ async function writePrices(actions: Awaited<ReturnType<typeof buildSaleRotationP
 }
 
 async function capturePrices(actions: Awaited<ReturnType<typeof buildSaleRotationPreview>>["actions"]): Promise<PriceSnapshot[]> {
-  const response = await macroalgaeGraphql<Gql<{ nodes: Array<null | { id: string; variants: { nodes: Array<{ id: string; price: string; compareAtPrice: string | null }> } }> }>>(`
+  const response = await macroalgaeGraphql<Gql<{ nodes: Array<null | { id: string; tags: string[]; variants: { nodes: Array<{ id: string; price: string; compareAtPrice: string | null }> } }> }>>(`
     query CaptureSalePrices($ids: [ID!]!) {
       nodes(ids: $ids) {
-        ... on Product { id variants(first: 250) { nodes { id price compareAtPrice } } }
+        ... on Product { id tags variants(first: 250) { nodes { id price compareAtPrice } } }
       }
     }
   `, { ids: actions.map((item) => item.product.shopifyProductId) });
@@ -382,6 +576,7 @@ async function capturePrices(actions: Awaited<ReturnType<typeof buildSaleRotatio
       variantId: variant.id,
       price: variant.price,
       compareAtPrice: variant.compareAtPrice,
+      hadSaleTag: node.tags.some((tag) => tag.toLowerCase() === SALE_TAG),
     })));
 }
 
@@ -395,18 +590,28 @@ async function restorePrices(snapshots: PriceSnapshot[]) {
   }
 }
 
+async function restoreTags(snapshots: PriceSnapshot[]) {
+  const states = new Map<string, boolean>();
+  snapshots.forEach((snapshot) => states.set(snapshot.productId, snapshot.hadSaleTag));
+  for (const [productId, hadSaleTag] of states) {
+    const field = hadSaleTag ? "tagsAdd" : "tagsRemove";
+    await productMutation(`mutation($id: ID!, $tags: [String!]!) { update: ${field}(id: $id, tags: $tags) { userErrors { message } } }`, { id: productId, tags: [SALE_TAG] }, "Could not restore Sale Rotator tags.");
+  }
+}
+
 export async function runSaleRotation(triggerType: "Manual" | "Scheduled" = "Manual") {
   const settings = await getSaleSettings();
   const lockToken = randomUUID();
   const now = new Date();
   const locked = await prisma.saleRotationSettings.updateMany({
     where: { id: settings.id, OR: [{ lockExpiresAt: null }, { lockExpiresAt: { lt: now } }] },
-    data: { lockToken, lockExpiresAt: new Date(now.getTime() + 15 * 60_000) },
+    data: { lockToken, lockExpiresAt: new Date(now.getTime() + 30 * 60_000) },
   });
   if (!locked.count) throw new Error("Another sale rotation is already running.");
   const run = await prisma.saleRotationRun.create({ data: { shop: settings.shop, triggerType, dryRun: settings.dryRun } });
   let preview: Awaited<ReturnType<typeof buildSaleRotationPreview>> | null = null;
   let priceSnapshots: PriceSnapshot[] = [];
+  let explicitSelections: ExplicitSelectionSnapshot | null = null;
   try {
     preview = await buildSaleRotationPreview();
     await prisma.saleRotationItem.createMany({ data: preview.actions.map((item) => ({
@@ -418,30 +623,57 @@ export async function runSaleRotation(triggerType: "Manual" | "Scheduled" = "Man
       salePrice: item.salePrice,
     })) });
     if (!settings.dryRun) {
+      await assertSaleWriteReadiness(preview.collection);
       priceSnapshots = await capturePrices(preview.actions);
+      explicitSelections = await getExplicitSelectionSnapshot(preview.collection);
       await writePrices(preview.actions, priceSnapshots);
+      const productsToAdd = preview.actions.filter((item) => item.action === "ADD").map((item) => item.product.shopifyProductId);
+      const productsToRemove = preview.actions.filter((item) => item.action === "REMOVE").map((item) => item.product.shopifyProductId);
+      const selectedProducts = preview.actions.filter((item) => item.assignedDiscountPercent !== null).map((item) => item.product.shopifyProductId);
       await applyMembership(
         preview.collection,
-        preview.actions.filter((item) => item.action === "ADD").map((item) => item.product.shopifyProductId),
-        preview.actions.filter((item) => item.action === "REMOVE").map((item) => item.product.shopifyProductId),
+        productsToAdd,
+        productsToRemove,
+        selectedProducts,
       );
+      if (explicitSelections?.productIds.length) {
+        await updateExplicitSelections(preview.collection.id, explicitSelections.sourceId, { remove: explicitSelections.productIds });
+      }
+      const finalCollection = await waitForCollectionMembership(productsToAdd, productsToRemove);
+      const pinnedTwenty = preview.actions
+        .filter((item) => item.assignedDiscountPercent === 20)
+        .map((item) => item.product.shopifyProductId);
+      try {
+        await shuffleSaleCollection(finalCollection, pinnedTwenty);
+      } catch (error) {
+        console.warn("Sale rotation pricing completed, but collection ordering could not be shuffled:", error);
+      }
     }
     const message = settings.dryRun ? "Dry run completed; Shopify was not changed." : "Sale rotation completed successfully.";
-    await prisma.$transaction([
-      prisma.saleRotationRun.update({ where: { id: run.id }, data: { status: settings.dryRun ? "Dry Run" : "Completed", message, completedAt: new Date() } }),
-      prisma.saleRotationSettings.update({ where: { id: settings.id }, data: { lastRotatedAt: new Date() } }),
-    ]);
+    const finishRun = prisma.saleRotationRun.update({ where: { id: run.id }, data: { status: settings.dryRun ? "Dry Run" : "Completed", message, completedAt: new Date() } });
+    if (triggerType === "Scheduled") {
+      await prisma.$transaction([
+        finishRun,
+        prisma.saleRotationSettings.update({ where: { id: settings.id }, data: { lastRotatedAt: new Date() } }),
+      ]);
+    } else {
+      await finishRun;
+    }
     return { runId: run.id, executed: !settings.dryRun, message, preview };
   } catch (error) {
     let message = error instanceof Error ? error.message : "Sale rotation failed.";
     if (!settings.dryRun && preview) {
       try {
         await restorePrices(priceSnapshots);
-        await applyMembership(
-          preview.collection,
-          preview.actions.filter((item) => item.action === "REMOVE").map((item) => item.product.shopifyProductId),
-          preview.actions.filter((item) => item.action === "ADD").map((item) => item.product.shopifyProductId),
-        );
+        if (preview.collection.automated) await restoreTags(priceSnapshots);
+        else await applyMembership(
+            preview.collection,
+            preview.actions.filter((item) => item.action === "REMOVE").map((item) => item.product.shopifyProductId),
+            preview.actions.filter((item) => item.action === "ADD").map((item) => item.product.shopifyProductId),
+          );
+        if (explicitSelections) {
+          await updateExplicitSelections(preview.collection.id, explicitSelections.sourceId, { add: explicitSelections.productIds });
+        }
         message += " Shopify prices and collection membership were restored.";
       } catch (recoveryError) {
         message += ` Automatic recovery also failed: ${recoveryError instanceof Error ? recoveryError.message : "unknown recovery error"}`;
