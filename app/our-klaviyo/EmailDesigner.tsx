@@ -362,6 +362,27 @@ export default function EmailDesigner({
                     ) : (
                       <p>Your heading is included in the message below.</p>
                     )}
+                    {(content.template === "b2b-wholesale" ||
+                      visualLayout === "b2b-wholesale") && (
+                      <label>
+                        Intro line
+                        <input
+                          aria-label="Intro line"
+                          value={
+                            content.introText ??
+                            content.body.split("\n")[0] ??
+                            ""
+                          }
+                          onChange={(event) =>
+                            changeContent("introText", event.target.value)
+                          }
+                        />
+                        <small>
+                          Appears between the heading and Message. Leave blank to
+                          show no separate intro line.
+                        </small>
+                      </label>
+                    )}
                     <RichEmailCopy
                       value={copy}
                       onChange={(value) => changeContent("bodyHtml", value)}

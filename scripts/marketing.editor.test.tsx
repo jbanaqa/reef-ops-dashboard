@@ -386,6 +386,10 @@ test("delivery notice exposes its personalized heading and every message sentenc
   testing.fireEvent.click(await view.findByText("Delivery notice"));
   const heading = view.getByLabelText("Heading") as HTMLInputElement;
   assert.match(heading.value, /first_name\|default:"Aloha"/);
+  assert.equal(
+    (view.getByLabelText("Intro line") as HTMLInputElement).value,
+    "",
+  );
   const message = view.getByRole("textbox", { name: "Message" });
   assert.match(
     message.textContent || "",

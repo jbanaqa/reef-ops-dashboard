@@ -24,6 +24,7 @@ export const defaultDeliveryUpsell: DeliveryUpsellConfig = {
 export const deliveryUpsellContent: Content = {
   template: "b2b-wholesale",
   heading: personalizedDeliveryHeading,
+  introText: "",
   body: [
     "Your order is shipping out tomorrow at 8AM PST!",
     "",
@@ -75,7 +76,20 @@ export function validateDeliveryUpsell(value: unknown): DeliveryUpsellConfig {
 export function deliveryUpsellDraft(value: FlowConfig): FlowConfig {
   if (value.delivery) {
     const first = value.steps?.[0];
-    if (first?.content.heading !== previousDeliveryHeading) return value;
+    if (!first) return value;
+    const contentChanges: Partial<Content> = {};
+    if (first.content.heading === previousDeliveryHeading)
+      contentChanges.heading = personalizedDeliveryHeading;
+    if (
+      first.content.introText === undefined &&
+      first.content.body.split("\n")[0] ===
+        "Your order is shipping out tomorrow at 8AM PST!" &&
+      first.content.bodyHtml?.includes(
+        "Your order is shipping out tomorrow at 8AM PST!",
+      )
+    )
+      contentChanges.introText = "";
+    if (!Object.keys(contentChanges).length) return value;
     return {
       ...value,
       steps: [
@@ -83,7 +97,7 @@ export function deliveryUpsellDraft(value: FlowConfig): FlowConfig {
           ...first,
           content: {
             ...first.content,
-            heading: personalizedDeliveryHeading,
+            ...contentChanges,
           },
         },
         ...(value.steps || []).slice(1),

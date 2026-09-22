@@ -276,14 +276,21 @@ test("delivery upsell upgrades only untouched scaffold copy", () => {
     existing.steps[0].content.heading,
     '{{ first_name|default:"Aloha" }}, you have 24 hours to add-on to your order.',
   );
+  assert.equal(existing.steps[0].content.introText, "");
+  const personalized = render(
+    existing.steps[0].content,
+    "https://example.com/unsubscribe",
+    "123 Valid Street",
+    "Jaden Banawa",
+  );
   assert.match(
-    render(
-      existing.steps[0].content,
-      "https://example.com/unsubscribe",
-      "123 Valid Street",
-      "Jaden Banawa",
-    ),
+    personalized,
     /Jaden, you have 24 hours/,
+  );
+  assert.equal(
+    (personalized.match(/Your order is shipping out tomorrow at 8AM PST!/g) || [])
+      .length,
+    1,
   );
   assert.match(
     render(

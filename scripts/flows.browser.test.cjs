@@ -196,6 +196,19 @@ const { chromium } = require("playwright");
       await page.getByLabel("Button destination", { exact: true }).inputValue(),
       "https://coralsanonymous.com/collections/new-arrivals",
     );
+    assert.equal(
+      await page.getByLabel("Intro line", { exact: true }).inputValue(),
+      "",
+    );
+    const deliveryFrame = page.frameLocator('iframe[title="Email preview"]');
+    assert.equal(
+      await deliveryFrame
+        .getByText("Your order is shipping out tomorrow at 8AM PST!", {
+          exact: true,
+        })
+        .count(),
+      1,
+    );
     await page.getByLabel("Back to flow", { exact: true }).click();
     await page.getByRole("button", { name: "← All flows", exact: true }).click();
 
@@ -494,6 +507,7 @@ const { chromium } = require("playwright");
       const frame = page.frameLocator('iframe[title="Email preview"]');
       await frame
         .getByText("Example coral from your cart", { exact: true })
+        .first()
         .waitFor();
       if (name.includes("Discount"))
         await frame.getByText("AC300-PREVIEW", { exact: true }).waitFor();

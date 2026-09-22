@@ -155,6 +155,7 @@ export type Content = {
   heading: string;
   body: string;
   bodyHtml?: string;
+  introText?: string;
   button: string;
   url: string;
   hero?: string;
@@ -652,6 +653,10 @@ export function content(value: unknown): Content {
       c.bodyHtml !== undefined && c.bodyHtml !== null
         ? sanitizeEmailHtml(c.bodyHtml)
         : undefined,
+    introText:
+      c.introText === undefined
+        ? undefined
+        : String(c.introText).slice(0, 300),
     button: String(c.button || "Shop now").slice(0, 80),
     url: safeUrl(c.url),
     hero: c.hero ? imageSource(c.hero) : undefined,
@@ -1502,7 +1507,9 @@ export function render(
   if (layout === "b2b-wholesale") {
     const lines = c.body.split(String.fromCharCode(10));
     const greeting = personalize(
-      lines[0] || 'Hi {{ first_name|default:"Friend" }}!',
+      c.introText === undefined
+        ? lines[0] || 'Hi {{ first_name|default:"Friend" }}!'
+        : c.introText,
       profileName,
     );
     const plainBody = e(lines.slice(2).join(String.fromCharCode(10)))
@@ -1574,9 +1581,13 @@ export function render(
         ? bodyHtml
         : '<h1 style="text-align:center;font-size:27px;line-height:1.15;margin:0 0 45px">' +
           e(personalize(c.heading, profileName)) +
-          '</h1><p style="text-align:center;font-weight:bold;font-size:16px">' +
-          e(greeting) +
-          '</p><div style="font-size:13px;line-height:1.55">' +
+          "</h1>" +
+          (greeting
+            ? '<p style="text-align:center;font-weight:bold;font-size:16px">' +
+              e(greeting) +
+              "</p>"
+            : "") +
+          '<div style="font-size:13px;line-height:1.55">' +
           bodyHtml +
           "</div>") +
       productHtml(c) +
