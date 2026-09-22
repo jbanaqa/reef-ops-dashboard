@@ -40,7 +40,13 @@ export function emailBody(
     content: string;
     content_id: string;
   }[] = [];
-  for (const field of ["logo", "footerImage", "hero"] as const) {
+  for (const field of [
+    "logo",
+    "footerImage",
+    "hero",
+    "instagramIcon",
+    "facebookIcon",
+  ] as const) {
     const image = effectiveContent[field];
     const match = image?.match(
       /^data:image\/(png|jpeg|webp|gif);base64,([a-zA-Z0-9+/=]+)$/,

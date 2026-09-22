@@ -317,6 +317,14 @@ test("footer fields save with the email while sender details remain visible", as
   testing.fireEvent.change(view.getByLabelText("Footer message"), {
     target: { value: "Contact our wholesale team." },
   });
+  testing.fireEvent.change(view.getByLabelText("Instagram icon image"), {
+    target: {
+      files: [
+        new dom.window.File(["icon"], "instagram.png", { type: "image/png" }),
+      ],
+    },
+  });
+  await testing.waitFor(() => assert.ok(view.getByText("Remove instagram icon")));
   assert.ok(view.getByText(/123 Valid Street/));
   const addressToggle = view.getByLabelText(
     "Show business address in this email",
@@ -333,11 +341,13 @@ test("footer fields save with the email while sender details remain visible", as
         footerTitle: string;
         footerText: string;
         showPostalAddress: boolean;
+        instagramIcon?: string;
       };
     }[];
   };
   assert.equal(result.steps[0].content.showPostalAddress, true);
   assert.equal(result.steps[0].content.footerTitle, "Thank you, partners");
+  assert.match(result.steps[0].content.instagramIcon || "", /^data:image\/png;base64,/);
   assert.equal(
     result.steps[0].content.footerText,
     "Contact our wholesale team.",

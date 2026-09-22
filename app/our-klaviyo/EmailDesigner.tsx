@@ -28,12 +28,14 @@ function Artwork({
   scale,
   onChange,
   onScale,
+  maxFileBytes = 3_700_000,
 }: {
   label: string;
   value?: string;
   scale: number;
   onChange: (value: string | undefined) => void;
   onScale?: (value: number) => void;
+  maxFileBytes?: number;
 }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -68,9 +70,14 @@ function Artwork({
             setError("");
             if (
               !/^image\/(png|jpeg|webp|gif)$/.test(file.type) ||
+              file.size > maxFileBytes ||
               Math.ceil(file.size / 3) * 4 + 40 > 5000000
             ) {
-              setError("Use a PNG, JPEG, WebP, or GIF smaller than 3.7 MB.");
+              setError(
+                `Use a PNG, JPEG, WebP, or GIF smaller than ${
+                  maxFileBytes <= 500_000 ? "500 KB" : "3.7 MB"
+                }.`,
+              );
               return;
             }
             setLoading(true);
@@ -602,6 +609,13 @@ export default function EmailDesigner({
                     }
                   />
                 </label>
+                <Artwork
+                  label="Instagram icon"
+                  value={content.instagramIcon}
+                  scale={1}
+                  maxFileBytes={500_000}
+                  onChange={(value) => changeContent("instagramIcon", value)}
+                />
                 <label>
                   Facebook link
                   <input
@@ -613,10 +627,22 @@ export default function EmailDesigner({
                     }
                   />
                 </label>
+                <Artwork
+                  label="Facebook icon"
+                  value={content.facebookIcon}
+                  scale={1}
+                  maxFileBytes={500_000}
+                  onChange={(value) => changeContent("facebookIcon", value)}
+                />
                 <small>
-                  The logo, footer artwork, and social links saved here become
-                  shared defaults for future emails. The Unsubscribe link stays
-                  in every email.
+                  Square icons work best. Custom icons appear at 32 pixels in
+                  the email footer; the built-in symbols remain when no icon is
+                  uploaded.
+                </small>
+                <small>
+                  The logo, footer artwork, social links, and social icons saved
+                  here become shared defaults for future emails. The
+                  Unsubscribe link stays in every email.
                 </small>
                 <h3 style={{ marginTop: 24 }}>Sender details</h3>
                 <label

@@ -469,12 +469,16 @@ test("shared branding fills missing email artwork and footer metadata", () => {
       logo: "https://cdn.example.com/logo.png",
       instagramUrl: "https://instagram.com/example",
       facebookUrl: "https://facebook.com/example",
+      instagramIcon: "https://cdn.example.com/instagram.png",
+      facebookIcon: "https://cdn.example.com/facebook.png",
     },
   );
   assert.match(html, /cdn\.example\.com\/logo\.png/);
   assert.match(html, /Follow Us/);
   assert.match(html, /instagram\.com\/example/);
   assert.match(html, /facebook\.com\/example/);
+  assert.match(html, /cdn\.example\.com\/instagram\.png/);
+  assert.match(html, /cdn\.example\.com\/facebook\.png/);
   assert.match(html, /All rights reserved/);
 });
 test("segment window validation rejects NaN, fractions, and negative windows", () => {
@@ -699,14 +703,18 @@ test("uploaded artwork becomes inline email attachments", () => {
         ...defaultContent,
         template: "b2b-wholesale",
         logo: "data:image/png;base64,YWJj",
+        instagramUrl: "https://instagram.com/example",
+        instagramIcon: "data:image/png;base64,ZGVm",
       },
     },
     "Address",
     "Company",
   );
   assert.match(payload.html, /src="cid:marketing-logo"/);
+  assert.match(payload.html, /src="cid:marketing-instagramIcon"/);
   assert.ok(!payload.html.includes("data:image"));
   assert.equal(payload.attachments?.[0].content, "YWJj");
+  assert.equal(payload.attachments?.[1].content, "ZGVm");
 });
 
 test("clearing HTML copy does not resurrect the previous plain-text message", () => {

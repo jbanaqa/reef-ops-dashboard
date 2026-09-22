@@ -181,6 +181,8 @@ export type Content = {
   footerUnsubscribeText?: string;
   instagramUrl?: string;
   facebookUrl?: string;
+  instagramIcon?: string;
+  facebookIcon?: string;
   /** @deprecated Older saved flows may still contain these pixel values. */ logoWidth?: number;
   logoHeight?: number;
   footerWidth?: number;
@@ -201,6 +203,8 @@ export type EmailBranding = {
   footerScale?: number;
   instagramUrl?: string;
   facebookUrl?: string;
+  instagramIcon?: string;
+  facebookIcon?: string;
 };
 export type MarketingSettings = {
   postalAddress: string;
@@ -303,6 +307,12 @@ export function marketingSettings(
         : {}),
       ...(branding.facebookUrl
         ? { facebookUrl: safeUrl(branding.facebookUrl).slice(0, 500) }
+        : {}),
+      ...(brandingImage(branding.instagramIcon)
+        ? { instagramIcon: brandingImage(branding.instagramIcon) }
+        : {}),
+      ...(brandingImage(branding.facebookIcon)
+        ? { facebookIcon: brandingImage(branding.facebookIcon) }
         : {}),
     },
     operations: {
@@ -667,6 +677,8 @@ export function content(value: unknown): Content {
     facebookUrl: c.facebookUrl
       ? safeUrl(c.facebookUrl).slice(0, 500)
       : undefined,
+    instagramIcon: c.instagramIcon ? imageSource(c.instagramIcon) : undefined,
+    facebookIcon: c.facebookIcon ? imageSource(c.facebookIcon) : undefined,
     footerScale: c.footerImage
       ? scale(c.footerScale, c.footerWidth, 560)
       : undefined,
@@ -699,6 +711,12 @@ export function withBranding(c: Content, branding?: EmailBranding): Content {
     ...(c.facebookUrl === undefined && branding.facebookUrl
       ? { facebookUrl: branding.facebookUrl }
       : {}),
+    ...(c.instagramIcon === undefined && branding.instagramIcon
+      ? { instagramIcon: branding.instagramIcon }
+      : {}),
+    ...(c.facebookIcon === undefined && branding.facebookIcon
+      ? { facebookIcon: branding.facebookIcon }
+      : {}),
   };
 }
 export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
@@ -715,6 +733,10 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
       found.instagramUrl = v.instagramUrl;
     if (typeof v.facebookUrl === "string" && v.facebookUrl)
       found.facebookUrl = v.facebookUrl;
+    if (typeof v.instagramIcon === "string" && v.instagramIcon)
+      found.instagramIcon = v.instagramIcon;
+    if (typeof v.facebookIcon === "string" && v.facebookIcon)
+      found.facebookIcon = v.facebookIcon;
     for (const child of Object.values(v)) {
       if (child && typeof child === "object") visit(child);
     }
@@ -730,12 +752,20 @@ function socialHtml(c: Content) {
     (c.instagramUrl
       ? '<a href="' +
         escapeHtml(c.instagramUrl) +
-        '" style="display:inline-block;margin:0 9px;color:#122f35;font-size:24px;font-weight:bold;text-decoration:none" aria-label="Instagram">◎</a>'
+        '" style="display:inline-block;margin:0 9px;color:#122f35;font-size:24px;font-weight:bold;text-decoration:none;vertical-align:middle" aria-label="Instagram">' +
+        (c.instagramIcon
+          ? '<img src="' + escapeHtml(c.instagramIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
+          : "◎") +
+        "</a>"
       : "") +
     (c.facebookUrl
       ? '<a href="' +
         escapeHtml(c.facebookUrl) +
-        '" style="display:inline-block;margin:0 9px;color:#122f35;font-family:Arial,sans-serif;font-size:24px;font-weight:bold;text-decoration:none" aria-label="Facebook">f</a>'
+        '" style="display:inline-block;margin:0 9px;color:#122f35;font-family:Arial,sans-serif;font-size:24px;font-weight:bold;text-decoration:none;vertical-align:middle" aria-label="Facebook">' +
+        (c.facebookIcon
+          ? '<img src="' + escapeHtml(c.facebookIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
+          : "f") +
+        "</a>"
       : "") +
     "</div>"
   );
@@ -1027,10 +1057,18 @@ function campaignSaleHtml(
     (c.facebookUrl || c.instagramUrl
       ? '<p style="margin:0 0 14px;font-size:25px">' +
         (c.facebookUrl
-          ? '<a href="' + e(c.facebookUrl) + '" aria-label="Facebook" style="color:#fff;text-decoration:none;margin:0 12px">f</a>'
+          ? '<a href="' + e(c.facebookUrl) + '" aria-label="Facebook" style="display:inline-block;color:#fff;text-decoration:none;margin:0 12px;vertical-align:middle">' +
+            (c.facebookIcon
+              ? '<img src="' + e(c.facebookIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
+              : "f") +
+            "</a>"
           : "") +
         (c.instagramUrl
-          ? '<a href="' + e(c.instagramUrl) + '" aria-label="Instagram" style="color:#fff;text-decoration:none;margin:0 12px">◎</a>'
+          ? '<a href="' + e(c.instagramUrl) + '" aria-label="Instagram" style="display:inline-block;color:#fff;text-decoration:none;margin:0 12px;vertical-align:middle">' +
+            (c.instagramIcon
+              ? '<img src="' + e(c.instagramIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
+              : "◎") +
+            "</a>"
           : "") +
         "</p>"
       : "") +
