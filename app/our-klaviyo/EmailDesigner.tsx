@@ -13,6 +13,15 @@ import EmailPreview from "./EmailPreview";
 import RichEmailCopy from "./RichEmailCopy";
 import CampaignEmailFields from "./CampaignEmailFields";
 
+const emailLayoutNames: Record<EmailLayout, string> = {
+  standard: "Standard",
+  "b2b-wholesale": "B2B wholesale",
+  "cart-recovery": "Cart recovery",
+  welcome: "Welcome offer",
+  "welcome-social": "Welcome social",
+  "campaign-sale": "Campaign sale",
+};
+
 function Artwork({
   label,
   value,
@@ -448,8 +457,9 @@ export default function EmailDesigner({
               )))}
             {panel === "layout" && (
               <>
-                <section className="mk-editor-section">
-                  <h3>Email layout</h3>
+                <details className="mk-editor-section mk-editor-disclosure">
+                  <summary><span>Email layout</span><small>{emailLayoutNames[visualLayout]}</small></summary>
+                  <div className="mk-editor-disclosure-body">
                   <p>
                     Change the appearance without changing this email&apos;s trigger,
                     timing, audience, coupon, or dynamic customer data.
@@ -485,7 +495,8 @@ export default function EmailDesigner({
                       Restore this email&apos;s original layout
                     </button>
                   )}
-                </section>
+                  </div>
+                </details>
                 {visualLayout === "campaign-sale" && content.campaignLayout && (
                   <CampaignEmailFields
                     content={content}

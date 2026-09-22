@@ -86,8 +86,20 @@ export default function CampaignEmailFields({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "preview-campaign-feeds", content }),
       });
-      const result = await response.json();
+      const responseText = await response.text();
+      let result: { content?: Content; error?: string } = {};
+      try {
+        result = JSON.parse(responseText) as typeof result;
+      } catch {
+        if (!response.ok)
+          throw new Error(
+            "The product preview service did not finish. Please try again in a moment.",
+          );
+        throw new Error("The product preview returned an unreadable response.");
+      }
       if (!response.ok) throw new Error(result.error || "Could not load products.");
+      if (!result.content?.campaignLayout)
+        throw new Error("The product preview did not include an email layout.");
       const resolved = result.content as Content;
       onChange("campaignLayout", resolved.campaignLayout);
     } catch (error) {
@@ -114,8 +126,9 @@ export default function CampaignEmailFields({
         </label>
       </section>}
 
-      <section className="mk-editor-section">
-        <h3>Header links</h3>
+      <details className="mk-editor-section mk-editor-disclosure">
+        <summary><span>Header links</span><small>{layout.navigation.length} links</small></summary>
+        <div className="mk-editor-disclosure-body">
         <p>The logo is managed in Artwork. These links sit directly below it.</p>
         {layout.navigation.map((item, index) => (
           <fieldset className="mk-campaign-field-card" key={`${item.label}-${index}`}>
@@ -167,10 +180,12 @@ export default function CampaignEmailFields({
             Add header link
           </button>
         )}
-      </section>
+        </div>
+      </details>
 
-      <section className="mk-editor-section">
-        <h3>Sale banner</h3>
+      <details className="mk-editor-section mk-editor-disclosure">
+        <summary><span>Sale banner</span><small>Link destination</small></summary>
+        <div className="mk-editor-disclosure-body">
         <p>Upload the full-width banner in Artwork, then choose where it links.</p>
         <label>
           Banner destination
@@ -180,16 +195,18 @@ export default function CampaignEmailFields({
             onChange={(event) => patchLayout({ heroLink: event.target.value })}
           />
         </label>
-      </section>
+        </div>
+      </details>
 
-      <section className="mk-editor-section">
-        <h3>Email sections</h3>
+      <details className="mk-editor-section mk-editor-disclosure">
+        <summary><span>Email sections</span><small>{layout.sections.length} sections</small></summary>
+        <div className="mk-editor-disclosure-body">
         <p>Add, reorder, and edit product grids and full-width buttons.</p>
         <div className="mk-campaign-section-list">
           {layout.sections.map((section, sectionIndex) => (
-            <details className="mk-campaign-builder-card" key={section.id} open={sectionIndex === 0}>
+            <details className="mk-campaign-builder-card" key={section.id}>
               <summary>
-                <span>{section.type === "products" ? `Product grid · ${section.feed?.name || "Manual"} · ${section.feed?.limit || section.products.length}` : `Full-width button · ${section.label}`}</span>
+                <span>{section.type === "products" ? `Product grid · ${campaignProductFeed(section.feed)?.name || section.feed?.name || "Manual"} · ${section.feed?.limit || section.products.length}` : `Full-width button · ${section.label}`}</span>
               </summary>
               <div className="mk-campaign-builder-actions">
                 <button type="button" disabled={sectionIndex === 0} onClick={() => patchLayout({ sections: move(layout.sections, sectionIndex, -1) })}>Move up</button>
@@ -233,7 +250,7 @@ export default function CampaignEmailFields({
                   </label>
                   {section.feed && (
                     <div className="mk-campaign-feed-card">
-                      <strong>{section.feed.name}</strong>
+                      <strong>{campaignProductFeed(section.feed)?.name || section.feed.name}</strong>
                       <span>
                         {section.feed.tags.length
                           ? `Tag includes ${section.feed.tags.join(" OR ")}. `
@@ -295,10 +312,12 @@ export default function CampaignEmailFields({
           <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("products"), type: "products", backgroundColor: "#ffffff", products: [blankProduct(), blankProduct()] }] })}>Add product grid</button>
           <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("cta"), type: "cta", label: "SHOP NOW!", url: home, backgroundColor: "#3c8429", textColor: "#ffffff" }] })}>Add full-width button</button>
         </div>
-      </section>
+        </div>
+      </details>
 
-      <section className="mk-editor-section">
-        <h3>Design</h3>
+      <details className="mk-editor-section mk-editor-disclosure">
+        <summary><span>Design</span><small>Colors, type and spacing</small></summary>
+        <div className="mk-editor-disclosure-body">
         <p>Safe email styles are applied inline for consistent delivery.</p>
         <label>Font<select value={layout.style.fontFamily} onChange={(event) => patchStyle({ fontFamily: event.target.value as CampaignEmailLayout["style"]["fontFamily"] })}><option>Arial</option><option>Verdana</option><option>Georgia</option><option>Trebuchet MS</option></select></label>
         <label>Product alignment<select value={layout.style.productAlignment} onChange={(event) => patchStyle({ productAlignment: event.target.value as CampaignEmailLayout["style"]["productAlignment"] })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
@@ -316,7 +335,8 @@ export default function CampaignEmailFields({
         ] as const).map(([key, label, min, max]) => (
           <label key={key}>{label} <span>{layout.style[key]}px</span><input type="range" min={min} max={max} value={layout.style[key]} onChange={(event) => patchStyle({ [key]: Number(event.target.value) })} /></label>
         ))}
-      </section>
+        </div>
+      </details>
     </>
   );
 }

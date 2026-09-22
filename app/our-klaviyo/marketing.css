@@ -19,6 +19,14 @@ button.mk-flow-node{font:inherit;text-align:left;cursor:pointer;color:inherit;wi
 .marketing .mk-designer-tabs button{min-width:0;padding:10px 6px}
 
 .mk-designer.is-read-only .mk-designer-body{grid-template-columns:minmax(0,1fr)}
+.mk-editor-disclosure{padding:0}
+.mk-editor-disclosure>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 0;cursor:pointer;list-style:none;color:var(--text-main)}
+.mk-editor-disclosure>summary::-webkit-details-marker{display:none}
+.mk-editor-disclosure>summary:before{content:"›";font-size:20px;line-height:1;transition:transform .15s ease}
+.mk-editor-disclosure[open]>summary:before{transform:rotate(90deg)}
+.mk-editor-disclosure>summary>span{flex:1;font-size:15px;font-weight:650}
+.marketing .mk-editor-disclosure>summary>small{margin:0;white-space:nowrap}
+.mk-editor-disclosure-body{padding:0 0 22px 24px}
 .mk-campaign-field-card,.mk-campaign-builder-card,.mk-campaign-product-card{border:1px solid var(--border);border-radius:9px;background:var(--surface-muted);padding:12px;margin:12px 0}
 .mk-campaign-field-card legend{padding:0 6px;color:var(--text-main);font-weight:650}
 .mk-campaign-builder-card>summary,.mk-campaign-product-card>summary{cursor:pointer;color:var(--text-main);font-size:13px;font-weight:650;line-height:1.45}

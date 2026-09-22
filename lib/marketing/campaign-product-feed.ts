@@ -34,8 +34,8 @@ type ProductsResponse = {
 };
 
 const PRODUCTS = `
-  query MarketingCampaignProducts($after: String) {
-    products(first: 50, after: $after, query: "status:active", sortKey: CREATED_AT, reverse: true) {
+  query MarketingCampaignProducts($after: String, $query: String!) {
+    products(first: 50, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
       nodes {
         id title handle tags createdAt onlineStoreUrl
         featuredImage { url }
@@ -86,20 +86,31 @@ function seededShuffle<T>(items: T[], seed: string) {
   return result;
 }
 
-async function campaignCatalog() {
+function feedQuery(feed: CampaignProductFeed) {
+  if (!feed.tags.length) return "status:active";
+  const tags = feed.tags.map((tag) => `tag:${tag}`).join(" OR ");
+  return `status:active AND (${tags})`;
+}
+
+async function feedCatalog(feed: CampaignProductFeed) {
   const products: ShopifyProduct[] = [];
   let after: string | null = null;
   let complete = false;
   // A bounded catalogue read prevents a malformed store response from holding
   // campaign preparation indefinitely. Refuse to send rather than truncate.
-  for (let page = 0; page < 40; page++) {
+  for (let page = 0; page < 10; page++) {
     const response: ProductsResponse = await shopifyGraphql<ProductsResponse>(
       PRODUCTS,
-      { after },
+      { after, query: feedQuery(feed) },
     );
     const connection = response.data?.products;
     if (!connection) throw new Error("Shopify did not return the product catalogue.");
     products.push(...connection.nodes);
+    const eligible = candidates(products, feed);
+    if (feed.order === "newest" && eligible.length >= feed.limit) {
+      complete = true;
+      break;
+    }
     if (!connection.pageInfo.hasNextPage) {
       complete = true;
       break;
@@ -108,7 +119,7 @@ async function campaignCatalog() {
     if (!after) throw new Error("Shopify product pagination was incomplete.");
   }
   if (!complete)
-    throw new Error("The Shopify catalogue is too large to prepare safely in one campaign run.");
+    throw new Error(`The ${feed.name} feed is too large to prepare safely in one request.`);
   return products;
 }
 
@@ -152,14 +163,25 @@ export async function resolveCampaignProductFeeds(
   const layout = source.campaignLayout;
   if (!layout?.sections.some((section) => section.type === "products" && section.feed))
     return source;
-  const catalog = await campaignCatalog();
+  const feeds = new Map(
+    layout.sections.flatMap((section) =>
+      section.type === "products" && section.feed
+        ? [[section.feed.key, section.feed] as const]
+        : [],
+    ),
+  );
+  const catalogs = new Map(
+    await Promise.all(
+      [...feeds.values()].map(async (feed) => [feed.key, await feedCatalog(feed)] as const),
+    ),
+  );
   return {
     ...source,
     campaignLayout: {
       ...layout,
       sections: layout.sections.map((section) => {
         if (section.type !== "products" || !section.feed) return section;
-        const matching = candidates(catalog, section.feed);
+        const matching = candidates(catalogs.get(section.feed.key) || [], section.feed);
         const selected =
           section.feed.order === "random"
             ? seededShuffle(matching, `${seed}:${section.feed.key}`)

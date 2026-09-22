@@ -31,8 +31,8 @@ export type CampaignEmailProduct = {
 export const campaignProductFeeds = [
   {
     key: "anniversarysalesale",
-    name: "Anniversary sale",
-    description: "Products tagged A50, A55, A60, or A65. Random order.",
+    name: "Sale product feed",
+    description: "General sale products tagged A50, A55, A60, or A65. Random order.",
     tags: ["A50", "A55", "A60", "A65"],
     order: "random",
     limit: 6,
@@ -1389,7 +1389,7 @@ export const defaultCampaignContent: Content = {
     ],
     sections: [
       {
-        id: "anniversary-sale-products",
+        id: "sale-products",
         type: "products",
         backgroundColor: "#ffffff",
         feed: campaignProductFeed({ key: "anniversarysalesale" }),

@@ -367,6 +367,12 @@ test("one editor can change a flow's visual layout without changing its template
   await testing.waitFor(() =>
     assert.ok(view.getByText("Email sections", { exact: true })),
   );
+  const layoutGroup = view.getByText("Email layout", { exact: true }).closest("details");
+  const sectionsGroup = view.getByText("Email sections", { exact: true }).closest("details");
+  assert.equal(layoutGroup?.open, false);
+  assert.equal(sectionsGroup?.open, false);
+  testing.fireEvent.click(view.getByText("Email sections", { exact: true }));
+  assert.equal(sectionsGroup?.open, true);
   const frame = view.getByTitle("Email preview") as HTMLIFrameElement;
   assert.match(frame.getAttribute("srcdoc") || "", /Universal editor/);
   testing.fireEvent.click(view.getByRole("button", { name: "Save email" }));
