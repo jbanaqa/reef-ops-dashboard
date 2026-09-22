@@ -67,6 +67,42 @@ test("campaign sale layouts round-trip and render responsive email-safe sections
   assert.match(html, /max-width:480px/);
   assert.match(html, /123 Ocean Ave/);
 });
+test("visual layouts can change without changing flow behavior or dynamic data", () => {
+  const campaignLayout = structuredClone(defaultCampaignContent.campaignLayout!);
+  campaignLayout.sections = [];
+  const welcome = content({
+    ...welcomeSteps[0].content,
+    layout: "campaign-sale",
+    campaignLayout,
+    couponCode: "WELCOME-PERSONAL",
+  });
+  assert.equal(welcome.template, "welcome");
+  assert.equal(welcome.layout, "campaign-sale");
+  const saleHtml = render(welcome, "https://example.com/u", "123 Ocean Ave");
+  assert.match(saleHtml, /WELCOME-PERSONAL/);
+  assert.match(saleHtml, new RegExp(welcome.heading));
+
+  const cartAsWelcome = content({
+    ...defaultContent,
+    template: "cart-recovery",
+    layout: "welcome",
+    products: [
+      {
+        title: "Customer cart coral",
+        url: "https://coralsanonymous.com/cart",
+        price: "$29.99",
+      },
+    ],
+  });
+  const welcomeHtml = render(
+    cartAsWelcome,
+    "https://example.com/u",
+    "123 Ocean Ave",
+  );
+  assert.match(welcomeHtml, /Customer cart coral/);
+  assert.equal(cartAsWelcome.template, "cart-recovery");
+  assert.equal(cartAsWelcome.layout, "welcome");
+});
 import {
   defaultDeliveryUpsell,
   deliveryDateFromTags,

@@ -6,6 +6,15 @@ export const channels = [
   "SMS_TRANSACTIONAL",
 ] as const;
 export type Channel = (typeof channels)[number];
+export const emailLayouts = [
+  "standard",
+  "b2b-wholesale",
+  "cart-recovery",
+  "welcome",
+  "welcome-social",
+  "campaign-sale",
+] as const;
+export type EmailLayout = (typeof emailLayouts)[number];
 export type CampaignEmailProduct = {
   id: string;
   title: string;
@@ -70,6 +79,8 @@ export type Content = {
     | "welcome"
     | "welcome-social"
     | "campaign-sale";
+  /** Visual presentation. The template continues to describe dynamic flow behavior. */
+  layout?: EmailLayout;
   couponCode?: string;
   couponExpiresAt?: string;
   offerAboveBody?: boolean;
@@ -525,6 +536,9 @@ export function content(value: unknown): Content {
           : c.template === "b2b-wholesale"
             ? "b2b-wholesale"
             : "standard",
+    layout: emailLayouts.includes(c.layout as EmailLayout)
+      ? (c.layout as EmailLayout)
+      : undefined,
     couponCode: c.couponCode ? String(c.couponCode).slice(0, 100) : undefined,
     couponExpiresAt: c.couponExpiresAt
       ? new Date(c.couponExpiresAt).toISOString()
@@ -678,9 +692,10 @@ export function escapeHtml(value: string) {
   );
 }
 export function footerTitle(c: Content) {
+  const layout = c.layout || c.template;
   return (
     c.footerTitle ??
-    (c.template === "b2b-wholesale" && !c.footerImage
+    (layout === "b2b-wholesale" && !c.footerImage
       ? "Thank you for your business"
       : "")
   );
@@ -726,7 +741,27 @@ function campaignSaleHtml(
       e(c.heading) +
       '" width="600" style="display:block;width:100%;max-width:600px;height:auto"></a></td></tr>'
     : "";
-  const sections = layout.sections
+  const usesDynamicFlowContent = c.template !== "campaign-sale";
+  const dynamicProducts: CampaignEmailSection[] =
+    usesDynamicFlowContent && c.products?.length
+      ? [
+          {
+            id: "dynamic-flow-products",
+            type: "products",
+            backgroundColor: style.contentBackground,
+            products: c.products.map((product, index) => ({
+              id: `dynamic-product-${index}`,
+              title: product.title,
+              url: product.url,
+              image: product.image,
+              salePrice: product.price,
+              showCompareAtPrice: false,
+              button: "Shop now",
+            })),
+          },
+        ]
+      : [];
+  const sections = [...dynamicProducts, ...layout.sections]
     .map((section) => {
       if (section.type === "cta")
         return (
@@ -799,6 +834,56 @@ function campaignSaleHtml(
       return '<tr><td style="padding:' + style.sectionPadding + 'px;background:' + e(section.backgroundColor || style.contentBackground) + '"><table role="presentation" width="100%" style="table-layout:fixed"><tbody>' + rows.join("") + "</tbody></table></td></tr>";
     })
     .join("");
+  const dynamicExpiry = c.couponExpiresAt
+    ? new Intl.DateTimeFormat("en-US", {
+        dateStyle: "long",
+        timeStyle: "short",
+        timeZone: "America/Los_Angeles",
+      }).format(new Date(c.couponExpiresAt)) + " Pacific time"
+    : "your personal expiration date";
+  const dynamicCopy =
+    c.bodyHtml !== undefined
+      ? personalize(
+          c.bodyHtml.replaceAll("{{ coupon_expires }}", dynamicExpiry),
+          undefined,
+          true,
+        )
+      : e(
+          personalize(
+            c.body.replaceAll("{{ coupon_expires }}", dynamicExpiry),
+          ),
+        ).replace(/\n/g, "<br>");
+  const dynamicMessage = usesDynamicFlowContent
+    ? '<tr><td style="padding:28px ' +
+      style.sectionPadding +
+      'px;text-align:center;background:' +
+      e(style.contentBackground) +
+      ';color:' +
+      e(style.textColor) +
+      '"><h1 style="margin:0 0 18px;font-size:28px;line-height:1.2">' +
+      e(c.heading) +
+      '</h1><div style="font-size:16px;line-height:1.6">' +
+      dynamicCopy +
+      "</div>" +
+      (c.couponCode
+        ? '<div style="margin:22px 0 0"><span style="display:inline-block;border:2px dashed ' +
+          e(style.salePriceColor) +
+          ';border-radius:8px;padding:10px 16px;font-size:21px;font-weight:bold">' +
+          e(c.couponCode) +
+          "</span></div>"
+        : "") +
+      '<p style="margin:24px 0 0"><a href="' +
+      e(c.url) +
+      '" style="display:inline-block;background:' +
+      e(style.buttonBackground) +
+      ";color:" +
+      e(style.buttonTextColor) +
+      ";border-radius:" +
+      style.buttonRadius +
+      'px;padding:12px 20px;font-weight:bold;text-decoration:none">' +
+      e(c.button) +
+      "</a></p></td></tr>"
+    : "";
   return (
     "<!doctype html><html>" +
     emailHead +
@@ -807,7 +892,7 @@ function campaignSaleHtml(
     (c.logo
       ? '<img src="' + e(c.logo) + '" alt="' + e(organizationName) + '" width="' + Math.round(360 * (c.logoScale || 1)) + '" style="display:block;max-width:100%;height:auto;margin:auto">'
       : '<strong style="font-size:27px;font-style:italic">' + e(organizationName.toUpperCase()) + "</strong>") +
-    "</td></tr><tr><td style=\"padding:0 20px 8px\">" + nav + "</td></tr>" + hero + sections +
+    "</td></tr><tr><td style=\"padding:0 20px 8px\">" + nav + "</td></tr>" + hero + dynamicMessage + sections +
     '<tr><td style="padding:24px;background:#050505;color:#fff;text-align:center;font-size:12px;line-height:1.6">' +
     (c.facebookUrl || c.instagramUrl
       ? '<p style="margin:0 0 14px;font-size:25px">' +
@@ -836,9 +921,10 @@ export function render(
   c = content(withBranding(content(c), branding));
   address = c.showPostalAddress ? address : "";
   const e = escapeHtml;
-  if (c.template === "campaign-sale" && c.campaignLayout)
+  const layout = c.layout || c.template || "standard";
+  if (layout === "campaign-sale" && c.campaignLayout)
     return campaignSaleHtml(c, unsubscribe, address, organizationName);
-  if (c.template === "welcome" || c.template === "welcome-social") {
+  if (layout === "welcome" || layout === "welcome-social") {
     const displayExpiry = c.couponExpiresAt
       ? new Intl.DateTimeFormat("en-US", {
           dateStyle: "long",
@@ -851,7 +937,7 @@ export function render(
       body: c.body.replaceAll("{{ coupon_expires }}", displayExpiry),
       bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", displayExpiry),
     };
-    const social = c.template === "welcome-social";
+    const social = layout === "welcome-social";
     const instagram =
       c.instagramUrl || "https://www.instagram.com/coralsanonymous/";
     const facebook =
@@ -959,6 +1045,7 @@ export function render(
           ) +
           "</tr></table>"
         : "") +
+      cartProductHtml(c) +
       '<p style="margin:26px 0 0;text-align:center"><a href="' +
       e(c.url) +
       '" style="display:block;border-radius:4px;background:#e69a49;padding:12px 16px;color:white;font-size:17px;font-weight:bold;text-decoration:none">' +
@@ -992,7 +1079,7 @@ export function render(
       " | All rights reserved.</p></td></tr></table></td></tr></table></body></html>"
     );
   }
-  if (c.couponCode && c.template !== "cart-recovery") {
+  if (c.couponCode && layout !== "cart-recovery") {
     const line = "Your 10% discount code: " + c.couponCode;
     c = {
       ...c,
@@ -1002,7 +1089,7 @@ export function render(
         : {}),
     };
   }
-  if (c.template === "cart-recovery") {
+  if (layout === "cart-recovery") {
     const copy =
       c.bodyHtml !== undefined
         ? personalize(c.bodyHtml, profileName, true)
@@ -1080,7 +1167,7 @@ export function render(
       '">Unsubscribe</a></p></td></tr></table></td></tr></table></body></html>'
     );
   }
-  if (c.template === "b2b-wholesale") {
+  if (layout === "b2b-wholesale") {
     const lines = c.body.split(String.fromCharCode(10));
     const greeting = personalize(
       lines[0] || 'Hi {{ first_name|default:"Friend" }}!',

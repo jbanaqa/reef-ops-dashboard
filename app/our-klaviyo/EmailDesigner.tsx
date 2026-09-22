@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Content,
+  defaultCampaignContent,
+  type EmailLayout,
   escapeHtml,
   imageSource,
   footerTitle,
@@ -169,9 +171,10 @@ export default function EmailDesigner({
   ) => void | Promise<unknown>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [panel, setPanel] = useState<"content" | "artwork" | "footer" | "test">(
-    "content",
-  );
+  const [panel, setPanel] = useState<
+    "content" | "layout" | "artwork" | "footer" | "test"
+  >("content");
+  const visualLayout = content.layout || content.template || "standard";
   const [mobile, setMobile] = useState(false);
   const [mobileWidth, setMobileWidth] = useState(375);
   const [recipient, setRecipient] = useState("");
@@ -265,17 +268,8 @@ export default function EmailDesigner({
       <div className="mk-designer-body">
         {!readOnly && <aside className="mk-designer-sidebar">
           <nav className="mk-designer-tabs" aria-label="Email editing sections">
-            {(["content", "artwork", "footer", "test"] as const)
-              .filter((tab) =>
-                contentFields
-                  ? tab === "content" || tab === "footer"
-                  : tab !== "artwork" ||
-                    content.template === "b2b-wholesale" ||
-                     content.template === "cart-recovery" ||
-                     content.template === "welcome" ||
-                     content.template === "welcome-social" ||
-                     content.template === "campaign-sale",
-              )
+            {(["content", "layout", "artwork", "footer", "test"] as const)
+              .filter((tab) => tab !== "test" || !!onTest)
               .map((tab) => (
                 <button
                   key={tab}
@@ -283,8 +277,10 @@ export default function EmailDesigner({
                   aria-pressed={panel === tab}
                   onClick={() => setPanel(tab)}
                 >
-                  {tab === "content"
-                    ? "Content"
+                   {tab === "content"
+                      ? "Content"
+                    : tab === "layout"
+                      ? "Layout"
                     : tab === "artwork"
                       ? "Artwork"
                       : tab === "footer"
@@ -295,13 +291,13 @@ export default function EmailDesigner({
           </nav>
           <div className="mk-designer-fields">
             {panel === "content" &&
-              (contentFields || (content.template === "campaign-sale" && content.campaignLayout ? (
-                <CampaignEmailFields
-                  content={content}
-                  subject={subject}
-                  onSubject={onSubject}
-                  onChange={changeContent}
-                />
+              (contentFields || (content.template === "campaign-sale" && visualLayout === "campaign-sale" ? (
+                <section className="mk-editor-section">
+                  <h3>Inbox details</h3>
+                  <p>Edit the sale structure in Layout. These details appear in the inbox.</p>
+                  <label>Subject<input value={subject} onChange={(event) => onSubject(event.target.value)} /></label>
+                  <label>Preview text<input value={content.preview || ""} onChange={(event) => changeContent("preview", event.target.value)} /></label>
+                </section>
               ) : (
                 <>
                   <section className="mk-editor-section">
@@ -450,6 +446,57 @@ export default function EmailDesigner({
                   )}
                 </>
               )))}
+            {panel === "layout" && (
+              <>
+                <section className="mk-editor-section">
+                  <h3>Email layout</h3>
+                  <p>
+                    Change the appearance without changing this email&apos;s trigger,
+                    timing, audience, coupon, or dynamic customer data.
+                  </p>
+                  <label>
+                    Visual preset
+                    <select
+                      aria-label="Visual preset"
+                      value={visualLayout}
+                      onChange={(event) => {
+                        const layout = event.target.value as EmailLayout;
+                        changeContent("layout", layout);
+                        if (layout === "campaign-sale" && !content.campaignLayout) {
+                          const campaignLayout = structuredClone(
+                            defaultCampaignContent.campaignLayout!,
+                          );
+                          if (content.template !== "campaign-sale")
+                            campaignLayout.sections = [];
+                          changeContent("campaignLayout", campaignLayout);
+                        }
+                      }}
+                    >
+                      <option value="standard">Standard</option>
+                      <option value="b2b-wholesale">B2B wholesale</option>
+                      <option value="cart-recovery">Cart recovery</option>
+                      <option value="welcome">Welcome offer</option>
+                      <option value="welcome-social">Welcome social</option>
+                      <option value="campaign-sale">Campaign sale</option>
+                    </select>
+                  </label>
+                  {content.layout && (
+                    <button type="button" onClick={() => changeContent("layout", undefined)}>
+                      Restore this email&apos;s original layout
+                    </button>
+                  )}
+                </section>
+                {visualLayout === "campaign-sale" && content.campaignLayout && (
+                  <CampaignEmailFields
+                    content={content}
+                    subject={subject}
+                    onSubject={onSubject}
+                    onChange={changeContent}
+                    showInbox={false}
+                  />
+                )}
+              </>
+            )}
             {panel === "artwork" && (
               <>
                 <div className="mk-editor-section">
@@ -459,14 +506,12 @@ export default function EmailDesigner({
                     mobile.
                   </p>
                 </div>
-                {(content.template?.startsWith("welcome") || content.template === "campaign-sale") && (
-                  <Artwork
-                    label="Hero"
-                    value={content.hero}
-                    scale={1}
-                    onChange={(value) => changeContent("hero", value)}
-                  />
-                )}
+                <Artwork
+                  label="Hero"
+                  value={content.hero}
+                  scale={1}
+                  onChange={(value) => changeContent("hero", value)}
+                />
                 <Artwork
                   label="Logo"
                   value={content.logo}

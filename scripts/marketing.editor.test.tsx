@@ -341,3 +341,40 @@ test("footer fields save with the email while sender details remain visible", as
     "Contact our wholesale team.",
   );
 });
+
+test("one editor can change a flow's visual layout without changing its template", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  const r = resource("b2b-welcome", "Universal editor");
+  Object.assign(r.data.steps[0].content, { template: "b2b-wholesale" });
+  let saved: unknown;
+  const view = testing.render(
+    <FlowEditor
+      resource={r}
+      busy={false}
+      settings={defaultMarketingSettings}
+      save={async (data, enabled) => {
+        saved = data;
+        return { ...r, data, enabled };
+      }}
+    />,
+  );
+  testing.fireEvent.click(await view.findByText("Universal editor"));
+  testing.fireEvent.click(view.getByRole("button", { name: "Layout" }));
+  testing.fireEvent.change(view.getByLabelText("Visual preset"), {
+    target: { value: "campaign-sale" },
+  });
+  await testing.waitFor(() =>
+    assert.ok(view.getByText("Email sections", { exact: true })),
+  );
+  const frame = view.getByTitle("Email preview") as HTMLIFrameElement;
+  assert.match(frame.getAttribute("srcdoc") || "", /Universal editor/);
+  testing.fireEvent.click(view.getByRole("button", { name: "Save email" }));
+  await testing.waitFor(() => assert.ok(saved));
+  const savedContent = (
+    saved as { steps: { content: { template: string; layout: string; campaignLayout: unknown } }[] }
+  ).steps[0].content;
+  assert.equal(savedContent.template, "b2b-wholesale");
+  assert.equal(savedContent.layout, "campaign-sale");
+  assert.ok(savedContent.campaignLayout);
+});

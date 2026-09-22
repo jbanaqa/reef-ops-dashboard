@@ -36,11 +36,13 @@ export default function CampaignEmailFields({
   onChange,
   subject,
   onSubject,
+  showInbox = true,
 }: {
   content: Content;
   onChange: (key: keyof Content, value: Content[keyof Content]) => void;
   subject: string;
   onSubject: (value: string) => void;
+  showInbox?: boolean;
 }) {
   const layout = content.campaignLayout!;
   const update = (next: CampaignEmailLayout) => onChange("campaignLayout", next);
@@ -70,7 +72,7 @@ export default function CampaignEmailFields({
   };
   return (
     <>
-      <section className="mk-editor-section">
+      {showInbox && <section className="mk-editor-section">
         <h3>Inbox details</h3>
         <p>Set the subject and the short preview shown beside it.</p>
         <label>
@@ -84,7 +86,7 @@ export default function CampaignEmailFields({
             onChange={(event) => onChange("preview", event.target.value)}
           />
         </label>
-      </section>
+      </section>}
 
       <section className="mk-editor-section">
         <h3>Header links</h3>
