@@ -772,6 +772,69 @@ test("custom footer survives normalization and renders safely in both email form
     );
   }
 });
+test("every email layout uses the editable copyright footer controls", () => {
+  const layouts = [
+    content({
+      ...defaultContent,
+      template: "standard",
+      footerCopyrightText: "© {{ year }} {{ organization }} · Reef Team",
+    }),
+    content({
+      ...defaultContent,
+      template: "b2b-wholesale",
+      footerCopyrightText: "© {{ year }} {{ organization }} · Reef Team",
+    }),
+    content({
+      ...defaultContent,
+      template: "cart-recovery",
+      footerCopyrightText: "© {{ year }} {{ organization }} · Reef Team",
+    }),
+    content({
+      ...defaultContent,
+      template: "welcome",
+      footerCopyrightText: "© {{ year }} {{ organization }} · Reef Team",
+    }),
+    content({
+      ...defaultCampaignContent,
+      footerTitle: "Campaign footer",
+      footerCopyrightText: "© {{ year }} {{ organization }} · Reef Team",
+    }),
+  ];
+  for (const c of layouts) {
+    const html = render(
+      c,
+      "https://example.com/unsubscribe",
+      "123 Valid Street",
+      undefined,
+      "Company Name",
+    );
+    assert.match(
+      html,
+      new RegExp(`© ${new Date().getFullYear()} Company Name · Reef Team`),
+    );
+  }
+  assert.match(
+    render(
+      layouts.at(-1)!,
+      "https://example.com/unsubscribe",
+      "123 Valid Street",
+      undefined,
+      "Company Name",
+    ),
+    /Campaign footer/,
+  );
+  const hidden = render(
+    content({
+      ...defaultCampaignContent,
+      showFooterCopyright: false,
+    }),
+    "https://example.com/unsubscribe",
+    "123 Valid Street",
+    undefined,
+    "Company Name",
+  );
+  assert.doesNotMatch(hidden, /All rights reserved/);
+});
 test("cleared footer copy keeps the unsubscribe link and mailing address", () => {
   const html = render(
     content({

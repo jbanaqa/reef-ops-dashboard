@@ -179,6 +179,8 @@ export type Content = {
   showPostalAddress?: boolean;
   footerText?: string;
   footerUnsubscribeText?: string;
+  showFooterCopyright?: boolean;
+  footerCopyrightText?: string;
   instagramUrl?: string;
   facebookUrl?: string;
   instagramIcon?: string;
@@ -671,6 +673,11 @@ export function content(value: unknown): Content {
       c.footerUnsubscribeText === undefined
         ? undefined
         : String(c.footerUnsubscribeText).slice(0, 300),
+    showFooterCopyright: c.showFooterCopyright !== false,
+    footerCopyrightText:
+      c.footerCopyrightText === undefined
+        ? undefined
+        : String(c.footerCopyrightText).slice(0, 300),
     instagramUrl: c.instagramUrl
       ? safeUrl(c.instagramUrl).slice(0, 500)
       : undefined,
@@ -831,6 +838,18 @@ export function footerTitle(c: Content) {
       ? "Thank you for your business"
       : "")
   );
+}
+export const defaultFooterCopyright =
+  "© {{ year }} {{ organization }} | All rights reserved.";
+export function footerCopyright(
+  c: Content,
+  organizationName: string,
+  now = new Date(),
+) {
+  if (c.showFooterCopyright === false) return "";
+  return (c.footerCopyrightText ?? defaultFooterCopyright)
+    .replaceAll("{{ year }}", String(now.getFullYear()))
+    .replaceAll("{{ organization }}", organizationName);
 }
 const emailHead =
   '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:12px 10px!important}.reef-campaign-nav td{display:block!important;width:100%!important;padding:5px 10px!important}.reef-campaign-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-campaign-product img{max-width:100%!important;height:auto!important}}</style></head>';
@@ -1054,6 +1073,12 @@ function campaignSaleHtml(
       : '<strong style="font-size:27px;font-style:italic">' + e(organizationName.toUpperCase()) + "</strong>") +
     "</td></tr><tr><td style=\"padding:0 20px 8px\">" + nav + "</td></tr>" + hero + dynamicMessage + sections +
     '<tr><td style="padding:24px;background:#050505;color:#fff;text-align:center;font-size:12px;line-height:1.6">' +
+    (c.footerImage
+      ? '<img src="' + e(c.footerImage) + '" alt="" width="' + Math.round(560 * (c.footerScale || 1)) + '" style="display:block;max-width:100%;height:auto;margin:0 auto 14px">'
+      : "") +
+    (footerTitle(c)
+      ? '<h2 style="margin:0 0 14px;color:#fff;font-size:18px">' + e(footerTitle(c)) + "</h2>"
+      : "") +
     (c.facebookUrl || c.instagramUrl
       ? '<p style="margin:0 0 14px;font-size:25px">' +
         (c.facebookUrl
@@ -1074,7 +1099,11 @@ function campaignSaleHtml(
       : "") +
     '<p style="margin:12px 0">' + e(c.footerText || "") .replace(/\n/g, "<br>") + "</p><p>" +
     e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
-    ' <a href="' + e(unsubscribe) + '" style="color:#fff">Unsubscribe</a></p><p>' + e(organizationName) + (address ? "<br>" + e(address) : "") + "</p></td></tr></table></td></tr></table></body></html>"
+    ' <a href="' + e(unsubscribe) + '" style="color:#fff">Unsubscribe</a></p><p>' + e(organizationName) + (address ? "<br>" + e(address) : "") + "</p>" +
+    (footerCopyright(c, organizationName)
+      ? '<p style="margin:12px 0 0">' + e(footerCopyright(c, organizationName)) + "</p>"
+      : "") +
+    "</td></tr></table></td></tr></table></body></html>"
   );
 }
 
@@ -1240,11 +1269,11 @@ export function render(
       '" style="color:#555">Unsubscribe</a></p><p>' +
       e(organizationName) +
       (address ? "<br>" + e(address) : "") +
-      "</p><p>© " +
-      new Date().getFullYear() +
-      " " +
-      e(organizationName) +
-      " | All rights reserved.</p></td></tr></table></td></tr></table></body></html>"
+      "</p>" +
+      (footerCopyright(c, organizationName)
+        ? "<p>" + e(footerCopyright(c, organizationName)) + "</p>"
+        : "") +
+      "</td></tr></table></td></tr></table></body></html>"
     );
   }
   if (c.couponCode && layout !== "cart-recovery") {
@@ -1323,12 +1352,11 @@ export function render(
       e(organizationName) +
       "<br>" +
       e(address) +
-      "</p><p>© " +
-      new Date().getFullYear() +
-      " " +
-      e(organizationName) +
-      " | All rights reserved." +
-      "</p><p>" +
+      "</p>" +
+      (footerCopyright(c, organizationName)
+        ? "<p>" + e(footerCopyright(c, organizationName)) + "</p>"
+        : "") +
+      "<p>" +
       e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
       ' <a style="color:#174f60" href="' +
       e(unsubscribe) +
@@ -1430,11 +1458,13 @@ export function render(
       e(unsubscribe) +
       '">Unsubscribe</a></p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
       (address ? e(address) : "") +
-      '</p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">© ' +
-      new Date().getFullYear() +
-      " " +
-      e(organizationName) +
-      " | All rights reserved.</p></td></tr></table></td></tr></table></body></html>"
+      "</p>" +
+      (footerCopyright(c, organizationName)
+        ? '<p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
+          e(footerCopyright(c, organizationName)) +
+          "</p>"
+        : "") +
+      "</td></tr></table></td></tr></table></body></html>"
     );
   }
   return (
@@ -1472,11 +1502,9 @@ export function render(
     e(organizationName) +
     "<br>" +
     e(address) +
-    "<br>© " +
-    new Date().getFullYear() +
-    " " +
-    e(organizationName) +
-    " | All rights reserved." +
+    (footerCopyright(c, organizationName)
+      ? "<br>" + e(footerCopyright(c, organizationName))
+      : "") +
     "<br>" +
     e(c.footerUnsubscribeText ?? "") +
     ' <a href="' +

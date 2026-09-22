@@ -6,6 +6,7 @@ import {
   textBody,
   withBranding,
   footerTitle,
+  footerCopyright,
 } from "./rules";
 
 export type Delivery = {
@@ -105,7 +106,7 @@ export function emailBody(
       effectiveContent.showPostalAddress === true ? address : "",
       effectiveContent.footerUnsubscribeText,
       "Unsubscribe: " + m.unsubscribe,
-      "© " + new Date().getFullYear() + " " + organizationName + " | All rights reserved.",
+      footerCopyright(effectiveContent, organizationName),
       effectiveContent.instagramUrl
         ? "Instagram: " + effectiveContent.instagramUrl
         : "",

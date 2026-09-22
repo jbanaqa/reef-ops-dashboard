@@ -317,6 +317,9 @@ test("footer fields save with the email while sender details remain visible", as
   testing.fireEvent.change(view.getByLabelText("Footer message"), {
     target: { value: "Contact our wholesale team." },
   });
+  testing.fireEvent.change(view.getByLabelText("Copyright line"), {
+    target: { value: "© {{ year }} Reef Team" },
+  });
   testing.fireEvent.change(view.getByLabelText("Instagram icon image"), {
     target: {
       files: [
@@ -341,12 +344,17 @@ test("footer fields save with the email while sender details remain visible", as
         footerTitle: string;
         footerText: string;
         showPostalAddress: boolean;
+        footerCopyrightText?: string;
         instagramIcon?: string;
       };
     }[];
   };
   assert.equal(result.steps[0].content.showPostalAddress, true);
   assert.equal(result.steps[0].content.footerTitle, "Thank you, partners");
+  assert.equal(
+    result.steps[0].content.footerCopyrightText,
+    "© {{ year }} Reef Team",
+  );
   assert.match(result.steps[0].content.instagramIcon || "", /^data:image\/png;base64,/);
   assert.equal(
     result.steps[0].content.footerText,

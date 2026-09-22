@@ -8,6 +8,7 @@ import {
   escapeHtml,
   imageSource,
   footerTitle,
+  defaultFooterCopyright,
 } from "@/lib/marketing/rules";
 import EmailPreview from "./EmailPreview";
 import RichEmailCopy from "./RichEmailCopy";
@@ -580,6 +581,37 @@ export default function EmailDesigner({
                       changeContent("footerText", e.target.value)
                     }
                   />
+                </label>
+                <label
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <input
+                    style={{ width: "auto", margin: 0 }}
+                    type="checkbox"
+                    checked={content.showFooterCopyright !== false}
+                    onChange={(e) =>
+                      changeContent("showFooterCopyright", e.target.checked)
+                    }
+                  />{" "}
+                  Show copyright line
+                </label>
+                <label>
+                  Copyright line
+                  <input
+                    aria-label="Copyright line"
+                    maxLength={300}
+                    disabled={content.showFooterCopyright === false}
+                    value={
+                      content.footerCopyrightText ?? defaultFooterCopyright
+                    }
+                    onChange={(e) =>
+                      changeContent("footerCopyrightText", e.target.value)
+                    }
+                  />
+                  <small>
+                    Use {"{{ year }}"} for the current year and{" "}
+                    {"{{ organization }}"} for the sender name from Settings.
+                  </small>
                 </label>
                 <label>
                   Unsubscribe introduction
