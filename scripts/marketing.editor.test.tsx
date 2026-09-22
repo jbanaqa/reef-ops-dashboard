@@ -425,3 +425,35 @@ test("campaign product grid controls update count and product order together", a
     assert.equal(section.products.length, 0);
   });
 });
+
+test("campaign design controls resize the logo and default product images", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  let latest = structuredClone(defaultCampaignContent);
+  function Editor() {
+    const [draft, setDraft] = React.useState(structuredClone(defaultCampaignContent));
+    latest = draft;
+    return (
+      <CampaignEmailFields
+        content={draft}
+        subject="Sale"
+        onSubject={() => undefined}
+        onChange={(key, value) =>
+          setDraft((current) => ({ ...current, [key]: value }))
+        }
+      />
+    );
+  }
+  const view = testing.render(<Editor />);
+  testing.fireEvent.click(view.getByText("Design", { exact: true }));
+  testing.fireEvent.change(view.getByLabelText("Logo width"), {
+    target: { value: "520" },
+  });
+  testing.fireEvent.change(view.getByLabelText(/Default image width/), {
+    target: { value: "90" },
+  });
+  await testing.waitFor(() => {
+    assert.equal(Math.round((latest.logoScale || 0) * 360), 520);
+    assert.equal(latest.campaignLayout?.style.productImageWidth, 90);
+  });
+});

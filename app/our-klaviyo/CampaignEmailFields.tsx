@@ -381,6 +381,20 @@ export default function CampaignEmailFields({
         <summary><span>Design</span><small>Colors, type and spacing</small></summary>
         <div className="mk-editor-disclosure-body">
         <p>Safe email styles are applied inline for consistent delivery.</p>
+        <label>
+          Logo width <span>{Math.round(360 * (content.logoScale ?? 1))}px</span>
+          <input
+            aria-label="Logo width"
+            type="range"
+            min="180"
+            max="560"
+            step="10"
+            value={Math.min(560, Math.max(180, Math.round(360 * (content.logoScale ?? 1))))}
+            onChange={(event) =>
+              onChange("logoScale", Number(event.target.value) / 360)
+            }
+          />
+        </label>
         <label>Font<select value={layout.style.fontFamily} onChange={(event) => patchStyle({ fontFamily: event.target.value as CampaignEmailLayout["style"]["fontFamily"] })}><option>Arial</option><option>Verdana</option><option>Georgia</option><option>Trebuchet MS</option></select></label>
         <label>Product alignment<select value={layout.style.productAlignment} onChange={(event) => patchStyle({ productAlignment: event.target.value as CampaignEmailLayout["style"]["productAlignment"] })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
         <div className="mk-campaign-color-grid">
