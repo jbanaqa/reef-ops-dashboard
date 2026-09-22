@@ -1,5 +1,11 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Campaign product feeds — September 22, 2026
+
+Campaign Sale product grids now support named dynamic Shopify feeds as well as manual products. New campaign drafts reproduce the three supplied Klaviyo selections: `anniversarysalesale` matches any of A50/A55/A60/A65, selects six products in random order; `newnewdiscount` matches any of AW50/AW55/AW60/AW65, selects the newest twelve; `newnew1` selects the newest twelve eligible products across all categories. Tag matching is case-insensitive and OR-based. `DONT DISCOUNT`, A70/AW70, and ASALE are not included because they were absent from the actual feed-selection summaries the user chose as the source of truth.
+
+The shared editor shows the feed definition, slot count, and a refreshable Shopify preview. Feed previews do not replace the saved rule. At campaign delivery preparation, Reef Ops queries active Online Store products, rejects products without an available variant, resolves every dynamic grid, and stores a durable campaign-level snapshot before recipient messages are sent. Random selection is deterministic per campaign so every recipient and every 500-profile expansion page receives the same products; refreshing a draft preview uses a new seed. Shopify failures leave the campaign scheduled for retry and record the feed error rather than sending an empty grid. Existing manual campaign grids continue to work.
+
 ### Campaign sale email builder — September 22, 2026
 
 New campaign drafts now start with a reusable, email-safe sale layout based on the customer-received Corals Anonymous campaigns: shared logo, up to five header links, a linked full-width banner, ordered product-grid and full-width CTA sections, and the existing shared footer. Each product independently stores its image URL, title, destination, sale and compare-at prices, button label, field visibility, and image width. Global controls cover safe font stacks, alignment, spacing, backgrounds, price/button colors, sizes, and rounding. Sections and products can be added, removed, and reordered; desktop grids stack on narrow email clients. Saved templates, campaign duplication, preview, test send, delivery, and plain-text fallback all use the same validated content model. Existing generic campaigns remain readable and are not silently converted.

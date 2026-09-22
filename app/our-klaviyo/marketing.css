@@ -26,6 +26,13 @@ button.mk-flow-node{font:inherit;text-align:left;cursor:pointer;color:inherit;wi
 .mk-campaign-builder-actions,.mk-campaign-add-row{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
 .marketing .mk-campaign-builder-actions button,.marketing .mk-campaign-add-row button{padding:7px 9px;font-size:12px}
 .mk-campaign-products{display:grid;gap:8px;margin-top:12px}
+.mk-campaign-feed-card{display:grid;gap:7px;padding:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+.mk-campaign-feed-card strong{color:var(--text-main);font-size:14px}
+.mk-campaign-feed-card span{color:var(--text-muted);font-size:12px;line-height:1.5}
+.marketing .mk-campaign-feed-card button{justify-self:start;margin-top:3px}
+.mk-campaign-feed-preview{padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+.mk-campaign-feed-preview summary{cursor:pointer;color:var(--text-main);font-size:12px;font-weight:650}
+.mk-campaign-feed-preview ol{display:grid;gap:5px;margin:10px 0 0;padding-left:22px;color:var(--text-muted);font-size:12px;line-height:1.4}
 .mk-campaign-product-card{background:var(--surface)}
 .mk-campaign-two-fields,.mk-campaign-color-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .marketing .mk-campaign-visibility{display:grid;gap:7px;margin:13px 0}

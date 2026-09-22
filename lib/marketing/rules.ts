@@ -28,11 +28,59 @@ export type CampaignEmailProduct = {
   showButton?: boolean;
   imageWidth?: number;
 };
+export const campaignProductFeeds = [
+  {
+    key: "anniversarysalesale",
+    name: "Anniversary sale",
+    description: "Products tagged A50, A55, A60, or A65. Random order.",
+    tags: ["A50", "A55", "A60", "A65"],
+    order: "random",
+    limit: 6,
+  },
+  {
+    key: "newnewdiscount",
+    name: "New discounts",
+    description: "Products tagged AW50, AW55, AW60, or AW65. Newest first.",
+    tags: ["AW50", "AW55", "AW60", "AW65"],
+    order: "newest",
+    limit: 12,
+  },
+  {
+    key: "newnew1",
+    name: "Newest products",
+    description: "Products from all categories. Newest first.",
+    tags: [],
+    order: "newest",
+    limit: 12,
+  },
+] as const;
+export type CampaignProductFeedKey = (typeof campaignProductFeeds)[number]["key"];
+export type CampaignProductFeed = {
+  key: CampaignProductFeedKey;
+  name: string;
+  tags: string[];
+  order: "random" | "newest";
+  limit: number;
+};
+export function campaignProductFeed(value: unknown): CampaignProductFeed | undefined {
+  const key = String((value as { key?: unknown } | null)?.key || "");
+  const saved = campaignProductFeeds.find((feed) => feed.key === key);
+  return saved
+    ? {
+        key: saved.key,
+        name: saved.name,
+        tags: [...saved.tags],
+        order: saved.order,
+        limit: saved.limit,
+      }
+    : undefined;
+}
 export type CampaignEmailSection =
   | {
       id: string;
       type: "products";
       backgroundColor?: string;
+      feed?: CampaignProductFeed;
       products: CampaignEmailProduct[];
     }
   | {
@@ -475,6 +523,7 @@ export function content(value: unknown): Content {
             id: String(section.id || `products-${index}`).slice(0, 100),
             type: "products" as const,
             backgroundColor: color(section.backgroundColor, "#ffffff"),
+            feed: campaignProductFeed(section.feed),
             products: (section.products || []).slice(0, 40).map((product, productIndex) => ({
               id: String(product.id || `product-${index}-${productIndex}`).slice(0, 100),
               title: String(product.title || "Product name").slice(0, 200),
@@ -1340,27 +1389,25 @@ export const defaultCampaignContent: Content = {
     ],
     sections: [
       {
-        id: "featured-products",
+        id: "anniversary-sale-products",
         type: "products",
         backgroundColor: "#ffffff",
-        products: [
-          {
-            id: "product-1",
-            title: "Featured coral",
-            url: "https://coralsanonymous.com/collections/new-arrivals",
-            salePrice: "$0.00",
-            compareAtPrice: "$0.00",
-            button: "Shop now",
-          },
-          {
-            id: "product-2",
-            title: "Featured coral",
-            url: "https://coralsanonymous.com/collections/new-arrivals",
-            salePrice: "$0.00",
-            compareAtPrice: "$0.00",
-            button: "Shop now",
-          },
-        ],
+        feed: campaignProductFeed({ key: "anniversarysalesale" }),
+        products: [],
+      },
+      {
+        id: "new-discount-products",
+        type: "products",
+        backgroundColor: "#ffffff",
+        feed: campaignProductFeed({ key: "newnewdiscount" }),
+        products: [],
+      },
+      {
+        id: "newest-products",
+        type: "products",
+        backgroundColor: "#ffffff",
+        feed: campaignProductFeed({ key: "newnew1" }),
+        products: [],
       },
       {
         id: "shop-cta",

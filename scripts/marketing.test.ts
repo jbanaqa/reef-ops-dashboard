@@ -48,17 +48,33 @@ test("campaign sale layouts round-trip and render responsive email-safe sections
   const first = draft.campaignLayout!.sections[0];
   assert.equal(first.type, "products");
   if (first.type !== "products") throw new Error("Expected product section");
-  first.products[0] = {
-    ...first.products[0],
+  first.products.push({
+    id: "preview-product",
+    url: "https://coralsanonymous.com/products/red-white-coco-worm",
     image: "https://coralsanonymous.com/cdn/shop/files/coral.jpg",
     title: "Red and White Coco Worm",
     salePrice: "$40.00",
     compareAtPrice: "$79.99",
     imageWidth: 160,
-  };
+  });
   const saved = content(draft);
   assert.equal(saved.template, "campaign-sale");
-  assert.equal(saved.campaignLayout?.sections.length, 2);
+  assert.equal(saved.campaignLayout?.sections.length, 4);
+  assert.deepEqual(
+    saved.campaignLayout?.sections
+      .filter((section) => section.type === "products")
+      .map((section) => section.feed && [
+        section.feed.key,
+        section.feed.tags,
+        section.feed.order,
+        section.feed.limit,
+      ]),
+    [
+      ["anniversarysalesale", ["A50", "A55", "A60", "A65"], "random", 6],
+      ["newnewdiscount", ["AW50", "AW55", "AW60", "AW65"], "newest", 12],
+      ["newnew1", [], "newest", 12],
+    ],
+  );
   const html = render(saved, "https://example.com/unsubscribe", "123 Ocean Ave");
   assert.match(html, /reef-campaign-product/);
   assert.match(html, /Red and White Coco Worm/);
@@ -602,6 +618,16 @@ test("encoded unsafe links and executable styles are stripped", () => {
 
 import { emailBody } from "../lib/marketing/delivery";
 test("campaign sale plain-text fallback includes products and section links", () => {
+  const campaign = structuredClone(defaultCampaignContent);
+  const section = campaign.campaignLayout!.sections[0];
+  if (section.type !== "products") throw new Error("Expected product section");
+  section.products.push({
+    id: "featured",
+    title: "Featured coral",
+    url: "https://coralsanonymous.com/products/featured",
+    salePrice: "$0.00",
+    compareAtPrice: "$0.00",
+  });
   const payload = emailBody(
     {
       id: "campaign",
@@ -609,7 +635,7 @@ test("campaign sale plain-text fallback includes products and section links", ()
       subject: "Sale",
       to: "test@example.com",
       unsubscribe: "https://example.com/u",
-      content: defaultCampaignContent,
+      content: campaign,
     },
     "123 Ocean Ave",
     "Corals Anonymous",

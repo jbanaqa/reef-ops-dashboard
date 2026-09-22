@@ -54,6 +54,7 @@ import {
 } from "@/lib/marketing/message-test";
 import { validateFlow } from "@/lib/marketing/flow-config";
 import { shopifyGraphql } from "@/lib/shopify";
+import { resolveCampaignProductFeeds } from "@/lib/marketing/campaign-product-feed";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -620,9 +621,13 @@ export async function POST(request: Request) {
       return Response.json(await registerShopifyMarketingWebhooks());
     if (b.action === "preview") {
       const s = await loadMarketingSettings();
+      const previewContent = await resolveCampaignProductFeeds(
+        content(b.content),
+        `campaign-preview:${crypto.randomUUID()}`,
+      );
       return Response.json({
         html: render(
-          content(b.content),
+          previewContent,
           "#unsubscribe",
           s.postalAddress,
           undefined,
@@ -630,6 +635,13 @@ export async function POST(request: Request) {
         ),
       });
     }
+    if (b.action === "preview-campaign-feeds")
+      return Response.json({
+        content: await resolveCampaignProductFeeds(
+          content(b.content),
+          `campaign-preview:${crypto.randomUUID()}`,
+        ),
+      });
     if (b.action === "test-email") {
       const to = email(b.to);
       const allowed = (process.env.MARKETING_TEST_EMAILS || "")
@@ -643,12 +655,16 @@ export async function POST(request: Request) {
       if (!setup(s.operations, s.postalAddress).emailReady)
         throw new Error("Complete email provider setup first.");
       const id = crypto.randomUUID();
+      const testContent = await resolveCampaignProductFeeds(
+        content(b.content),
+        `campaign-test:${id}`,
+      );
       const providerId = await resendProvider.send({
         id,
         to,
         channel: "EMAIL",
         subject: `[TEST] ${String(b.subject || "Campaign preview").slice(0, 190)}`,
-        content: content(b.content),
+        content: testContent,
         address: s.postalAddress,
         organizationName: s.organizationName,
         branding: s.branding,

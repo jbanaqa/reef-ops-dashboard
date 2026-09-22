@@ -27,6 +27,7 @@ import {
 import { validateFlow } from "./flow-config";
 import type { WelcomeConfig } from "./welcome-config";
 import type { DeliveryUpsellConfig } from "./delivery-upsell-config";
+import { resolveCampaignProductFeeds } from "./campaign-product-feed";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
 import { canConfirmEmailResubscription } from "./confirmation";
 import {
@@ -129,6 +130,79 @@ export async function runMarketing(onlyMessageId?: string) {
         orderBy: { scheduledAt: "asc" },
       });
   for (const campaign of campaigns) {
+    let preparedContent: Content;
+    try {
+      const savedSnapshot = await prisma.marketingResource.findUnique({
+        where: {
+          shop_kind_key: {
+            shop: shop(),
+            kind: "CAMPAIGN_FEED",
+            key: campaign.id,
+          },
+        },
+      });
+      const savedContent = (savedSnapshot?.data as { content?: unknown } | null)?.content;
+      preparedContent = savedContent
+        ? content(savedContent)
+        : await resolveCampaignProductFeeds(
+            content(campaign.content),
+            `campaign:${campaign.id}`,
+          );
+      if (!savedContent)
+        await prisma.marketingResource.upsert({
+          where: {
+            shop_kind_key: {
+              shop: shop(),
+              kind: "CAMPAIGN_FEED",
+              key: campaign.id,
+            },
+          },
+          create: {
+            shop: shop(),
+            kind: "CAMPAIGN_FEED",
+            key: campaign.id,
+            name: `Campaign product snapshot: ${campaign.name}`,
+            data: json({
+              at: new Date().toISOString(),
+              content: preparedContent,
+            }),
+          },
+          update: {
+            name: `Campaign product snapshot: ${campaign.name}`,
+            data: json({
+              at: new Date().toISOString(),
+              content: preparedContent,
+            }),
+          },
+        });
+    } catch (error) {
+      await prisma.marketingResource.upsert({
+        where: {
+          shop_kind_key: {
+            shop: shop(),
+            kind: "CAMPAIGN_FEED",
+            key: campaign.id,
+          },
+        },
+        create: {
+          shop: shop(),
+          kind: "CAMPAIGN_FEED",
+          key: campaign.id,
+          name: `Campaign product feed: ${campaign.name}`,
+          data: json({
+            at: new Date().toISOString(),
+            error: error instanceof Error ? error.message : "Product feed failed",
+          }),
+        },
+        update: {
+          data: json({
+            at: new Date().toISOString(),
+            error: error instanceof Error ? error.message : "Product feed failed",
+          }),
+        },
+      });
+      continue;
+    }
     // Expand only a bounded page per campaign/run. Exclude existing recipients
     // so interrupted/overlapping expansion resumes without rescanning all pages.
     await atomic(async (tx) => {
@@ -136,7 +210,15 @@ export async function runMarketing(onlyMessageId?: string) {
         where: { id: campaign.id },
       });
       if (current?.status !== "SCHEDULED") return;
+      await tx.marketingCampaign.update({
+        where: { id: current.id },
+        data: { content: json(preparedContent) },
+      });
       if (current.expandedAt) {
+        await tx.marketingMessage.updateMany({
+          where: { campaignId: current.id, status: "PENDING" },
+          data: { content: json(preparedContent) },
+        });
         await tx.marketingCampaign.update({
           where: { id: current.id },
           data: { status: "SENDING" },
@@ -163,7 +245,7 @@ export async function runMarketing(onlyMessageId?: string) {
             profileId: p.id,
             channel: campaign.channel,
             subject: campaign.subject,
-            content: json(campaign.content),
+            content: json(preparedContent),
             dueAt: now,
           })),
           skipDuplicates: true,

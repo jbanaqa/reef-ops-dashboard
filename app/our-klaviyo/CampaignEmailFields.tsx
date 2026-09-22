@@ -1,10 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import type {
   CampaignEmailLayout,
   CampaignEmailProduct,
   CampaignEmailSection,
   Content,
+} from "@/lib/marketing/rules";
+import {
+  campaignProductFeed,
+  campaignProductFeeds,
 } from "@/lib/marketing/rules";
 
 const home = "https://coralsanonymous.com/collections/new-arrivals";
@@ -44,6 +49,8 @@ export default function CampaignEmailFields({
   onSubject: (value: string) => void;
   showInbox?: boolean;
 }) {
+  const [refreshingFeed, setRefreshingFeed] = useState<string | null>(null);
+  const [feedError, setFeedError] = useState("");
   const layout = content.campaignLayout!;
   const update = (next: CampaignEmailLayout) => onChange("campaignLayout", next);
   const patchLayout = (patch: Partial<CampaignEmailLayout>) =>
@@ -69,6 +76,25 @@ export default function CampaignEmailFields({
         index === productIndex ? product : current,
       ),
     });
+  };
+  const refreshFeeds = async (sectionId: string) => {
+    setRefreshingFeed(sectionId);
+    setFeedError("");
+    try {
+      const response = await fetch("/api/marketing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "preview-campaign-feeds", content }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not load products.");
+      const resolved = result.content as Content;
+      onChange("campaignLayout", resolved.campaignLayout);
+    } catch (error) {
+      setFeedError(error instanceof Error ? error.message : "Could not load products.");
+    } finally {
+      setRefreshingFeed(null);
+    }
   };
   return (
     <>
@@ -163,7 +189,7 @@ export default function CampaignEmailFields({
           {layout.sections.map((section, sectionIndex) => (
             <details className="mk-campaign-builder-card" key={section.id} open={sectionIndex === 0}>
               <summary>
-                <span>{section.type === "products" ? `Product grid · ${section.products.length}` : `Full-width button · ${section.label}`}</span>
+                <span>{section.type === "products" ? `Product grid · ${section.feed?.name || "Manual"} · ${section.feed?.limit || section.products.length}` : `Full-width button · ${section.label}`}</span>
               </summary>
               <div className="mk-campaign-builder-actions">
                 <button type="button" disabled={sectionIndex === 0} onClick={() => patchLayout({ sections: move(layout.sections, sectionIndex, -1) })}>Move up</button>
@@ -186,7 +212,52 @@ export default function CampaignEmailFields({
                 </>
               ) : (
                 <div className="mk-campaign-products">
-                  {section.products.map((product, productIndex) => (
+                  <label>
+                    Product selection
+                    <select
+                      value={section.feed?.key || "manual"}
+                      onChange={(event) => {
+                        const feed = campaignProductFeed({ key: event.target.value });
+                        replaceSection(sectionIndex, {
+                          ...section,
+                          feed,
+                          products: feed ? [] : section.products,
+                        });
+                      }}
+                    >
+                      <option value="manual">Choose products manually</option>
+                      {campaignProductFeeds.map((feed) => (
+                        <option key={feed.key} value={feed.key}>{feed.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {section.feed && (
+                    <div className="mk-campaign-feed-card">
+                      <strong>{section.feed.name}</strong>
+                      <span>
+                        {section.feed.tags.length
+                          ? `Tag includes ${section.feed.tags.join(" OR ")}. `
+                          : "All categories. "}
+                        Show {section.feed.order === "random" ? "random" : "newest"} products.
+                      </span>
+                      <span>{section.feed.limit} products appear in this grid.</span>
+                      <button
+                        type="button"
+                        disabled={refreshingFeed !== null}
+                        onClick={() => refreshFeeds(section.id)}
+                      >
+                        {refreshingFeed === section.id ? "Loading products…" : "Refresh product preview"}
+                      </button>
+                    </div>
+                  )}
+                  {feedError && refreshingFeed === null && <p className="mk-editor-error">{feedError}</p>}
+                  {section.feed && section.products.length > 0 && (
+                    <details className="mk-campaign-feed-preview">
+                      <summary>Current preview · {section.products.length} products</summary>
+                      <ol>{section.products.map((product) => <li key={product.id}>{product.title}</li>)}</ol>
+                    </details>
+                  )}
+                  {!section.feed && section.products.map((product, productIndex) => (
                     <details className="mk-campaign-product-card" key={product.id}>
                       <summary>Product {productIndex + 1} · {product.title}</summary>
                       <label>Product name<input value={product.title} onChange={(event) => replaceProduct(sectionIndex, productIndex, { ...product, title: event.target.value })} /></label>
@@ -214,7 +285,7 @@ export default function CampaignEmailFields({
                       </div>
                     </details>
                   ))}
-                  <button type="button" onClick={() => replaceSection(sectionIndex, { ...section, products: [...section.products, blankProduct()] })}>Add product</button>
+                  {!section.feed && <button type="button" onClick={() => replaceSection(sectionIndex, { ...section, products: [...section.products, blankProduct()] })}>Add product</button>}
                 </div>
               )}
             </details>
