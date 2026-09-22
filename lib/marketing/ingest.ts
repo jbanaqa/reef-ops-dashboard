@@ -574,7 +574,8 @@ export async function importProfiles(
               channel,
               suppressed ? "UNSUBSCRIBED" : status || "NEVER_SUBSCRIBED",
               source || "klaviyo-import",
-              timestamp ? date(timestamp) : new Date(),
+              // An undated absence is not an event that happened at import time.
+              timestamp ? date(timestamp) : status === "NEVER_SUBSCRIBED" && !suppressed ? new Date(0) : new Date(),
               suppressed ? "Imported suppression" : undefined,
               recordConsentEvents,
             );

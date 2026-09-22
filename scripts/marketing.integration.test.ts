@@ -843,6 +843,58 @@ test("ingestion gate rejects signed events and transient rows do not hide flows"
   assert.ok(!data.resources.some((r: { kind: string }) => r.kind === "RATE"));
 });
 
+test("absence snapshots preserve explicit consent and suppression provenance", async () => {
+  const earlier = new Date(Date.now() - 86400000);
+  const p = await store.atomic(async (tx) => {
+    const profile = await store.identify(tx, { email: "consent-precedence@example.com" });
+    await store.consent(tx, profile.id, "EMAIL", "SUBSCRIBED", "shopify", earlier);
+    return profile;
+  });
+  await ingest.importProfiles([{ email: p.email!, emailStatus: "NEVER_SUBSCRIBED", emailConsentSource: "klaviyo:api" }], false);
+  await store.atomic((tx) => store.consent(tx, p.id, "EMAIL", "NEVER_SUBSCRIBED", "shopify", new Date()));
+  const saved = await prisma.marketingConsent.findUniqueOrThrow({ where: { profileId_channel: { profileId: p.id, channel: "EMAIL" } } });
+  assert.equal(saved.status, "SUBSCRIBED");
+  assert.equal(saved.source, "shopify");
+  assert.equal(+saved.occurredAt, +earlier);
+  await store.atomic((tx) => store.consent(tx, p.id, "EMAIL", "UNSUBSCRIBED", "unsubscribe-link", new Date()));
+  const blocked = await prisma.marketingConsent.findUniqueOrThrow({ where: { id: saved.id } });
+  await store.atomic((tx) => store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "shopify", new Date()));
+  assert.deepEqual(await prisma.marketingConsent.findUniqueOrThrow({ where: { id: saved.id } }), blocked);
+  const result = await ingest.importProfiles([{ email: "undated-consent@example.com", emailStatus: "NEVER_SUBSCRIBED" }], false);
+  assert.ok(result.every((r) => r.status !== "ERROR"));
+  const empty = await prisma.marketingProfile.findUniqueOrThrow({ where: { shop_email: { shop, email: "undated-consent@example.com" } }, include: { consents: true } });
+  assert.equal(+empty.consents[0].occurredAt, 0);
+  await store.atomic((tx) => store.consent(tx, empty.id, "EMAIL", "SUBSCRIBED", "shopify", earlier));
+  assert.equal((await prisma.marketingConsent.findUniqueOrThrow({ where: { id: empty.consents[0].id } })).status, "SUBSCRIBED");
+});
+
+test("consent repair restores recorded signup only and is idempotent", async () => {
+  const ids: string[] = [];
+  for (const kind of ["verified", "suppressed", "optout", "unknown"]) {
+    const p = await store.atomic(async (tx) => {
+      const p = await store.identify(tx, { email: `repair-${kind}@example.com` });
+      if (kind !== "unknown") await store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "storefront-single-opt-in-v1", new Date(Date.now() - 86400000));
+      if (kind === "optout") await store.consent(tx, p.id, "EMAIL", "UNSUBSCRIBED", "unsubscribe-link", new Date());
+      await tx.marketingConsent.upsert({
+        where: { profileId_channel: { profileId: p.id, channel: "EMAIL" } },
+        create: { profileId: p.id, channel: "EMAIL", status: "NEVER_SUBSCRIBED", source: "klaviyo:api", occurredAt: new Date() },
+        update: { status: "NEVER_SUBSCRIBED", source: "klaviyo:api", occurredAt: new Date(), suppressed: kind === "suppressed" },
+      });
+      return p;
+    });
+    ids.push(p.id);
+  }
+  const sql = await readFile("prisma/migrations/20260922010000_repair_imported_consent/migration.sql", "utf8");
+  await db.exec(sql);
+  await db.exec(sql);
+  const rows = await prisma.marketingConsent.findMany({ where: { profileId: { in: ids } } });
+  for (let index = 0; index < ids.length; index++) {
+    assert.equal(rows.find((r) => r.profileId === ids[index])?.status, index === 0 ? "SUBSCRIBED" : "NEVER_SUBSCRIBED");
+  }
+  assert.equal(await prisma.marketingEvent.count({ where: { profileId: { in: ids }, type: "CONSENT_RECONCILED" } }), 1);
+  assert.equal(await prisma.marketingMessage.count({ where: { profileId: { in: ids } } }), 0);
+});
+
 test("suppression stays sticky and cancels pending messages", async () => {
   const p = await store.atomic(async (tx) => {
     const p = await store.identify(tx, { email: "suppress@example.com" });

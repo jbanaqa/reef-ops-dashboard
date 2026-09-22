@@ -1,5 +1,11 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Consent precedence and verified-history repair — September 21, 2026
+
+Confirmed the user's email consent was overwritten by `klaviyo:api` NEVER_SUBSCRIBED despite accepted Shopify and storefront signup evidence. `consent()` now treats NEVER_SUBSCRIBED as absence of evidence: it cannot overwrite an existing decision. Explicit subscription can replace an absence snapshot even when the snapshot has a later timestamp. Ignored updates preserve the current source, reason, and timestamp; genuine opt-outs/suppressions remain sticky. Undated imported absence uses an unknown-date sentinel rather than import time, shown as Date not provided in the profile. Profiles now identify Klaviyo as the consent source; ignored activity explains the reason.
+
+Migration `20260922010000_repair_imported_consent` restores only unsuppressed EMAIL rows currently marked NEVER_SUBSCRIBED from Klaviyo with an accepted prior Shopify/storefront signup event and no recorded opt-out/bounce/complaint/suppression evidence. It preserves the original source/date and writes CONSENT_RECONCILED audit events; it neither creates enrollments nor revives cancelled messages. Production read-only preflight found 22 candidates. Current pending messages on restored profiles become eligible for normal checks. All 80 marketing tests, TypeScript, and targeted lint pass. Shopify webhooks remain queued/retried through the existing worker; this does not promise instantaneous synchronization or clear existing suppressions when Shopify says subscribed.
+
 ### Profile drawer readability — September 21, 2026
 
 Follow-up after user visual feedback: the profile drawer now uses a gray canvas, white section panels, teal active-flow headers, blue message-history headers and scheduled rows, green sent rows, amber failed/uncertain rows, and neutral cancelled rows. Status text remains visible so color is supplemental. Selected filters use a solid blue background. Overview sections have tinted header bands. Desktop and 320px screenshots reviewed; browser suite, TypeScript and targeted lint passed. Presentation only.

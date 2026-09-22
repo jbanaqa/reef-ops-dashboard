@@ -157,6 +157,13 @@ export async function consent(
     where: { profileId_channel: { profileId, channel } },
   });
   const suppress = status === "UNSUBSCRIBED" || !!reason;
+  // Absence of consent in another system is not a revocation of known consent.
+  // Preserve both the decision and its provenance when rejecting a snapshot.
+  const absentEvidence = status === "NEVER_SUBSCRIBED" && !suppress && !!current;
+  const stickySuppression = !!current?.suppressed && !suppress;
+  const olderEvidence = !!current && current.status !== "NEVER_SUBSCRIBED" &&
+    current.occurredAt > occurredAt && !suppress;
+  const ignored = absentEvidence || stickySuppression || olderEvidence;
   if (recordEvent)
     await record(tx, {
       key: `consent:${profileId}:${channel}:${source}:${occurredAt.toISOString()}:${status}:${reason || ""}`,
@@ -168,18 +175,19 @@ export async function consent(
         status,
         source,
         reason,
-        ignored: !!current && current.occurredAt > occurredAt,
+        ignored,
+        ...(ignored ? { ignoredReason: absentEvidence ? "Missing consent does not revoke existing consent" : stickySuppression ? "Existing suppression preserved" : "Older consent evidence" } : {}),
       },
     });
   // Suppressions are sticky. Neither imports nor delayed customer updates can undo them.
-  if (current && current.occurredAt > occurredAt && !suppress) return;
+  if (ignored) return;
   const data = {
     status: current?.suppressed && !suppress ? current.status : status,
     suppressed: suppress || current?.suppressed || false,
     reason: reason || current?.reason,
     source,
     occurredAt:
-      current && current.occurredAt > occurredAt
+      current && current.status !== "NEVER_SUBSCRIBED" && current.occurredAt > occurredAt
         ? current.occurredAt
         : occurredAt,
   };

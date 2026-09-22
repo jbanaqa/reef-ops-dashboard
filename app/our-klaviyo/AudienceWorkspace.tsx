@@ -271,7 +271,7 @@ function eventLabel(e: Activity) {
   if (e.type === "CONSENT") {
     const channel = p.channel === "EMAIL" ? "Email" : "Text message";
     if (p.ignored)
-      return channel + " preference update received (older update ignored)";
+      return channel + " preference update ignored: " + (typeof p.ignoredReason === "string" ? p.ignoredReason : "older update");
     return (
       channel +
       (p.status === "SUBSCRIBED"
@@ -299,6 +299,7 @@ function eventLabel(e: Activity) {
     COMPLAINED: "Spam complaint received",
     UNSUBSCRIBED: "Unsubscribed",
     EMAIL_SUBSCRIBED: "Joined Mailable Subscribers",
+    CONSENT_RECONCILED: "Email subscription restored from verified consent history",
     WELCOME_ENTERED: "Entered the welcome series",
     FORM_EMAIL_SUBMITTED: "Email signup submitted",
     "checkouts/create": "Checkout started",
@@ -620,9 +621,10 @@ function ContactPanel({
                           {c
                             ? (c.source === "shopify"
                                 ? "Synced from Shopify"
-                                : "Preference recorded") +
-                              " · " +
-                              date(c.occurredAt)
+                                : c.source?.startsWith("klaviyo")
+                                  ? "Imported from Klaviyo"
+                                  : "Preference recorded") +
+                              (c.occurredAt && Date.parse(c.occurredAt) > 0 ? " · " + date(c.occurredAt) : " · Date not provided")
                             : "No subscription recorded"}
                         </p>
                         {c?.reason && <p>{c.reason}</p>}
