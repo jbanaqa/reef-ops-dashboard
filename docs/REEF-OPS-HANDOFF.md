@@ -12,7 +12,7 @@ Campaign structure was then corrected against the complete received-email screen
 
 Each dynamic campaign product grid now has its own editable product count (1–40) and order. Orders include random, newest, oldest, recent best sellers, recent most viewed, price low/high, and product name A–Z/Z–A. Best-selling and most-viewed use Reef Ops' recorded three-day commerce activity. The same saved count and order drive editor previews, test sends, and scheduled delivery; changing either clears a stale preview until it is refreshed.
 
-Campaign Design now exposes logo width directly (180–560 px). The mobile campaign stylesheet preserves the two-column product grid and no longer replaces the chosen default/per-product image width with a near-full-width mobile image. Therefore the same product image width is visible in desktop/mobile preview, test messages, and delivery; existing per-product width overrides still take precedence over the grid default.
+Campaign Design now exposes logo width directly (180–560 px). On mobile, each campaign product occupies its own row while its image retains the chosen default/per-product pixel width; the mobile stylesheet no longer expands that image to nearly the full screen. Desktop keeps the two-column grid. The same product image width is visible in desktop/mobile preview, test messages, and delivery; existing per-product width overrides still take precedence over the grid default.
 
 ### Campaign sale email builder — September 22, 2026
 

@@ -105,8 +105,10 @@ test("campaign sale layouts round-trip and render responsive email-safe sections
   assert.ok(html.indexOf("SHOP NOW!") < html.indexOf("Newest grid marker"));
   assert.ok(html.indexOf("Newest grid marker") < html.indexOf("TAP. SHOP. DONE."));
   assert.match(html, /max-width:480px/);
-  assert.match(html, /reef-campaign-product\{width:50%!important/);
-  assert.doesNotMatch(html, /reef-campaign-product\{display:block/);
+  assert.match(
+    html,
+    /reef-campaign-product\{display:block!important;width:100%!important/,
+  );
   assert.doesNotMatch(html, /reef-campaign-product img\{width:auto!important/);
   assert.match(html, /width:140px;max-width:100%/);
   assert.match(html, /123 Ocean Ave/);
