@@ -206,7 +206,7 @@ export default function CampaignEmailFields({
           {layout.sections.map((section, sectionIndex) => (
             <details className="mk-campaign-builder-card" key={section.id}>
               <summary>
-                <span>{section.type === "products" ? `Product grid · ${campaignProductFeed(section.feed)?.name || section.feed?.name || "Manual"} · ${section.feed?.limit || section.products.length}` : `Full-width button · ${section.label}`}</span>
+                <span>{section.type === "products" ? `Product grid · ${campaignProductFeed(section.feed)?.name || section.feed?.name || "Manual"} · ${section.feed?.limit || section.products.length}` : section.type === "banner" ? `Full-width banner · ${section.text}` : `Full-width button · ${section.label}`}</span>
               </summary>
               <div className="mk-campaign-builder-actions">
                 <button type="button" disabled={sectionIndex === 0} onClick={() => patchLayout({ sections: move(layout.sections, sectionIndex, -1) })}>Move up</button>
@@ -226,6 +226,19 @@ export default function CampaignEmailFields({
                   <label>Button label<input value={section.label} onChange={(event) => replaceSection(sectionIndex, { ...section, label: event.target.value })} /></label>
                   <label>Destination<input type="url" value={section.url} onChange={(event) => replaceSection(sectionIndex, { ...section, url: event.target.value })} /></label>
                   <label>Text color<input type="color" value={section.textColor || "#ffffff"} onChange={(event) => replaceSection(sectionIndex, { ...section, textColor: event.target.value })} /></label>
+                </>
+              ) : section.type === "banner" ? (
+                <>
+                  <label>Banner text<input value={section.text} onChange={(event) => replaceSection(sectionIndex, { ...section, text: event.target.value })} /></label>
+                  <label>Highlighted text<input value={section.accent || ""} onChange={(event) => replaceSection(sectionIndex, { ...section, accent: event.target.value || undefined })} /></label>
+                  <label>Destination<input type="url" value={section.url} onChange={(event) => replaceSection(sectionIndex, { ...section, url: event.target.value })} /></label>
+                  <div className="mk-campaign-color-grid">
+                    <label>Text color<input type="color" value={section.textColor || "#080808"} onChange={(event) => replaceSection(sectionIndex, { ...section, textColor: event.target.value })} /></label>
+                    <label>Highlight color<input type="color" value={section.accentColor || "#5439ee"} onChange={(event) => replaceSection(sectionIndex, { ...section, accentColor: event.target.value })} /></label>
+                    <label>Border color<input type="color" value={section.borderColor || "#5439ee"} onChange={(event) => replaceSection(sectionIndex, { ...section, borderColor: event.target.value })} /></label>
+                  </div>
+                  <label className="mk-check"><input type="checkbox" checked={section.accentPill === true} onChange={(event) => replaceSection(sectionIndex, { ...section, accentPill: event.target.checked })} /> Show highlighted text as a pill</label>
+                  <label>Border width <span>{section.borderWidth || 0}px</span><input type="range" min="0" max="8" value={section.borderWidth || 0} onChange={(event) => replaceSection(sectionIndex, { ...section, borderWidth: Number(event.target.value) })} /></label>
                 </>
               ) : (
                 <div className="mk-campaign-products">
@@ -311,6 +324,7 @@ export default function CampaignEmailFields({
         <div className="mk-campaign-add-row">
           <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("products"), type: "products", backgroundColor: "#ffffff", products: [blankProduct(), blankProduct()] }] })}>Add product grid</button>
           <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("cta"), type: "cta", label: "SHOP NOW!", url: home, backgroundColor: "#3c8429", textColor: "#ffffff" }] })}>Add full-width button</button>
+          <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("banner"), type: "banner", text: "Promotional banner", url: home, backgroundColor: "#ffffff", textColor: "#080808", accentColor: "#5439ee", borderColor: "#5439ee", borderWidth: 0 }] })}>Add full-width banner</button>
         </div>
         </div>
       </details>

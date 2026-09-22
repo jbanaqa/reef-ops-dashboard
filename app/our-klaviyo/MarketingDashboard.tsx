@@ -157,6 +157,31 @@ const newCampaign = () => ({
   recipientMode: "SEND_TIME" as const,
 });
 const sameRules = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const currentCampaignContent = (item: Campaign) => {
+  const saved = structuredClone(item.content);
+  const sections = saved.campaignLayout?.sections;
+  if (item.status !== "DRAFT" || !sections || sections.length !== 4) return saved;
+  const byId = new Map(sections.map((section) => [section.id, section]));
+  const saleProducts =
+    byId.get("sale-products") || byId.get("anniversary-sale-products");
+  if (
+    !saleProducts ||
+    !byId.has("new-discount-products") ||
+    !byId.has("newest-products") ||
+    !byId.has("shop-cta")
+  ) return saved;
+  const currentDefaults = defaultCampaignContent.campaignLayout!.sections;
+  saved.campaignLayout!.sections = [
+    { ...saleProducts, id: "sale-products" },
+    byId.get("new-discount-products")!,
+    byId.get("shop-cta")!,
+    byId.get("newest-products")!,
+    ...currentDefaults
+      .filter((section) => section.type === "banner")
+      .map((section) => structuredClone(section)),
+  ];
+  return saved;
+};
 const campaignForm = (item: Campaign, resources: Resource[]): CampaignForm => {
   const saved = item.audience as Partial<CampaignAudience>;
   const audience =
@@ -178,7 +203,7 @@ const campaignForm = (item: Campaign, resources: Resource[]): CampaignForm => {
     id: item.id,
     name: item.name,
     subject: item.subject,
-    content: item.content,
+    content: currentCampaignContent(item),
     audience,
     smartSending: item.smartSendingHours > 0,
     recipientMode:

@@ -90,6 +90,19 @@ export type CampaignEmailSection =
       url: string;
       backgroundColor?: string;
       textColor?: string;
+    }
+  | {
+      id: string;
+      type: "banner";
+      text: string;
+      accent?: string;
+      url: string;
+      backgroundColor?: string;
+      textColor?: string;
+      accentColor?: string;
+      accentPill?: boolean;
+      borderColor?: string;
+      borderWidth?: number;
     };
 export type CampaignEmailLayout = {
   heroLink?: string;
@@ -510,6 +523,20 @@ export function content(value: unknown): Content {
           url: safeUrl(item.url).slice(0, 500),
         })),
         sections: (rawLayout.sections || []).slice(0, 20).map((section, index) => {
+          if (section.type === "banner")
+            return {
+              id: String(section.id || `banner-${index}`).slice(0, 100),
+              type: "banner" as const,
+              text: String(section.text || "Promotional banner").slice(0, 200),
+              accent: String(section.accent || "").slice(0, 80) || undefined,
+              url: safeUrl(section.url).slice(0, 500),
+              backgroundColor: color(section.backgroundColor, "#ffffff"),
+              textColor: color(section.textColor, "#080808"),
+              accentColor: color(section.accentColor, "#5439ee"),
+              accentPill: section.accentPill === true,
+              borderColor: color(section.borderColor, "#5439ee"),
+              borderWidth: bounded(section.borderWidth, 0, 0, 8),
+            };
           if (section.type === "cta")
             return {
               id: String(section.id || `cta-${index}`).slice(0, 100),
@@ -812,6 +839,34 @@ function campaignSaleHtml(
       : [];
   const sections = [...dynamicProducts, ...layout.sections]
     .map((section) => {
+      if (section.type === "banner")
+        return (
+          '<tr><td style="padding:10px;background:' +
+          e(style.contentBackground) +
+          ';text-align:center"><a href="' +
+          e(section.url) +
+          '" style="display:block;box-sizing:border-box;background:' +
+          e(section.backgroundColor || style.contentBackground) +
+          ";color:" +
+          e(section.textColor || style.textColor) +
+          ";border:" +
+          (section.borderWidth || 0) +
+          "px solid " +
+          e(section.borderColor || section.backgroundColor || style.contentBackground) +
+          ';padding:17px 14px;font-size:24px;line-height:1.15;font-weight:bold;text-decoration:none">' +
+          e(section.text) +
+          (section.accent
+            ? ' <span style="color:' +
+              e(section.accentColor || section.textColor || style.textColor) +
+              (section.accentPill
+                ? ";background:#ffffff;border-radius:5px;padding:2px 6px"
+                : "") +
+              ';white-space:nowrap">' +
+              e(section.accent) +
+              "</span>"
+            : "") +
+          "</a></td></tr>"
+        );
       if (section.type === "cta")
         return (
           '<tr><td style="padding:' +
@@ -1403,6 +1458,14 @@ export const defaultCampaignContent: Content = {
         products: [],
       },
       {
+        id: "shop-cta",
+        type: "cta",
+        label: "SHOP NOW!",
+        url: "https://coralsanonymous.com/collections/new-arrivals",
+        backgroundColor: "#3c8429",
+        textColor: "#ffffff",
+      },
+      {
         id: "newest-products",
         type: "products",
         backgroundColor: "#ffffff",
@@ -1410,12 +1473,29 @@ export const defaultCampaignContent: Content = {
         products: [],
       },
       {
-        id: "shop-cta",
-        type: "cta",
-        label: "SHOP NOW!",
+        id: "shop-app-banner",
+        type: "banner",
+        text: "TAP. SHOP. DONE.  |  NOW ON THE SHOP APP!",
+        accent: "shop",
         url: "https://coralsanonymous.com/collections/new-arrivals",
-        backgroundColor: "#3c8429",
+        backgroundColor: "#ffffff",
+        textColor: "#111111",
+        accentColor: "#5439ee",
+        borderColor: "#5439ee",
+        borderWidth: 4,
+      },
+      {
+        id: "shop-pay-banner",
+        type: "banner",
+        text: "Buy now, pay later with Shop",
+        accent: "Pay",
+        url: "https://coralsanonymous.com/collections/new-arrivals",
+        backgroundColor: "#5439ee",
         textColor: "#ffffff",
+        accentColor: "#5439ee",
+        accentPill: true,
+        borderColor: "#5439ee",
+        borderWidth: 0,
       },
     ],
     style: {

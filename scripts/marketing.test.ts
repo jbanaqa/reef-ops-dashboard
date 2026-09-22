@@ -57,9 +57,28 @@ test("campaign sale layouts round-trip and render responsive email-safe sections
     compareAtPrice: "$79.99",
     imageWidth: 160,
   });
+  const newest = draft.campaignLayout!.sections[3];
+  if (newest.type !== "products") throw new Error("Expected newest product section");
+  newest.products.push({
+    id: "newest-preview-product",
+    url: "https://coralsanonymous.com/products/newest-coral",
+    title: "Newest grid marker",
+    salePrice: "$25.00",
+  });
   const saved = content(draft);
   assert.equal(saved.template, "campaign-sale");
-  assert.equal(saved.campaignLayout?.sections.length, 4);
+  assert.equal(saved.campaignLayout?.sections.length, 6);
+  assert.deepEqual(
+    saved.campaignLayout?.sections.map((section) => section.id),
+    [
+      "sale-products",
+      "new-discount-products",
+      "shop-cta",
+      "newest-products",
+      "shop-app-banner",
+      "shop-pay-banner",
+    ],
+  );
   assert.deepEqual(
     saved.campaignLayout?.sections
       .filter((section) => section.type === "products")
@@ -80,6 +99,10 @@ test("campaign sale layouts round-trip and render responsive email-safe sections
   assert.match(html, /Red and White Coco Worm/);
   assert.match(html, /text-decoration:line-through/);
   assert.match(html, /SHOP NOW!/);
+  assert.match(html, /TAP\. SHOP\. DONE\./);
+  assert.match(html, /Buy now, pay later with/);
+  assert.ok(html.indexOf("SHOP NOW!") < html.indexOf("Newest grid marker"));
+  assert.ok(html.indexOf("Newest grid marker") < html.indexOf("TAP. SHOP. DONE."));
   assert.match(html, /max-width:480px/);
   assert.match(html, /123 Ocean Ave/);
 });

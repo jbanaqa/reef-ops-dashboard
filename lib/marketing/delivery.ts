@@ -87,7 +87,9 @@ export function emailBody(
                   .filter(Boolean)
                   .join(" · "),
               )
-            : [section.label + ": " + section.url],
+            : section.type === "cta"
+              ? [section.label + ": " + section.url]
+              : [[section.text, section.accent].filter(Boolean).join(" ") + ": " + section.url],
         )
         .join("\n"),
       effectiveContent.url,
