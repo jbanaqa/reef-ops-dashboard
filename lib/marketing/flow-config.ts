@@ -4,6 +4,7 @@ import { defaultContent } from "./rules";
 import { validateWelcome, type WelcomeConfig } from "./welcome-config";
 import {
   validateDeliveryUpsell,
+  deliveryUpsellDraft,
   type DeliveryUpsellConfig,
 } from "./delivery-upsell-config";
 import { channels, content, Content, flowDefaults } from "./rules";
@@ -55,7 +56,9 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     throw new Error("Unknown flow.");
   if (!value || typeof value !== "object")
     throw new Error("Flow configuration required.");
-  const f = { ...(value as FlowConfig) };
+  const incoming = { ...(value as FlowConfig) };
+  const f =
+    key === "delivery-upsell" ? deliveryUpsellDraft(incoming) : incoming;
   const stock =
     key === "low-stock" && f.stock ? validateStock(f.stock) : undefined;
   if (stock)

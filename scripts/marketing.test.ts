@@ -165,6 +165,7 @@ test("visual layouts can change without changing flow behavior or dynamic data",
 });
 import {
   defaultDeliveryUpsell,
+  deliveryUpsellContent,
   deliveryDateFromTags,
   deliveryUpsellDueAt,
   deliveryUpsellDraft,
@@ -255,6 +256,48 @@ test("delivery upsell upgrades only untouched scaffold copy", () => {
   assert.equal(
     upgraded.steps[0].content.url,
     "https://coralsanonymous.com/collections/new-arrivals",
+  );
+  const existing = deliveryUpsellDraft({
+    reviewed: true,
+    delivery: defaultDeliveryUpsell,
+    steps: [
+      {
+        minutes: 0,
+        channel: "EMAIL",
+        subject: "Notice",
+        content: {
+          ...deliveryUpsellContent,
+          heading: "Corals, you have 24 hours to add-on to your order.",
+        },
+      },
+    ],
+  });
+  assert.equal(
+    existing.steps[0].content.heading,
+    '{{ first_name|default:"Aloha" }}, you have 24 hours to add-on to your order.',
+  );
+  assert.match(
+    render(
+      existing.steps[0].content,
+      "https://example.com/unsubscribe",
+      "123 Valid Street",
+      "Jaden Banawa",
+    ),
+    /Jaden, you have 24 hours/,
+  );
+  assert.match(
+    render(
+      existing.steps[0].content,
+      "https://example.com/unsubscribe",
+      "123 Valid Street",
+    ),
+    /Aloha, you have 24 hours/,
+  );
+  const customized = structuredClone(existing);
+  customized.steps[0].content.heading = "My custom notice";
+  assert.equal(
+    deliveryUpsellDraft(customized).steps[0].content.heading,
+    "My custom notice",
   );
 });
 
@@ -452,7 +495,7 @@ test("cart recovery renders a responsive two-column product grid", () => {
   assert.equal((html.match(/width="50%"/g) || []).length, 4);
   assert.match(html, /background="https:\/\/cdn\.example\.com\/cart-art\.jpg"/);
   assert.match(html, /Blue coral/);
-  assert.match(html, /Product image/);
+  assert.doesNotMatch(html, /Product image/);
 });
 test("shared branding fills missing email artwork and footer metadata", () => {
   const html = render(
@@ -834,6 +877,55 @@ test("every email layout uses the editable copyright footer controls", () => {
     "Company Name",
   );
   assert.doesNotMatch(hidden, /All rights reserved/);
+});
+test("generated welcome, coupon, social, and unsubscribe copy is editable", () => {
+  const offer = render(
+    content({
+      ...welcomeSteps[0].content,
+      couponCode: "TEST10",
+      couponExpiresAt: "2026-10-01T19:00:00.000Z",
+      couponLabel: "Your reef offer",
+      couponTerms: "Custom offer terms",
+      couponExpiryText: "Use it before {{ coupon_expires }}",
+      welcomeHeroGreeting: '{{ first_name|default:"Aloha" }}!',
+      welcomeHeroText: "Custom welcome banner",
+      footerUnsubscribeLinkText: "Manage email preferences",
+    }),
+    "https://example.com/unsubscribe",
+    "123 Valid Street",
+    "Jaden Banawa",
+  );
+  assert.match(offer, /Your reef offer/);
+  assert.match(offer, /Custom offer terms/);
+  assert.match(offer, /Use it before/);
+  assert.match(offer, /Jaden!/);
+  assert.match(offer, /Custom welcome banner/);
+  assert.match(offer, /Manage email preferences/);
+
+  const social = render(
+    content({
+      ...welcomeSteps[3].content,
+      socialFollowText: "Find us here",
+      instagramHeading: "Photo reef",
+      instagramHandle: "@customreef",
+      instagramText: "Custom Instagram copy",
+      facebookHeading: "Reef community",
+      facebookHandle: "@customcommunity",
+      facebookText: "Custom Facebook copy",
+    }),
+    "https://example.com/unsubscribe",
+    "123 Valid Street",
+  );
+  for (const expected of [
+    "Find us here",
+    "Photo reef",
+    "@customreef",
+    "Custom Instagram copy",
+    "Reef community",
+    "@customcommunity",
+    "Custom Facebook copy",
+  ])
+    assert.match(social, new RegExp(expected));
 });
 test("cleared footer copy keeps the unsubscribe link and mailing address", () => {
   const html = render(

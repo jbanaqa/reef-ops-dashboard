@@ -7,6 +7,8 @@ import {
   withBranding,
   footerTitle,
   footerCopyright,
+  defaultGeneratedEmailCopy,
+  personalize,
 } from "./rules";
 
 export type Delivery = {
@@ -69,11 +71,25 @@ export function emailBody(
       effectiveContent.heading,
       textBody(effectiveContent, m.profileName),
       effectiveContent.couponCode
-        ? "Your 10% discount code: " +
+        ? (effectiveContent.couponLabel ||
+            defaultGeneratedEmailCopy.genericCouponLabel) +
+          " " +
           effectiveContent.couponCode +
-          " (one use; cannot combine with other discounts)"
+          (effectiveContent.couponTerms === ""
+            ? ""
+            : " (" +
+              (effectiveContent.couponTerms ||
+                defaultGeneratedEmailCopy.welcomeCouponTerms) +
+              ")")
         : undefined,
-      effectiveContent.couponExpiresAt ? "Offer expires: " + effectiveContent.couponExpiresAt : undefined,
+      effectiveContent.couponExpiresAt
+        ? (effectiveContent.couponExpiryText ||
+            defaultGeneratedEmailCopy.couponExpiry
+          ).replace(
+            "{{ coupon_expires }}",
+            effectiveContent.couponExpiresAt,
+          )
+        : undefined,
       (effectiveContent.products || [])
         .map((p) => [p.title, p.price, p.url].filter(Boolean).join(" · "))
         .join("\n"),
@@ -154,7 +170,7 @@ export const resendProvider: DeliveryProvider = {
         body: JSON.stringify({
           from,
           to: [m.to],
-          subject: m.subject,
+          subject: personalize(m.subject, m.profileName),
           ...emailBody(m, address, organizationName),
           headers: m.internalPreview
             ? undefined

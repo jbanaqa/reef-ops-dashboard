@@ -175,8 +175,10 @@ export default function RichEmailCopy({
         </>
       )}
       <small>
-        Type directly and select text to format it. Existing custom HTML remains
-        available.
+        Every sentence shown in this message area is editable. Type directly,
+        select text to format it, or open Edit HTML for existing custom markup.
+        Use {`{{ first_name|default:"Aloha" }}`} to show the customer&apos;s first
+        name with Aloha as the fallback.
       </small>
     </div>
   );

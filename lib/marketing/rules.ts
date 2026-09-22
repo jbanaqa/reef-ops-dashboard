@@ -179,8 +179,22 @@ export type Content = {
   showPostalAddress?: boolean;
   footerText?: string;
   footerUnsubscribeText?: string;
+  footerUnsubscribeLinkText?: string;
   showFooterCopyright?: boolean;
   footerCopyrightText?: string;
+  couponLabel?: string;
+  couponTerms?: string;
+  couponExpiryText?: string;
+  couponExpiryFallbackText?: string;
+  welcomeHeroGreeting?: string;
+  welcomeHeroText?: string;
+  socialFollowText?: string;
+  instagramHeading?: string;
+  instagramHandle?: string;
+  instagramText?: string;
+  facebookHeading?: string;
+  facebookHandle?: string;
+  facebookText?: string;
   instagramUrl?: string;
   facebookUrl?: string;
   instagramIcon?: string;
@@ -449,7 +463,9 @@ export function textBody(c: Content, name = "") {
   return personalize(
     (c.bodyHtml !== undefined ? htmlText(c.bodyHtml) : c.body).replaceAll(
       "{{ coupon_expires }}",
-      c.couponExpiresAt || "your personal expiration date",
+      c.couponExpiresAt ||
+        c.couponExpiryFallbackText ||
+        defaultGeneratedEmailCopy.couponExpiryFallback,
     ),
     name,
   );
@@ -504,7 +520,7 @@ function cartProductHtml(c: Content) {
               '" width="240" alt="' +
               escapeHtml(p.title) +
               '" style="display:block;width:100%;max-width:240px;height:auto;margin:0 auto 9px;background:#f1f4f4">'
-            : '<div style="width:100%;height:150px;background:#f1f4f4;margin:0 auto 9px;color:#7b8789;font-size:12px;line-height:150px">Product image</div>') +
+            : '<div style="width:100%;height:150px;background:#f1f4f4;margin:0 auto 9px;color:#7b8789;font-size:12px;line-height:150px">' + escapeHtml(p.title) + "</div>") +
           '<strong style="display:block;font-family:Georgia,serif;font-size:16px;line-height:1.25;text-decoration:underline">' +
           escapeHtml(p.title) +
           "</strong>" +
@@ -673,11 +689,67 @@ export function content(value: unknown): Content {
       c.footerUnsubscribeText === undefined
         ? undefined
         : String(c.footerUnsubscribeText).slice(0, 300),
+    footerUnsubscribeLinkText:
+      c.footerUnsubscribeLinkText === undefined
+        ? undefined
+        : String(c.footerUnsubscribeLinkText).slice(0, 100),
     showFooterCopyright: c.showFooterCopyright !== false,
     footerCopyrightText:
       c.footerCopyrightText === undefined
         ? undefined
         : String(c.footerCopyrightText).slice(0, 300),
+    couponLabel:
+      c.couponLabel === undefined
+        ? undefined
+        : String(c.couponLabel).slice(0, 200),
+    couponTerms:
+      c.couponTerms === undefined
+        ? undefined
+        : String(c.couponTerms).slice(0, 500),
+    couponExpiryText:
+      c.couponExpiryText === undefined
+        ? undefined
+        : String(c.couponExpiryText).slice(0, 500),
+    couponExpiryFallbackText:
+      c.couponExpiryFallbackText === undefined
+        ? undefined
+        : String(c.couponExpiryFallbackText).slice(0, 200),
+    welcomeHeroGreeting:
+      c.welcomeHeroGreeting === undefined
+        ? undefined
+        : String(c.welcomeHeroGreeting).slice(0, 200),
+    welcomeHeroText:
+      c.welcomeHeroText === undefined
+        ? undefined
+        : String(c.welcomeHeroText).slice(0, 500),
+    socialFollowText:
+      c.socialFollowText === undefined
+        ? undefined
+        : String(c.socialFollowText).slice(0, 100),
+    instagramHeading:
+      c.instagramHeading === undefined
+        ? undefined
+        : String(c.instagramHeading).slice(0, 100),
+    instagramHandle:
+      c.instagramHandle === undefined
+        ? undefined
+        : String(c.instagramHandle).slice(0, 100),
+    instagramText:
+      c.instagramText === undefined
+        ? undefined
+        : String(c.instagramText).slice(0, 300),
+    facebookHeading:
+      c.facebookHeading === undefined
+        ? undefined
+        : String(c.facebookHeading).slice(0, 100),
+    facebookHandle:
+      c.facebookHandle === undefined
+        ? undefined
+        : String(c.facebookHandle).slice(0, 100),
+    facebookText:
+      c.facebookText === undefined
+        ? undefined
+        : String(c.facebookText).slice(0, 300),
     instagramUrl: c.instagramUrl
       ? safeUrl(c.instagramUrl).slice(0, 500)
       : undefined,
@@ -841,6 +913,28 @@ export function footerTitle(c: Content) {
 }
 export const defaultFooterCopyright =
   "© {{ year }} {{ organization }} | All rights reserved.";
+export const defaultGeneratedEmailCopy = {
+  unsubscribeLink: "Unsubscribe",
+  welcomeCouponLabel: "Discount Code:",
+  welcomeCouponLabelAbove: "10% OFF Your Entire Order:",
+  welcomeCouponTerms: "One use. Cannot combine with other discounts.",
+  couponExpiry: "Expires {{ coupon_expires }} Pacific time.",
+  couponExpiryFallback: "your personal expiration date",
+  cartCouponLabel: "Use Discount Code:",
+  cartCouponTerms:
+    "10% off your order. One use. Cannot combine with other discounts.",
+  genericCouponLabel: "Your 10% discount code:",
+  welcomeHeroGreeting: '{{ first_name|default:"Aloha" }},',
+  welcomeHeroAbove: "Thank you for subscribing\nto our newsletter!",
+  welcomeHeroBelow: "Save 10% off\nyour entire order!",
+  socialFollow: "FOLLOW US ON",
+  instagramHeading: "INSTAGRAM",
+  instagramHandle: "@coralsanonymous",
+  instagramText: "DAILY CORAL POSTS, SALES, AND MORE!",
+  facebookHeading: "FACEBOOK",
+  facebookHandle: "@coralsanonymousshop",
+  facebookText: "CORAL SALES, PROMO CODES AND MORE!",
+} as const;
 export function footerCopyright(
   c: Content,
   organizationName: string,
@@ -859,6 +953,7 @@ function campaignSaleHtml(
   unsubscribe: string,
   address: string,
   organizationName: string,
+  profileName?: string,
 ) {
   const layout = c.campaignLayout!;
   const style = layout.style;
@@ -889,7 +984,7 @@ function campaignSaleHtml(
       '"><img src="' +
       e(c.hero) +
       '" alt="' +
-      e(c.heading) +
+      e(personalize(c.heading, profileName)) +
       '" width="600" style="display:block;width:100%;max-width:600px;height:auto"></a></td></tr>'
     : "";
   const usesDynamicFlowContent = c.template !== "campaign-sale";
@@ -907,7 +1002,7 @@ function campaignSaleHtml(
               image: product.image,
               salePrice: product.price,
               showCompareAtPrice: false,
-              button: "Shop now",
+              button: c.button,
             })),
           },
         ]
@@ -993,7 +1088,7 @@ function campaignSaleHtml(
             ';text-decoration:none">' +
             (product.image
               ? '<img src="' + e(product.image) + '" alt="' + e(product.title) + '" width="' + imageWidth + '" style="display:block;width:' + imageWidth + 'px;max-width:100%;height:auto;margin:' + imageMargin + '">'
-              : '<div style="height:' + imageWidth + 'px;background:#f1f3f3;color:#777;line-height:' + imageWidth + 'px;text-align:center">Product image</div>') +
+              : '<div style="height:' + imageWidth + 'px;background:#f1f3f3;color:#777;line-height:' + imageWidth + 'px;text-align:center">' + e(product.title) + "</div>") +
             '<strong style="display:block;font-size:' +
             style.titleSize +
             'px;line-height:1.2">' +
@@ -1019,17 +1114,19 @@ function campaignSaleHtml(
         timeStyle: "short",
         timeZone: "America/Los_Angeles",
       }).format(new Date(c.couponExpiresAt)) + " Pacific time"
-    : "your personal expiration date";
+    : c.couponExpiryFallbackText ||
+      defaultGeneratedEmailCopy.couponExpiryFallback;
   const dynamicCopy =
     c.bodyHtml !== undefined
       ? personalize(
           c.bodyHtml.replaceAll("{{ coupon_expires }}", dynamicExpiry),
-          undefined,
+          profileName,
           true,
         )
       : e(
           personalize(
             c.body.replaceAll("{{ coupon_expires }}", dynamicExpiry),
+            profileName,
           ),
         ).replace(/\n/g, "<br>");
   const dynamicMessage = usesDynamicFlowContent
@@ -1040,7 +1137,7 @@ function campaignSaleHtml(
       ';color:' +
       e(style.textColor) +
       '"><h1 style="margin:0 0 18px;font-size:28px;line-height:1.2">' +
-      e(c.heading) +
+      e(personalize(c.heading, profileName)) +
       '</h1><div style="font-size:16px;line-height:1.6">' +
       dynamicCopy +
       "</div>" +
@@ -1066,7 +1163,7 @@ function campaignSaleHtml(
   return (
     "<!doctype html><html>" +
     emailHead +
-    '<body style="margin:0;background:' + e(style.emailBackground) + ";font-family:" + font + ";color:" + e(style.textColor) + '"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:' + e(style.contentBackground) + '"><tr><td style="display:none;max-height:0;overflow:hidden">' + e(c.preview || "") + "</td></tr>" +
+    '<body style="margin:0;background:' + e(style.emailBackground) + ";font-family:" + font + ";color:" + e(style.textColor) + '"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:' + e(style.contentBackground) + '"><tr><td style="display:none;max-height:0;overflow:hidden">' + e(personalize(c.preview || "", profileName)) + "</td></tr>" +
     '<tr><td class="reef-logo" align="center" style="padding:16px 26px 8px">' +
     (c.logo
       ? '<img src="' + e(c.logo) + '" alt="' + e(organizationName) + '" width="' + Math.round(360 * (c.logoScale || 1)) + '" style="display:block;width:' + Math.round(360 * (c.logoScale || 1)) + 'px;max-width:100%;height:auto;margin:auto">'
@@ -1099,7 +1196,9 @@ function campaignSaleHtml(
       : "") +
     '<p style="margin:12px 0">' + e(c.footerText || "") .replace(/\n/g, "<br>") + "</p><p>" +
     e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
-    ' <a href="' + e(unsubscribe) + '" style="color:#fff">Unsubscribe</a></p><p>' + e(organizationName) + (address ? "<br>" + e(address) : "") + "</p>" +
+    ' <a href="' + e(unsubscribe) + '" style="color:#fff">' +
+    e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
+    "</a></p><p>" + e(organizationName) + (address ? "<br>" + e(address) : "") + "</p>" +
     (footerCopyright(c, organizationName)
       ? '<p style="margin:12px 0 0">' + e(footerCopyright(c, organizationName)) + "</p>"
       : "") +
@@ -1120,7 +1219,13 @@ export function render(
   const e = escapeHtml;
   const layout = c.layout || c.template || "standard";
   if (layout === "campaign-sale" && c.campaignLayout)
-    return campaignSaleHtml(c, unsubscribe, address, organizationName);
+    return campaignSaleHtml(
+      c,
+      unsubscribe,
+      address,
+      organizationName,
+      profileName,
+    );
   if (layout === "welcome" || layout === "welcome-social") {
     const displayExpiry = c.couponExpiresAt
       ? new Intl.DateTimeFormat("en-US", {
@@ -1128,7 +1233,8 @@ export function render(
           timeStyle: "short",
           timeZone: "America/Los_Angeles",
         }).format(new Date(c.couponExpiresAt)) + " Pacific time"
-      : "your personal expiration date";
+      : c.couponExpiryFallbackText ||
+        defaultGeneratedEmailCopy.couponExpiryFallback;
     c = {
       ...c,
       body: c.body.replaceAll("{{ coupon_expires }}", displayExpiry),
@@ -1144,20 +1250,26 @@ export function render(
         ? personalize(c.bodyHtml, profileName, true)
         : e(personalize(c.body, profileName)).replace(/\n/g, "<br>");
     const expiry = c.couponExpiresAt
-      ? '<p style="font-size:12px;color:#555">Expires ' +
+      ? '<p style="font-size:12px;color:#555">' +
         e(
-          new Intl.DateTimeFormat("en-US", {
-            dateStyle: "long",
-            timeStyle: "short",
-            timeZone: "America/Los_Angeles",
-          }).format(new Date(c.couponExpiresAt)),
+          (c.couponExpiryText || defaultGeneratedEmailCopy.couponExpiry)
+            .replace("{{ coupon_expires }}", displayExpiry),
         ) +
-        " Pacific time. One use. Cannot combine with other discounts.</p>"
+        (c.couponTerms === ""
+          ? ""
+          : " " +
+            e(c.couponTerms || defaultGeneratedEmailCopy.welcomeCouponTerms)) +
+        "</p>"
       : "";
     const offer =
       c.couponCode && !social
         ? '<div style="text-align:center;padding:16px 0 28px"><h2 style="font-size:23px;margin:0 0 18px">' +
-          (c.offerAboveBody ? "10% OFF Your Entire Order:" : "Discount Code:") +
+          e(
+            c.couponLabel ||
+              (c.offerAboveBody
+                ? defaultGeneratedEmailCopy.welcomeCouponLabelAbove
+                : defaultGeneratedEmailCopy.welcomeCouponLabel),
+          ) +
           '</h2><span style="display:inline-block;border:2px solid #e6e6e6;border-radius:20px;padding:8px 16px;font-size:23px;font-weight:bold;overflow-wrap:anywhere">' +
           e(c.couponCode) +
           "</span>" +
@@ -1168,13 +1280,24 @@ export function render(
       ? '<img src="' +
         e(c.hero) +
         '" alt="' +
-        e(c.heading) +
+        e(personalize(c.heading, profileName)) +
         '" width="500" style="display:block;width:100%;max-width:500px;height:auto;margin:auto">'
       : !social
-        ? '<div style="background:#8bd8e2;padding:44px 22px;text-align:center;border:1px solid #459ca4"><p style="font-size:25px;margin:0;color:#172e32;font-weight:bold">Aloha Friend,</p><p style="font-size:29px;line-height:1.25;font-weight:bold;margin:18px 0">' +
-          (c.offerAboveBody
-            ? "Thank you for subscribing<br>to our newsletter!"
-            : "Save 10% off<br>your entire order!") +
+        ? '<div style="background:#8bd8e2;padding:44px 22px;text-align:center;border:1px solid #459ca4"><p style="font-size:25px;margin:0;color:#172e32;font-weight:bold">' +
+          e(
+            personalize(
+              c.welcomeHeroGreeting ||
+                defaultGeneratedEmailCopy.welcomeHeroGreeting,
+              profileName,
+            ),
+          ) +
+          '</p><p style="font-size:29px;line-height:1.25;font-weight:bold;margin:18px 0">' +
+          e(
+            c.welcomeHeroText ||
+              (c.offerAboveBody
+                ? defaultGeneratedEmailCopy.welcomeHeroAbove
+                : defaultGeneratedEmailCopy.welcomeHeroBelow),
+          ).replace(/\n/g, "<br>") +
           "</p></div>"
         : "";
     const socialCard = (
@@ -1188,18 +1311,20 @@ export function render(
       e(url) +
       '" style="display:block;background:' +
       color +
-      ';padding:28px 12px;color:white;text-decoration:none;text-align:center"><span style="font-size:12px;font-weight:bold">FOLLOW US ON</span><h2 style="font-size:23px;margin:12px 0">' +
-      label +
+      ';padding:28px 12px;color:white;text-decoration:none;text-align:center"><span style="font-size:12px;font-weight:bold">' +
+      e(c.socialFollowText || defaultGeneratedEmailCopy.socialFollow) +
+      '</span><h2 style="font-size:23px;margin:12px 0">' +
+      e(label) +
       '</h2><span style="font-size:12px">' +
-      handle +
+      e(handle) +
       '</span><p style="font-weight:bold;font-size:16px;line-height:1.4;margin-top:28px">' +
-      copy +
+      e(copy) +
       "</p></a></td>";
     return (
       "<!doctype html><html>" +
       emailHead +
       '<body style="margin:0;background:#f7f7f7;font-family:Arial,sans-serif;color:#080808"><table role="presentation" width="100%"><tr><td class="reef-outer" align="center" style="padding:16px"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:white"><tr><td style="display:none;font-size:1px;max-height:0;overflow:hidden">' +
-      e(c.preview || "") +
+      e(personalize(c.preview || "", profileName)) +
       "</td></tr>" +
       (c.logo
         ? '<tr><td class="reef-logo" align="center" style="padding:20px"><img src="' +
@@ -1213,7 +1338,7 @@ export function render(
       '<tr><td style="padding:8px 30px 0">' +
       hero +
       '</td></tr><tr><td class="reef-copy" style="padding:16px 30px 24px;font-size:16px;line-height:1.4"><h1 style="text-align:center;font-size:28px;line-height:1.2;margin:0 0 22px">' +
-      e(c.heading) +
+      e(personalize(c.heading, profileName)) +
       "</h1>" +
       (c.offerAboveBody ? offer : "") +
       '<div style="' +
@@ -1228,16 +1353,16 @@ export function render(
         ? '<table role="presentation" width="100%" style="table-layout:fixed;margin-top:24px"><tr>' +
           socialCard(
             instagram,
-            "INSTAGRAM",
-            "@coralsanonymous",
-            "DAILY CORAL POSTS, SALES, AND MORE!",
+            c.instagramHeading || defaultGeneratedEmailCopy.instagramHeading,
+            c.instagramHandle || defaultGeneratedEmailCopy.instagramHandle,
+            c.instagramText || defaultGeneratedEmailCopy.instagramText,
             "#c95379",
           ) +
           socialCard(
             facebook,
-            "FACEBOOK",
-            "@coralsanonymousshop",
-            "CORAL SALES, PROMO CODES AND MORE!",
+            c.facebookHeading || defaultGeneratedEmailCopy.facebookHeading,
+            c.facebookHandle || defaultGeneratedEmailCopy.facebookHandle,
+            c.facebookText || defaultGeneratedEmailCopy.facebookText,
             "#606aff",
           ) +
           "</tr></table>"
@@ -1266,7 +1391,9 @@ export function render(
       e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
       ' <a href="' +
       e(unsubscribe) +
-      '" style="color:#555">Unsubscribe</a></p><p>' +
+      '" style="color:#555">' +
+      e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
+      "</a></p><p>" +
       e(organizationName) +
       (address ? "<br>" + e(address) : "") +
       "</p>" +
@@ -1277,7 +1404,10 @@ export function render(
     );
   }
   if (c.couponCode && layout !== "cart-recovery") {
-    const line = "Your 10% discount code: " + c.couponCode;
+    const line =
+      (c.couponLabel || defaultGeneratedEmailCopy.genericCouponLabel) +
+      " " +
+      c.couponCode;
     c = {
       ...c,
       body: c.body + "\n\n" + line,
@@ -1307,7 +1437,7 @@ export function render(
       emailHead +
       '<body style="background:#eff8f8;margin:0;font-family:Arial,sans-serif"><table role="presentation" width="100%"><tr><td align="center" class="reef-outer" style="padding:16px"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:#8bd8e2"><tr><td class="reef-logo" style="background:white;padding:24px;text-align:center">' +
       '<span style="display:none;max-height:0;overflow:hidden;mso-hide:all">' +
-      e(c.preview || "") +
+      e(personalize(c.preview || "", profileName)) +
       "</span>" +
       logo +
       '</td></tr><tr><td align="center" style="padding:0;background:#82d2dc"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed"><tr><td class="reef-copy reef-cart-copy"' +
@@ -1320,14 +1450,18 @@ export function render(
         : "background-image:linear-gradient(135deg,#91d6dd,#5896a4,#91d6dd);") +
       '">' +
       '<h1 style="font-family:Georgia,serif;font-style:italic;font-size:30px;line-height:1.3;color:white;text-shadow:1px 2px 2px #173e46">' +
-      e(c.heading) +
+      e(personalize(c.heading, profileName)) +
       '</h1><div style="font-family:Georgia,serif;font-style:italic;font-weight:bold;font-size:23px;line-height:1.55;color:white;text-shadow:1px 2px 2px #173e46">' +
       copy +
       "</div>" +
       (c.couponCode
-        ? '<p style="font-size:14px;margin-top:30px">Use Discount Code:</p><p style="font-weight:bold;font-size:22px;overflow-wrap:anywhere">' +
+        ? '<p style="font-size:14px;margin-top:30px">' +
+          e(c.couponLabel || defaultGeneratedEmailCopy.cartCouponLabel) +
+          '</p><p style="font-weight:bold;font-size:22px;overflow-wrap:anywhere">' +
           e(c.couponCode) +
-          '</p><p style="font-size:12px">10% off your order. One use. Cannot combine with other discounts.</p>'
+          '</p><p style="font-size:12px">' +
+          e(c.couponTerms || defaultGeneratedEmailCopy.cartCouponTerms) +
+          "</p>"
         : "") +
       '<p style="margin:30px 0 8px"><a href="' +
       e(c.url) +
@@ -1360,7 +1494,9 @@ export function render(
       e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
       ' <a style="color:#174f60" href="' +
       e(unsubscribe) +
-      '">Unsubscribe</a></p></td></tr></table></td></tr></table></body></html>'
+      '">' +
+      e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
+      "</a></p></td></tr></table></td></tr></table></body></html>"
     );
   }
   if (layout === "b2b-wholesale") {
@@ -1404,7 +1540,9 @@ export function render(
         '" alt="Corals Anonymous" style="max-width:100%;width:' +
         String(Math.round(260 * logoScale)) +
         'px;height:auto">'
-      : '<div style="display:inline-block;padding:18px 26px;border:1px dashed #9aa8bb;color:#68778d;font-size:13px">Upload Corals Anonymous logo</div>';
+      : '<strong style="font-size:24px;font-style:italic;color:#102d33">' +
+        e(organizationName.toUpperCase()) +
+        "</strong>";
     const footer = c.footerImage
       ? '<img src="' +
         e(c.footerImage) +
@@ -1428,14 +1566,14 @@ export function render(
       emailHead +
       '<body style="margin:0;background:#07143a;font-family:Arial,sans-serif;color:#101820"><table role="presentation" width="100%"><tr><td align="center" class="reef-outer" style="padding:14px"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:white"><tr><td class="reef-logo" style="padding:12px 28px 18px;text-align:center">' +
       '<span style="display:none;max-height:0;overflow:hidden;mso-hide:all">' +
-      e(c.preview || "") +
+      e(personalize(c.preview || "", profileName)) +
       "</span>" +
       logo +
       '<hr style="border:0;border-top:1px solid #c9c9c9;margin:14px 0 0"></td></tr><tr><td class="reef-copy" style="padding:36px 52px 24px;font-size:13px;line-height:1.55">' +
       (customBody
         ? bodyHtml
         : '<h1 style="text-align:center;font-size:27px;line-height:1.15;margin:0 0 45px">' +
-          e(c.heading) +
+          e(personalize(c.heading, profileName)) +
           '</h1><p style="text-align:center;font-weight:bold;font-size:16px">' +
           e(greeting) +
           '</p><div style="font-size:13px;line-height:1.55">' +
@@ -1456,7 +1594,9 @@ export function render(
       e(c.footerUnsubscribeText ?? "No longer want to receive these emails?") +
       ' <a style="color:#ffd0a3" href="' +
       e(unsubscribe) +
-      '">Unsubscribe</a></p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
+      '">' +
+      e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
+      '</a></p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
       (address ? e(address) : "") +
       "</p>" +
       (footerCopyright(c, organizationName)
@@ -1471,7 +1611,7 @@ export function render(
     "<!doctype html><html>" +
     emailHead +
     '<body style="margin:0;background:#eef5f4;font-family:Arial,sans-serif;color:#123334"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:white"><tr><td style="padding:28px;text-align:center;background:#083b3b;color:white;font-size:25px;font-weight:bold">CORALS ANONYMOUS</td></tr><tr><td style="display:none">' +
-    e(c.preview || "") +
+    e(personalize(c.preview || "", profileName)) +
     "</td></tr>" +
     (c.hero
       ? '<tr><td><a href="' +
@@ -1479,11 +1619,11 @@ export function render(
         '"><img src="' +
         e(c.hero) +
         '" alt="' +
-        e(c.heading) +
+        e(personalize(c.heading, profileName)) +
         '" width="600" style="max-width:100%"></a></td></tr>'
       : "") +
     '<tr><td class="reef-copy" style="padding:28px"><h1>' +
-    e(c.heading) +
+    e(personalize(c.heading, profileName)) +
     '</h1><div style="line-height:1.7">' +
     (c.bodyHtml !== undefined
       ? personalize(c.bodyHtml, profileName, true)
@@ -1509,7 +1649,9 @@ export function render(
     e(c.footerUnsubscribeText ?? "") +
     ' <a href="' +
     e(unsubscribe) +
-    '">Unsubscribe from email marketing</a></td></tr></table></td></tr></table></body></html>'
+    '">' +
+    e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
+    "</a></td></tr></table></td></tr></table></body></html>"
   );
 }
 export const defaultContent: Content = {

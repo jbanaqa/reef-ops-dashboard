@@ -14,6 +14,10 @@ import {
 import FlowEditor from "../app/our-klaviyo/FlowEditor";
 import SettingsWorkspace from "../app/our-klaviyo/SettingsWorkspace";
 import CampaignEmailFields from "../app/our-klaviyo/CampaignEmailFields";
+import {
+  defaultDeliveryUpsell,
+  deliveryUpsellContent,
+} from "../lib/marketing/delivery-upsell-config";
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://app.example",
 });
@@ -359,6 +363,38 @@ test("footer fields save with the email while sender details remain visible", as
   assert.equal(
     result.steps[0].content.footerText,
     "Contact our wholesale team.",
+  );
+});
+
+test("delivery notice exposes its personalized heading and every message sentence", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  const base = resource("delivery-upsell", "Delivery notice");
+  const r = {
+    ...base,
+    data: { ...base.data, delivery: defaultDeliveryUpsell },
+  };
+  r.data.steps[0].content = structuredClone(deliveryUpsellContent);
+  const view = testing.render(
+    <FlowEditor
+      resource={r}
+      busy={false}
+      settings={defaultMarketingSettings}
+      save={async (data, enabled) => ({ ...r, data, enabled })}
+    />,
+  );
+  testing.fireEvent.click(await view.findByText("Delivery notice"));
+  const heading = view.getByLabelText("Heading") as HTMLInputElement;
+  assert.match(heading.value, /first_name\|default:"Aloha"/);
+  const message = view.getByRole("textbox", { name: "Message" });
+  assert.match(
+    message.textContent || "",
+    /Your order is shipping out tomorrow at 8AM PST!/,
+  );
+  assert.match(
+    view.getByText(/Every sentence shown in this message area is editable/)
+      .textContent || "",
+    /first_name/,
   );
 });
 

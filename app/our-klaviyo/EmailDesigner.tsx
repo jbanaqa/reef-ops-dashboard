@@ -9,6 +9,7 @@ import {
   imageSource,
   footerTitle,
   defaultFooterCopyright,
+  defaultGeneratedEmailCopy,
 } from "@/lib/marketing/rules";
 import EmailPreview from "./EmailPreview";
 import RichEmailCopy from "./RichEmailCopy";
@@ -348,11 +349,15 @@ export default function EmailDesigner({
                       <label>
                         Heading
                         <input
+                          aria-label="Heading"
                           value={content.heading}
                           onChange={(e) =>
                             changeContent("heading", e.target.value)
                           }
                         />
+                        <small>
+                          Personalize with {`{{ first_name|default:"Aloha" }}`}.
+                        </small>
                       </label>
                     ) : (
                       <p>Your heading is included in the message below.</p>
@@ -362,6 +367,198 @@ export default function EmailDesigner({
                       onChange={(value) => changeContent("bodyHtml", value)}
                     />
                   </section>
+                  {(content.template?.startsWith("welcome") ||
+                    content.template === "cart-recovery" ||
+                    visualLayout === "welcome" ||
+                    visualLayout === "welcome-social" ||
+                    visualLayout === "cart-recovery" ||
+                    content.couponCode) && (
+                    <details className="mk-editor-section mk-editor-disclosure">
+                      <summary>
+                        <span>Automatic text</span>
+                        <small>Coupon, greeting, and social wording</small>
+                      </summary>
+                      <div className="mk-editor-disclosure-body">
+                        {(content.template?.startsWith("welcome") ||
+                          content.template === "cart-recovery" ||
+                          visualLayout === "welcome" ||
+                          visualLayout === "cart-recovery" ||
+                          content.couponCode) && (
+                          <>
+                            <label>
+                              Coupon heading
+                              <input
+                                value={
+                                  content.couponLabel ??
+                                  (visualLayout === "cart-recovery"
+                                    ? defaultGeneratedEmailCopy.cartCouponLabel
+                                    : content.offerAboveBody
+                                      ? defaultGeneratedEmailCopy.welcomeCouponLabelAbove
+                                      : defaultGeneratedEmailCopy.welcomeCouponLabel)
+                                }
+                                onChange={(event) =>
+                                  changeContent("couponLabel", event.target.value)
+                                }
+                              />
+                            </label>
+                            <label>
+                              Coupon terms
+                              <textarea
+                                rows={3}
+                                value={
+                                  content.couponTerms ??
+                                  (visualLayout === "cart-recovery"
+                                    ? defaultGeneratedEmailCopy.cartCouponTerms
+                                    : defaultGeneratedEmailCopy.welcomeCouponTerms)
+                                }
+                                onChange={(event) =>
+                                  changeContent("couponTerms", event.target.value)
+                                }
+                              />
+                            </label>
+                            <label>
+                              Expiration sentence
+                              <input
+                                value={
+                                  content.couponExpiryText ??
+                                  defaultGeneratedEmailCopy.couponExpiry
+                                }
+                                onChange={(event) =>
+                                  changeContent(
+                                    "couponExpiryText",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                              <small>
+                                Use {"{{ coupon_expires }}"} for the customer&apos;s
+                                expiration date.
+                              </small>
+                            </label>
+                            <label>
+                              Expiration fallback
+                              <input
+                                value={
+                                  content.couponExpiryFallbackText ??
+                                  defaultGeneratedEmailCopy.couponExpiryFallback
+                                }
+                                onChange={(event) =>
+                                  changeContent(
+                                    "couponExpiryFallbackText",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                              <small>
+                                Used only in previews when no expiration date has
+                                been assigned yet.
+                              </small>
+                            </label>
+                          </>
+                        )}
+                        {visualLayout === "welcome" && (
+                          <>
+                            <label>
+                              Welcome banner greeting
+                              <input
+                                value={
+                                  content.welcomeHeroGreeting ??
+                                  defaultGeneratedEmailCopy.welcomeHeroGreeting
+                                }
+                                onChange={(event) =>
+                                  changeContent(
+                                    "welcomeHeroGreeting",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </label>
+                            <label>
+                              Welcome banner message
+                              <textarea
+                                rows={3}
+                                value={
+                                  content.welcomeHeroText ??
+                                  (content.offerAboveBody
+                                    ? defaultGeneratedEmailCopy.welcomeHeroAbove
+                                    : defaultGeneratedEmailCopy.welcomeHeroBelow)
+                                }
+                                onChange={(event) =>
+                                  changeContent(
+                                    "welcomeHeroText",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </label>
+                          </>
+                        )}
+                        {visualLayout === "welcome-social" && (
+                          <>
+                            <label>
+                              Social-card introduction
+                              <input
+                                value={
+                                  content.socialFollowText ??
+                                  defaultGeneratedEmailCopy.socialFollow
+                                }
+                                onChange={(event) =>
+                                  changeContent("socialFollowText", event.target.value)
+                                }
+                              />
+                            </label>
+                            {(
+                              [
+                                ["Instagram", "instagramHeading", "instagramHandle", "instagramText"],
+                                ["Facebook", "facebookHeading", "facebookHandle", "facebookText"],
+                              ] as const
+                            ).map(([name, heading, handle, text]) => (
+                              <fieldset key={name}>
+                                <legend>{name} card</legend>
+                                <label>
+                                  Heading
+                                  <input
+                                    value={
+                                      content[heading] ??
+                                      defaultGeneratedEmailCopy[heading]
+                                    }
+                                    onChange={(event) =>
+                                      changeContent(heading, event.target.value)
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  Handle
+                                  <input
+                                    value={
+                                      content[handle] ??
+                                      defaultGeneratedEmailCopy[handle]
+                                    }
+                                    onChange={(event) =>
+                                      changeContent(handle, event.target.value)
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  Message
+                                  <textarea
+                                    rows={3}
+                                    value={
+                                      content[text] ??
+                                      defaultGeneratedEmailCopy[text]
+                                    }
+                                    onChange={(event) =>
+                                      changeContent(text, event.target.value)
+                                    }
+                                  />
+                                </label>
+                              </fieldset>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </details>
+                  )}
                   {content.template !== "b2b-wholesale" &&
                     !content.template?.startsWith("welcome") && (
                       <label>
@@ -627,6 +824,22 @@ export default function EmailDesigner({
                     }
                     onChange={(e) =>
                       changeContent("footerUnsubscribeText", e.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  Unsubscribe link text
+                  <input
+                    maxLength={100}
+                    value={
+                      content.footerUnsubscribeLinkText ??
+                      defaultGeneratedEmailCopy.unsubscribeLink
+                    }
+                    onChange={(event) =>
+                      changeContent(
+                        "footerUnsubscribeLinkText",
+                        event.target.value,
+                      )
                     }
                   />
                 </label>

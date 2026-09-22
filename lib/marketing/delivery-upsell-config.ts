@@ -1,6 +1,11 @@
 import { email, type Content } from "./rules";
 import type { FlowConfig } from "./flow-config";
 
+const previousDeliveryHeading =
+  "Corals, you have 24 hours to add-on to your order.";
+const personalizedDeliveryHeading =
+  '{{ first_name|default:"Aloha" }}, you have 24 hours to add-on to your order.';
+
 export type DeliveryUpsellConfig = {
   version: 1;
   daysBefore: number;
@@ -18,7 +23,7 @@ export const defaultDeliveryUpsell: DeliveryUpsellConfig = {
 
 export const deliveryUpsellContent: Content = {
   template: "b2b-wholesale",
-  heading: "Corals, you have 24 hours to add-on to your order.",
+  heading: personalizedDeliveryHeading,
   body: [
     "Your order is shipping out tomorrow at 8AM PST!",
     "",
@@ -68,7 +73,23 @@ export function validateDeliveryUpsell(value: unknown): DeliveryUpsellConfig {
 }
 
 export function deliveryUpsellDraft(value: FlowConfig): FlowConfig {
-  if (value.delivery) return value;
+  if (value.delivery) {
+    const first = value.steps?.[0];
+    if (first?.content.heading !== previousDeliveryHeading) return value;
+    return {
+      ...value,
+      steps: [
+        {
+          ...first,
+          content: {
+            ...first.content,
+            heading: personalizedDeliveryHeading,
+          },
+        },
+        ...(value.steps || []).slice(1),
+      ],
+    };
+  }
   const old = value.steps?.[0];
   return {
     ...value,

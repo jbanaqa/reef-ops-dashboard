@@ -225,6 +225,8 @@ const { chromium } = require("playwright");
     await page.getByRole("button", { name: "Edit email and preview" }).click();
     await page.getByRole("dialog").waitFor();
     await page.getByRole("button", { name: "Layout", exact: true }).click();
+    await page.getByText("Email sections", { exact: true }).click();
+    await page.locator("summary").filter({ hasText: "Product grid" }).first().click();
     await page.getByText("Product 1 · Coco Worm", { exact: true }).click();
     await page.getByLabel("Product name").first().fill("Red and White Coco Worm");
     await page.getByRole("button", { name: "Add full-width button" }).click();
