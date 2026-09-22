@@ -2,8 +2,10 @@ import { getShopifyShopDomain, shopifyGraphql } from "@/lib/shopify";
 import {
   type CampaignEmailProduct,
   type CampaignProductFeed,
+  type CampaignProductFeedOrder,
   type Content,
 } from "./rules";
+import { recommendationHistory } from "./cart-feed";
 
 type ShopifyProduct = {
   id: string;
@@ -34,8 +36,8 @@ type ProductsResponse = {
 };
 
 const PRODUCTS = `
-  query MarketingCampaignProducts($after: String, $query: String!) {
-    products(first: 50, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+  query MarketingCampaignProducts($after: String, $query: String!, $sortKey: ProductSortKeys!, $reverse: Boolean!) {
+    products(first: 50, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
       nodes {
         id title handle tags createdAt onlineStoreUrl
         featuredImage { url }
@@ -101,13 +103,17 @@ async function feedCatalog(feed: CampaignProductFeed) {
   for (let page = 0; page < 10; page++) {
     const response: ProductsResponse = await shopifyGraphql<ProductsResponse>(
       PRODUCTS,
-      { after, query: feedQuery(feed) },
+      {
+        after,
+        query: feedQuery(feed),
+        ...shopifySort(feed.order),
+      },
     );
     const connection = response.data?.products;
     if (!connection) throw new Error("Shopify did not return the product catalogue.");
     products.push(...connection.nodes);
-    const eligible = candidates(products, feed);
-    if (feed.order === "newest" && eligible.length >= feed.limit) {
+    const eligible = eligibleProducts(products, feed);
+    if (isShopifyOrdered(feed.order) && eligible.length >= feed.limit) {
       complete = true;
       break;
     }
@@ -123,7 +129,7 @@ async function feedCatalog(feed: CampaignProductFeed) {
   return products;
 }
 
-function candidates(products: ShopifyProduct[], feed: CampaignProductFeed) {
+function eligibleProducts(products: ShopifyProduct[], feed: CampaignProductFeed) {
   const wanted = new Set(feed.tags.map((tag) => tag.toLocaleLowerCase()));
   const eligible = products.filter((product) => {
     if (!product.onlineStoreUrl) return false;
@@ -133,8 +139,56 @@ function candidates(products: ShopifyProduct[], feed: CampaignProductFeed) {
       product.tags.some((tag) => wanted.has(tag.toLocaleLowerCase()))
     );
   });
-  return feed.order === "random" ? eligible : eligible.sort((a, b) =>
-    Date.parse(b.createdAt) - Date.parse(a.createdAt),
+  return eligible;
+}
+
+function shopifySort(order: CampaignProductFeedOrder) {
+  if (order === "oldest") return { sortKey: "CREATED_AT", reverse: false };
+  if (order === "title-asc") return { sortKey: "TITLE", reverse: false };
+  if (order === "title-desc") return { sortKey: "TITLE", reverse: true };
+  return { sortKey: "CREATED_AT", reverse: true };
+}
+
+function isShopifyOrdered(order: CampaignProductFeedOrder) {
+  return ["newest", "oldest", "title-asc", "title-desc"].includes(order);
+}
+
+type Popularity = { sales: Map<string, number>; views: Map<string, number> };
+
+function numericProductId(product: ShopifyProduct) {
+  return product.id.split("/").pop() || product.id;
+}
+
+function productPrice(product: ShopifyProduct) {
+  const variant = product.variants.nodes.find((item) => item.availableForSale);
+  const amount = Number(variant?.price);
+  return Number.isFinite(amount) ? amount : Number.POSITIVE_INFINITY;
+}
+
+export function sortCampaignProducts(
+  products: ShopifyProduct[],
+  order: CampaignProductFeedOrder,
+  popularity?: Popularity,
+) {
+  const result = [...products];
+  const newest = (a: ShopifyProduct, b: ShopifyProduct) =>
+    Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id);
+  if (order === "random") return result;
+  if (order === "newest") return result.sort(newest);
+  if (order === "oldest") return result.sort((a, b) => -newest(a, b));
+  if (order === "title-asc")
+    return result.sort((a, b) => a.title.localeCompare(b.title) || newest(a, b));
+  if (order === "title-desc")
+    return result.sort((a, b) => b.title.localeCompare(a.title) || newest(a, b));
+  if (order === "price-low")
+    return result.sort((a, b) => productPrice(a) - productPrice(b) || newest(a, b));
+  if (order === "price-high")
+    return result.sort((a, b) => productPrice(b) - productPrice(a) || newest(a, b));
+  const scores = order === "best-selling" ? popularity?.sales : popularity?.views;
+  return result.sort(
+    (a, b) =>
+      (scores?.get(numericProductId(b)) || 0) -
+        (scores?.get(numericProductId(a)) || 0) || newest(a, b),
   );
 }
 
@@ -163,28 +217,37 @@ export async function resolveCampaignProductFeeds(
   const layout = source.campaignLayout;
   if (!layout?.sections.some((section) => section.type === "products" && section.feed))
     return source;
-  const feeds = new Map(
-    layout.sections.flatMap((section) =>
-      section.type === "products" && section.feed
-        ? [[section.feed.key, section.feed] as const]
-        : [],
-    ),
+  const feeds = layout.sections.flatMap((section) =>
+    section.type === "products" && section.feed
+      ? [{ sectionId: section.id, feed: section.feed }]
+      : [],
   );
   const catalogs = new Map(
     await Promise.all(
-      [...feeds.values()].map(async (feed) => [feed.key, await feedCatalog(feed)] as const),
+      feeds.map(
+        async ({ sectionId, feed }) =>
+          [sectionId, await feedCatalog(feed)] as const,
+      ),
     ),
   );
+  const needsPopularity = feeds.some(({ feed }) =>
+    ["best-selling", "most-viewed"].includes(feed.order),
+  );
+  const popularity = needsPopularity ? await recommendationHistory() : undefined;
   return {
     ...source,
     campaignLayout: {
       ...layout,
       sections: layout.sections.map((section) => {
         if (section.type !== "products" || !section.feed) return section;
-        const matching = candidates(catalogs.get(section.feed.key) || [], section.feed);
+        const matching = sortCampaignProducts(
+          eligibleProducts(catalogs.get(section.id) || [], section.feed),
+          section.feed.order,
+          popularity,
+        );
         const selected =
           section.feed.order === "random"
-            ? seededShuffle(matching, `${seed}:${section.feed.key}`)
+            ? seededShuffle(matching, `${seed}:${section.id}:${section.feed.key}`)
             : matching;
         return {
           ...section,

@@ -55,23 +55,49 @@ export const campaignProductFeeds = [
   },
 ] as const;
 export type CampaignProductFeedKey = (typeof campaignProductFeeds)[number]["key"];
+export const campaignProductFeedOrders = [
+  { value: "random", label: "Random" },
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "best-selling", label: "Best selling · last 3 days" },
+  { value: "most-viewed", label: "Most viewed · last 3 days" },
+  { value: "price-low", label: "Price · low to high" },
+  { value: "price-high", label: "Price · high to low" },
+  { value: "title-asc", label: "Product name · A to Z" },
+  { value: "title-desc", label: "Product name · Z to A" },
+] as const;
+export type CampaignProductFeedOrder =
+  (typeof campaignProductFeedOrders)[number]["value"];
 export type CampaignProductFeed = {
   key: CampaignProductFeedKey;
   name: string;
   tags: string[];
-  order: "random" | "newest";
+  order: CampaignProductFeedOrder;
   limit: number;
 };
 export function campaignProductFeed(value: unknown): CampaignProductFeed | undefined {
-  const key = String((value as { key?: unknown } | null)?.key || "");
+  const candidate = value as
+    | { key?: unknown; order?: unknown; limit?: unknown }
+    | null;
+  const key = String(candidate?.key || "");
   const saved = campaignProductFeeds.find((feed) => feed.key === key);
+  const requestedOrder = String(candidate?.order || "");
+  const order = campaignProductFeedOrders.some(
+    (option) => option.value === requestedOrder,
+  )
+    ? (requestedOrder as CampaignProductFeedOrder)
+    : saved?.order;
+  const requestedLimit = Number(candidate?.limit);
+  const limit = Number.isInteger(requestedLimit)
+    ? Math.min(40, Math.max(1, requestedLimit))
+    : saved?.limit;
   return saved
     ? {
         key: saved.key,
         name: saved.name,
         tags: [...saved.tags],
-        order: saved.order,
-        limit: saved.limit,
+        order: order!,
+        limit: limit!,
       }
     : undefined;
 }

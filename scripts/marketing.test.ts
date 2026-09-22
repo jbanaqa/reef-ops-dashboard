@@ -106,6 +106,20 @@ test("campaign sale layouts round-trip and render responsive email-safe sections
   assert.match(html, /max-width:480px/);
   assert.match(html, /123 Ocean Ave/);
 });
+test("campaign product grids preserve custom product counts and sort choices", () => {
+  const draft = structuredClone(defaultCampaignContent);
+  const section = draft.campaignLayout!.sections[0];
+  if (section.type !== "products" || !section.feed)
+    throw new Error("Expected a dynamic product grid");
+  section.feed.limit = 18;
+  section.feed.order = "best-selling";
+  const saved = content(draft);
+  const savedSection = saved.campaignLayout!.sections[0];
+  assert.equal(savedSection.type, "products");
+  if (savedSection.type !== "products") throw new Error("Expected product grid");
+  assert.equal(savedSection.feed?.limit, 18);
+  assert.equal(savedSection.feed?.order, "best-selling");
+});
 test("visual layouts can change without changing flow behavior or dynamic data", () => {
   const campaignLayout = structuredClone(defaultCampaignContent.campaignLayout!);
   campaignLayout.sections = [];

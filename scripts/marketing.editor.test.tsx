@@ -7,11 +7,13 @@ import EmailPreview from "../app/our-klaviyo/EmailPreview";
 import { JSDOM } from "jsdom";
 import { readFile } from "node:fs/promises";
 import {
+  defaultCampaignContent,
   defaultContent,
   defaultMarketingSettings,
 } from "../lib/marketing/rules";
 import FlowEditor from "../app/our-klaviyo/FlowEditor";
 import SettingsWorkspace from "../app/our-klaviyo/SettingsWorkspace";
+import CampaignEmailFields from "../app/our-klaviyo/CampaignEmailFields";
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://app.example",
 });
@@ -383,4 +385,43 @@ test("one editor can change a flow's visual layout without changing its template
   assert.equal(savedContent.template, "b2b-wholesale");
   assert.equal(savedContent.layout, "campaign-sale");
   assert.ok(savedContent.campaignLayout);
+});
+
+test("campaign product grid controls update count and product order together", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  let latest = structuredClone(defaultCampaignContent);
+  function Editor() {
+    const [draft, setDraft] = React.useState(structuredClone(defaultCampaignContent));
+    latest = draft;
+    return (
+      <CampaignEmailFields
+        content={draft}
+        subject="Sale"
+        onSubject={() => undefined}
+        onChange={(key, value) =>
+          setDraft((current) => ({ ...current, [key]: value }))
+        }
+      />
+    );
+  }
+  const view = testing.render(<Editor />);
+  testing.fireEvent.click(view.getByText("Email sections", { exact: true }));
+  testing.fireEvent.click(
+    view.getByText("Product grid · Sale product feed · 6", { exact: true }),
+  );
+  testing.fireEvent.change(view.getAllByLabelText("Number of products")[0], {
+    target: { value: "18" },
+  });
+  testing.fireEvent.change(view.getAllByLabelText("Product order")[0], {
+    target: { value: "best-selling" },
+  });
+  await testing.waitFor(() => {
+    const section = latest.campaignLayout!.sections[0];
+    assert.equal(section.type, "products");
+    if (section.type !== "products") throw new Error("Expected product grid");
+    assert.equal(section.feed?.limit, 18);
+    assert.equal(section.feed?.order, "best-selling");
+    assert.equal(section.products.length, 0);
+  });
 });

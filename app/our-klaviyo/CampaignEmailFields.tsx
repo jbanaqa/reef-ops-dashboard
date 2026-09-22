@@ -9,6 +9,7 @@ import type {
 } from "@/lib/marketing/rules";
 import {
   campaignProductFeed,
+  campaignProductFeedOrders,
   campaignProductFeeds,
 } from "@/lib/marketing/rules";
 
@@ -268,8 +269,55 @@ export default function CampaignEmailFields({
                         {section.feed.tags.length
                           ? `Tag includes ${section.feed.tags.join(" OR ")}. `
                           : "All categories. "}
-                        Show {section.feed.order === "random" ? "random" : "newest"} products.
+                        Product selection and availability are checked when the campaign is prepared.
                       </span>
+                      <div className="mk-campaign-two-fields">
+                        <label>
+                          Number of products
+                          <input
+                            type="number"
+                            min="1"
+                            max="40"
+                            value={section.feed.limit}
+                            onChange={(event) => {
+                              const feed = campaignProductFeed({
+                                ...section.feed,
+                                limit: Number(event.target.value),
+                              });
+                              if (feed)
+                                replaceSection(sectionIndex, {
+                                  ...section,
+                                  feed,
+                                  products: [],
+                                });
+                            }}
+                          />
+                        </label>
+                        <label>
+                          Product order
+                          <select
+                            value={section.feed.order}
+                            onChange={(event) => {
+                              const feed = campaignProductFeed({
+                                ...section.feed,
+                                order: event.target.value,
+                              });
+                              if (feed)
+                                replaceSection(sectionIndex, {
+                                  ...section,
+                                  feed,
+                                  products: [],
+                                });
+                            }}
+                          >
+                            {campaignProductFeedOrders.map((order) => (
+                              <option key={order.value} value={order.value}>
+                                {order.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
                       <span>{section.feed.limit} products appear in this grid.</span>
                       <button
                         type="button"
