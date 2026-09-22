@@ -14,7 +14,7 @@ import "./audiences.css";
 import {
   Content,
   render,
-  defaultContent,
+  defaultCampaignContent,
   defaultMarketingSettings,
   MarketingSettings,
   withBranding,
@@ -151,7 +151,7 @@ const flowTemplateGroups = [
 const newCampaign = () => ({
   name: "",
   subject: "",
-  content: defaultContent,
+  content: structuredClone(defaultCampaignContent),
   audience: { version: 2 as const, includeKeys: ["mailable"], excludeKeys: [] },
   smartSending: true,
   recipientMode: "SEND_TIME" as const,
@@ -202,6 +202,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   const [dismissalDraft, setDismissalDraft] = useState<boolean | null>(null);
   const [popupDelayDraft, setPopupDelayDraft] = useState<string | null>(null);
   const [resource, setResource] = useState<Resource | null>(null);
+  const [previewingCampaign, setPreviewingCampaign] = useState<Campaign | null>(null);
   const templates: Resource[] = data
     ? [
         ...flowEmailTemplates(data.resources),
@@ -287,12 +288,16 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     return r.id;
   };
   const editingContent = withBranding(
-    resource ? (resource.data as unknown as Content) : campaign.content,
+    previewingCampaign
+      ? previewingCampaign.content
+      : resource
+        ? (resource.data as unknown as Content)
+        : campaign.content,
     data?.settings.branding,
   );
   let emailHtml = "",
     emailPreviewError = "";
-  if (editingEmail || resource) {
+  if (editingEmail || resource || previewingCampaign) {
     try {
       emailHtml = render(
         editingContent,
@@ -318,13 +323,14 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     popupDelaySeconds <= 300;
   return (
     <section className="marketing">
-      {(editingEmail || resource) && (
+      {(editingEmail || resource || previewingCampaign) && (
         <EmailDesigner
-          title={resource ? resource.name : campaign.name || "Campaign email"}
-          backLabel={resource ? "Back to templates" : "Back to campaign"}
+          title={previewingCampaign?.name || (resource ? resource.name : campaign.name || "Campaign email")}
+          backLabel={previewingCampaign ? "Back to campaigns" : resource ? "Back to templates" : "Back to campaign"}
+          readOnly={!!previewingCampaign}
           editProducts
           subjectEditable={!resource}
-          subject={resource ? resource.subject || "Template preview" : campaign.subject}
+          subject={previewingCampaign?.subject || (resource ? resource.subject || "Template preview" : campaign.subject)}
           content={editingContent}
           html={emailHtml}
           previewError={emailPreviewError}
@@ -353,6 +359,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           onClose={() => {
             setEditingEmail(false);
             setResource(null);
+            setPreviewingCampaign(null);
           }}
           onSave={async () =>
             !!(await run(async () => {
@@ -950,6 +957,11 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                   Edit
                                 </button>
                               )}
+                              <button
+                                onClick={() => setPreviewingCampaign(item)}
+                              >
+                                View email
+                              </button>
                               <button
                                 onClick={() => {
                                   setCampaignOpen(true);

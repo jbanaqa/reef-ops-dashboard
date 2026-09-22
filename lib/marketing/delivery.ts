@@ -70,6 +70,26 @@ export function emailBody(
       (effectiveContent.products || [])
         .map((p) => [p.title, p.price, p.url].filter(Boolean).join(" · "))
         .join("\n"),
+      effectiveContent.campaignLayout?.sections
+        .flatMap((section) =>
+          section.type === "products"
+            ? section.products.map((product) =>
+                [
+                  product.title,
+                  product.showSalePrice === false ? "" : product.salePrice,
+                  product.showCompareAtPrice === false
+                    ? ""
+                    : product.compareAtPrice
+                      ? "Was " + product.compareAtPrice
+                      : "",
+                  product.url,
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+              )
+            : [section.label + ": " + section.url],
+        )
+        .join("\n"),
       effectiveContent.url,
       footerTitle(effectiveContent),
       effectiveContent.footerText,

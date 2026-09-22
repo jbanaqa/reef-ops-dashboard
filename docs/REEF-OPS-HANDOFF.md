@@ -1,5 +1,11 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Campaign sale email builder — September 22, 2026
+
+New campaign drafts now start with a reusable, email-safe sale layout based on the customer-received Corals Anonymous campaigns: shared logo, up to five header links, a linked full-width banner, ordered product-grid and full-width CTA sections, and the existing shared footer. Each product independently stores its image URL, title, destination, sale and compare-at prices, button label, field visibility, and image width. Global controls cover safe font stacks, alignment, spacing, backgrounds, price/button colors, sizes, and rounding. Sections and products can be added, removed, and reordered; desktop grids stack on narrow email clients. Saved templates, campaign duplication, preview, test send, delivery, and plain-text fallback all use the same validated content model. Existing generic campaigns remain readable and are not silently converted.
+
+Campaign cards now include **View email** for read-only inspection of drafts, scheduled, sending, sent, cancelled, and failed campaigns. New sends still use the existing campaign consent, audience, suppression, Smart Sending, scheduling, attribution, and provider safeguards. Verification: 82 marketing tests, TypeScript, targeted ESLint, and the isolated campaign browser suite pass. Browser screenshots were reviewed at desktop, a 375px email preview, and a 390px editor viewport. No real email was sent and no production build was run.
+
 ### Consent precedence and verified-history repair — September 21, 2026
 
 Confirmed the user's email consent was overwritten by `klaviyo:api` NEVER_SUBSCRIBED despite accepted Shopify and storefront signup evidence. `consent()` now treats NEVER_SUBSCRIBED as absence of evidence: it cannot overwrite an existing decision. Explicit subscription can replace an absence snapshot even when the snapshot has a later timestamp. Ignored updates preserve the current source, reason, and timestamp; genuine opt-outs/suppressions remain sticky. Undated imported absence uses an unknown-date sentinel rather than import time, shown as Date not provided in the profile. Profiles now identify Klaviyo as the consent source; ignored activity explains the reason.

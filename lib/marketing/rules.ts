@@ -6,6 +6,55 @@ export const channels = [
   "SMS_TRANSACTIONAL",
 ] as const;
 export type Channel = (typeof channels)[number];
+export type CampaignEmailProduct = {
+  id: string;
+  title: string;
+  url: string;
+  image?: string;
+  salePrice?: string;
+  compareAtPrice?: string;
+  button?: string;
+  showSalePrice?: boolean;
+  showCompareAtPrice?: boolean;
+  showButton?: boolean;
+  imageWidth?: number;
+};
+export type CampaignEmailSection =
+  | {
+      id: string;
+      type: "products";
+      backgroundColor?: string;
+      products: CampaignEmailProduct[];
+    }
+  | {
+      id: string;
+      type: "cta";
+      label: string;
+      url: string;
+      backgroundColor?: string;
+      textColor?: string;
+    };
+export type CampaignEmailLayout = {
+  heroLink?: string;
+  navigation: { label: string; url: string }[];
+  sections: CampaignEmailSection[];
+  style: {
+    fontFamily: "Arial" | "Verdana" | "Georgia" | "Trebuchet MS";
+    emailBackground: string;
+    contentBackground: string;
+    textColor: string;
+    salePriceColor: string;
+    buttonBackground: string;
+    buttonTextColor: string;
+    productAlignment: "left" | "center" | "right";
+    productGap: number;
+    sectionPadding: number;
+    productImageWidth: number;
+    buttonRadius: number;
+    titleSize: number;
+    priceSize: number;
+  };
+};
 export type Content = {
   heading: string;
   body: string;
@@ -19,7 +68,8 @@ export type Content = {
     | "b2b-wholesale"
     | "cart-recovery"
     | "welcome"
-    | "welcome-social";
+    | "welcome-social"
+    | "campaign-sale";
   couponCode?: string;
   couponExpiresAt?: string;
   offerAboveBody?: boolean;
@@ -38,6 +88,7 @@ export type Content = {
   footerWidth?: number;
   footerHeight?: number;
   products?: { title: string; url: string; image?: string; price?: string }[];
+  campaignLayout?: CampaignEmailLayout;
 };
 export type MarketingOperations = {
   sendingEnabled: boolean;
@@ -379,6 +430,79 @@ export function content(value: unknown): Content {
       ? Math.min(2.5, Math.max(0.25, Math.round(n * 10) / 10))
       : Math.min(2.5, Math.max(0.25, Math.round(fallback * 10) / 10));
   };
+  const color = (value: unknown, fallback: string) => {
+    const result = String(value || fallback).trim();
+    return /^#[0-9a-f]{6}$/i.test(result) ? result : fallback;
+  };
+  const bounded = (value: unknown, fallback: number, min: number, max: number) => {
+    const result = Number(value);
+    return Number.isFinite(result)
+      ? Math.min(max, Math.max(min, Math.round(result)))
+      : fallback;
+  };
+  const rawLayout = c.campaignLayout;
+  const campaignLayout: CampaignEmailLayout | undefined = rawLayout
+    ? {
+        heroLink: rawLayout.heroLink
+          ? safeUrl(rawLayout.heroLink).slice(0, 500)
+          : undefined,
+        navigation: (rawLayout.navigation || []).slice(0, 5).map((item) => ({
+          label: String(item.label || "Link").slice(0, 80),
+          url: safeUrl(item.url).slice(0, 500),
+        })),
+        sections: (rawLayout.sections || []).slice(0, 20).map((section, index) => {
+          if (section.type === "cta")
+            return {
+              id: String(section.id || `cta-${index}`).slice(0, 100),
+              type: "cta" as const,
+              label: String(section.label || "Shop now").slice(0, 100),
+              url: safeUrl(section.url).slice(0, 500),
+              backgroundColor: color(section.backgroundColor, "#3c8429"),
+              textColor: color(section.textColor, "#ffffff"),
+            };
+          return {
+            id: String(section.id || `products-${index}`).slice(0, 100),
+            type: "products" as const,
+            backgroundColor: color(section.backgroundColor, "#ffffff"),
+            products: (section.products || []).slice(0, 40).map((product, productIndex) => ({
+              id: String(product.id || `product-${index}-${productIndex}`).slice(0, 100),
+              title: String(product.title || "Product name").slice(0, 200),
+              url: safeUrl(product.url).slice(0, 500),
+              image: product.image ? safeUrl(product.image).slice(0, 500) : undefined,
+              salePrice: String(product.salePrice || "").slice(0, 80),
+              compareAtPrice: String(product.compareAtPrice || "").slice(0, 80),
+              button: String(product.button || "Shop now").slice(0, 80),
+              showSalePrice: product.showSalePrice !== false,
+              showCompareAtPrice: product.showCompareAtPrice !== false,
+              showButton: product.showButton !== false,
+              imageWidth: bounded(product.imageWidth, 0, 0, 280) || undefined,
+            })),
+          };
+        }),
+        style: {
+          fontFamily: (["Arial", "Verdana", "Georgia", "Trebuchet MS"] as const).includes(
+            rawLayout.style?.fontFamily,
+          )
+            ? rawLayout.style.fontFamily
+            : "Arial",
+          emailBackground: color(rawLayout.style?.emailBackground, "#fff7f5"),
+          contentBackground: color(rawLayout.style?.contentBackground, "#ffffff"),
+          textColor: color(rawLayout.style?.textColor, "#080808"),
+          salePriceColor: color(rawLayout.style?.salePriceColor, "#e84218"),
+          buttonBackground: color(rawLayout.style?.buttonBackground, "#79e93c"),
+          buttonTextColor: color(rawLayout.style?.buttonTextColor, "#000000"),
+          productAlignment: ["left", "center", "right"].includes(rawLayout.style?.productAlignment)
+            ? rawLayout.style.productAlignment
+            : "center",
+          productGap: bounded(rawLayout.style?.productGap, 18, 0, 60),
+          sectionPadding: bounded(rawLayout.style?.sectionPadding, 18, 0, 60),
+          productImageWidth: bounded(rawLayout.style?.productImageWidth, 140, 60, 280),
+          buttonRadius: bounded(rawLayout.style?.buttonRadius, 5, 0, 40),
+          titleSize: bounded(rawLayout.style?.titleSize, 18, 11, 32),
+          priceSize: bounded(rawLayout.style?.priceSize, 21, 11, 34),
+        },
+      }
+    : undefined;
   return {
     showPostalAddress: c.showPostalAddress === true,
     heading: c.heading.slice(0, 200),
@@ -394,6 +518,8 @@ export function content(value: unknown): Content {
     template:
       c.template === "welcome" || c.template === "welcome-social"
         ? c.template
+        : c.template === "campaign-sale"
+          ? "campaign-sale"
         : c.template === "cart-recovery"
           ? "cart-recovery"
           : c.template === "b2b-wholesale"
@@ -434,6 +560,7 @@ export function content(value: unknown): Content {
       image: p.image ? safeUrl(p.image) : undefined,
       price: String(p.price || "").slice(0, 80),
     })),
+    campaignLayout,
   };
 }
 export function withBranding(c: Content, branding?: EmailBranding): Content {
@@ -559,7 +686,144 @@ export function footerTitle(c: Content) {
   );
 }
 const emailHead =
-  '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:16px 20px!important}}</style></head>';
+  '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:16px 20px!important}.reef-campaign-nav td{display:block!important;width:100%!important;padding:5px 10px!important}.reef-campaign-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-campaign-product img{width:auto!important;max-width:88%!important}}</style></head>';
+
+function campaignSaleHtml(
+  c: Content,
+  unsubscribe: string,
+  address: string,
+  organizationName: string,
+) {
+  const layout = c.campaignLayout!;
+  const style = layout.style;
+  const e = escapeHtml;
+  const font =
+    style.fontFamily === "Trebuchet MS"
+      ? "'Trebuchet MS',Arial,sans-serif"
+      : `${style.fontFamily},Arial,sans-serif`;
+  const nav = layout.navigation.length
+    ? '<table role="presentation" class="reef-campaign-nav" width="100%" style="table-layout:fixed"><tr>' +
+      layout.navigation
+        .map(
+          (item) =>
+            '<td align="center" style="padding:10px 6px"><a href="' +
+            e(item.url) +
+            '" style="color:' +
+            e(style.textColor) +
+            ';font-weight:bold;text-decoration:none;font-size:15px">' +
+            e(item.label) +
+            "</a></td>",
+        )
+        .join("") +
+      "</tr></table>"
+    : "";
+  const hero = c.hero
+    ? '<tr><td><a href="' +
+      e(layout.heroLink || c.url) +
+      '"><img src="' +
+      e(c.hero) +
+      '" alt="' +
+      e(c.heading) +
+      '" width="600" style="display:block;width:100%;max-width:600px;height:auto"></a></td></tr>'
+    : "";
+  const sections = layout.sections
+    .map((section) => {
+      if (section.type === "cta")
+        return (
+          '<tr><td style="padding:' +
+          style.sectionPadding +
+          'px;background:' +
+          e(style.contentBackground) +
+          ';text-align:center"><a href="' +
+          e(section.url) +
+          '" style="display:block;background:' +
+          e(section.backgroundColor || style.buttonBackground) +
+          ";color:" +
+          e(section.textColor || style.buttonTextColor) +
+          ";border-radius:" +
+          style.buttonRadius +
+          'px;padding:9px 18px;font-size:25px;line-height:1.1;font-weight:bold;text-decoration:none">' +
+          e(section.label) +
+          "</a></td></tr>"
+        );
+      const rows: string[] = [];
+      for (let index = 0; index < section.products.length; index += 2) {
+        const cells = section.products.slice(index, index + 2).map((product) => {
+          const imageWidth = product.imageWidth || style.productImageWidth;
+          const imageMargin =
+            style.productAlignment === "center"
+              ? "0 auto 10px"
+              : style.productAlignment === "right"
+                ? "0 0 10px auto"
+                : "0 auto 10px 0";
+          const price = product.showSalePrice !== false && product.salePrice
+            ? '<span style="color:' + e(style.salePriceColor) + ";font-size:" + style.priceSize + 'px;font-weight:bold">' + e(product.salePrice) + "</span>"
+            : "";
+          const compare = product.showCompareAtPrice !== false && product.compareAtPrice
+            ? ' <span style="color:' + e(style.textColor) + ';font-size:13px;text-decoration:line-through">' + e(product.compareAtPrice) + "</span>"
+            : "";
+          const button = product.showButton !== false
+            ? '<div style="margin-top:13px"><a href="' + e(product.url) + '" style="display:inline-block;background:' + e(style.buttonBackground) + ";color:" + e(style.buttonTextColor) + ";border-radius:" + style.buttonRadius + 'px;padding:10px 14px;font-size:16px;font-weight:bold;text-decoration:none">' + e(product.button || "Shop now") + "</a></div>"
+            : "";
+          return (
+            '<td class="reef-campaign-product" valign="top" width="50%" style="width:50%;padding:' +
+            Math.round(style.productGap / 2) +
+            "px;text-align:" +
+            style.productAlignment +
+            ';color:' +
+            e(style.textColor) +
+            '"><a href="' +
+            e(product.url) +
+            '" style="color:' +
+            e(style.textColor) +
+            ';text-decoration:none">' +
+            (product.image
+              ? '<img src="' + e(product.image) + '" alt="' + e(product.title) + '" width="' + imageWidth + '" style="display:block;width:' + imageWidth + 'px;max-width:100%;height:auto;margin:' + imageMargin + '">'
+              : '<div style="height:' + imageWidth + 'px;background:#f1f3f3;color:#777;line-height:' + imageWidth + 'px;text-align:center">Product image</div>') +
+            '<strong style="display:block;font-size:' +
+            style.titleSize +
+            'px;line-height:1.2">' +
+            e(product.title) +
+            "</strong></a><div style=\"margin-top:8px\">" +
+            price +
+            compare +
+            "</div>" +
+            button +
+            "</td>"
+          );
+        });
+        if (cells.length === 1)
+          cells.push('<td class="reef-campaign-product" width="50%" style="width:50%">&nbsp;</td>');
+        rows.push("<tr>" + cells.join("") + "</tr>");
+      }
+      return '<tr><td style="padding:' + style.sectionPadding + 'px;background:' + e(section.backgroundColor || style.contentBackground) + '"><table role="presentation" width="100%" style="table-layout:fixed"><tbody>' + rows.join("") + "</tbody></table></td></tr>";
+    })
+    .join("");
+  return (
+    "<!doctype html><html>" +
+    emailHead +
+    '<body style="margin:0;background:' + e(style.emailBackground) + ";font-family:" + font + ";color:" + e(style.textColor) + '"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:' + e(style.contentBackground) + '"><tr><td style="display:none;max-height:0;overflow:hidden">' + e(c.preview || "") + "</td></tr>" +
+    '<tr><td class="reef-logo" align="center" style="padding:16px 26px 8px">' +
+    (c.logo
+      ? '<img src="' + e(c.logo) + '" alt="' + e(organizationName) + '" width="' + Math.round(360 * (c.logoScale || 1)) + '" style="display:block;max-width:100%;height:auto;margin:auto">'
+      : '<strong style="font-size:27px;font-style:italic">' + e(organizationName.toUpperCase()) + "</strong>") +
+    "</td></tr><tr><td style=\"padding:0 20px 8px\">" + nav + "</td></tr>" + hero + sections +
+    '<tr><td style="padding:24px;background:#050505;color:#fff;text-align:center;font-size:12px;line-height:1.6">' +
+    (c.facebookUrl || c.instagramUrl
+      ? '<p style="margin:0 0 14px;font-size:25px">' +
+        (c.facebookUrl
+          ? '<a href="' + e(c.facebookUrl) + '" aria-label="Facebook" style="color:#fff;text-decoration:none;margin:0 12px">f</a>'
+          : "") +
+        (c.instagramUrl
+          ? '<a href="' + e(c.instagramUrl) + '" aria-label="Instagram" style="color:#fff;text-decoration:none;margin:0 12px">◎</a>'
+          : "") +
+        "</p>"
+      : "") +
+    '<p style="margin:12px 0">' + e(c.footerText || "") .replace(/\n/g, "<br>") + "</p><p>" +
+    e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
+    ' <a href="' + e(unsubscribe) + '" style="color:#fff">Unsubscribe</a></p><p>' + e(organizationName) + (address ? "<br>" + e(address) : "") + "</p></td></tr></table></td></tr></table></body></html>"
+  );
+}
 
 export function render(
   c: Content,
@@ -572,6 +836,8 @@ export function render(
   c = content(withBranding(content(c), branding));
   address = c.showPostalAddress ? address : "";
   const e = escapeHtml;
+  if (c.template === "campaign-sale" && c.campaignLayout)
+    return campaignSaleHtml(c, unsubscribe, address, organizationName);
   if (c.template === "welcome" || c.template === "welcome-social") {
     const displayExpiry = c.couponExpiresAt
       ? new Intl.DateTimeFormat("en-US", {
@@ -969,6 +1235,72 @@ export const defaultContent: Content = {
   button: "Shop now",
   url: "https://coralsanonymous.com",
   preview: "Fresh arrivals for your reef.",
+};
+export const defaultCampaignContent: Content = {
+  heading: "Corals Anonymous sale",
+  body: "Shop this week's featured corals.",
+  button: "Shop now",
+  url: "https://coralsanonymous.com/collections/new-arrivals",
+  preview: "Fresh deals and new arrivals from Corals Anonymous.",
+  template: "campaign-sale",
+  showPostalAddress: true,
+  campaignLayout: {
+    heroLink: "https://coralsanonymous.com/collections/new-arrivals",
+    navigation: [
+      { label: "🔥 New Corals", url: "https://coralsanonymous.com/collections/new-arrivals" },
+      { label: "🏷️ Deal Busters", url: "https://coralsanonymous.com/collections/deal-busters" },
+      { label: "✚ Earn Points & Save!", url: "https://coralsanonymous.com/pages/rewards" },
+    ],
+    sections: [
+      {
+        id: "featured-products",
+        type: "products",
+        backgroundColor: "#ffffff",
+        products: [
+          {
+            id: "product-1",
+            title: "Featured coral",
+            url: "https://coralsanonymous.com/collections/new-arrivals",
+            salePrice: "$0.00",
+            compareAtPrice: "$0.00",
+            button: "Shop now",
+          },
+          {
+            id: "product-2",
+            title: "Featured coral",
+            url: "https://coralsanonymous.com/collections/new-arrivals",
+            salePrice: "$0.00",
+            compareAtPrice: "$0.00",
+            button: "Shop now",
+          },
+        ],
+      },
+      {
+        id: "shop-cta",
+        type: "cta",
+        label: "SHOP NOW!",
+        url: "https://coralsanonymous.com/collections/new-arrivals",
+        backgroundColor: "#3c8429",
+        textColor: "#ffffff",
+      },
+    ],
+    style: {
+      fontFamily: "Arial",
+      emailBackground: "#fff7f5",
+      contentBackground: "#ffffff",
+      textColor: "#080808",
+      salePriceColor: "#e84218",
+      buttonBackground: "#79e93c",
+      buttonTextColor: "#000000",
+      productAlignment: "center",
+      productGap: 18,
+      sectionPadding: 18,
+      productImageWidth: 140,
+      buttonRadius: 5,
+      titleSize: 18,
+      priceSize: 21,
+    },
+  },
 };
 export const flowDefaults = [
   {

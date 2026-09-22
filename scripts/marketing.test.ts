@@ -27,6 +27,7 @@ test("templates show each saved flow email without replacing saved copy", () => 
 });
 import {
   content,
+  defaultCampaignContent,
   defaultContent,
   eligible,
   email,
@@ -40,6 +41,32 @@ import {
   withCoupon,
   personalize,
 } from "../lib/marketing/rules";
+
+test("campaign sale layouts round-trip and render responsive email-safe sections", () => {
+  const draft = structuredClone(defaultCampaignContent);
+  draft.hero = "https://coralsanonymous.com/cdn/shop/files/sale.jpg";
+  const first = draft.campaignLayout!.sections[0];
+  assert.equal(first.type, "products");
+  if (first.type !== "products") throw new Error("Expected product section");
+  first.products[0] = {
+    ...first.products[0],
+    image: "https://coralsanonymous.com/cdn/shop/files/coral.jpg",
+    title: "Red and White Coco Worm",
+    salePrice: "$40.00",
+    compareAtPrice: "$79.99",
+    imageWidth: 160,
+  };
+  const saved = content(draft);
+  assert.equal(saved.template, "campaign-sale");
+  assert.equal(saved.campaignLayout?.sections.length, 2);
+  const html = render(saved, "https://example.com/unsubscribe", "123 Ocean Ave");
+  assert.match(html, /reef-campaign-product/);
+  assert.match(html, /Red and White Coco Worm/);
+  assert.match(html, /text-decoration:line-through/);
+  assert.match(html, /SHOP NOW!/);
+  assert.match(html, /max-width:480px/);
+  assert.match(html, /123 Ocean Ave/);
+});
 import {
   defaultDeliveryUpsell,
   deliveryDateFromTags,
@@ -538,6 +565,22 @@ test("encoded unsafe links and executable styles are stripped", () => {
 });
 
 import { emailBody } from "../lib/marketing/delivery";
+test("campaign sale plain-text fallback includes products and section links", () => {
+  const payload = emailBody(
+    {
+      id: "campaign",
+      channel: "EMAIL",
+      subject: "Sale",
+      to: "test@example.com",
+      unsubscribe: "https://example.com/u",
+      content: defaultCampaignContent,
+    },
+    "123 Ocean Ave",
+    "Corals Anonymous",
+  );
+  assert.match(payload.text, /Featured coral · \$0\.00 · Was \$0\.00/);
+  assert.match(payload.text, /SHOP NOW!: https:\/\/coralsanonymous\.com/);
+});
 test("uploaded artwork becomes inline email attachments", () => {
   const payload = emailBody(
     {

@@ -55,9 +55,30 @@ const { chromium } = require("playwright");
       body: "Saved campaign message",
       button: "Shop",
       url: "https://coralsanonymous.com",
-      template: "cart-recovery",
+      template: "campaign-sale",
+      hero: "https://coralsanonymous.com/cdn/shop/files/sale.jpg",
       footerText: "Existing footer",
-      products: [],
+      campaignLayout: {
+        heroLink: "https://coralsanonymous.com/collections/new-arrivals",
+        navigation: [
+          { label: "New Corals", url: "https://coralsanonymous.com/collections/new-arrivals" },
+          { label: "Deal Busters", url: "https://coralsanonymous.com/collections/deal-busters" },
+          { label: "Earn Points & Save!", url: "https://coralsanonymous.com/pages/rewards" },
+        ],
+        sections: [
+          {
+            id: "products-1",
+            type: "products",
+            backgroundColor: "#ffffff",
+            products: [
+              { id: "product-1", title: "Coco Worm", url: "https://coralsanonymous.com/products/coco-worm", image: "https://coralsanonymous.com/cdn/shop/files/coral.jpg", salePrice: "$40.00", compareAtPrice: "$79.99", button: "Shop now" },
+              { id: "product-2", title: "Gold Hammer", url: "https://coralsanonymous.com/products/gold-hammer", salePrice: "$39.00", compareAtPrice: "$77.99", button: "Shop now" },
+            ],
+          },
+          { id: "cta-1", type: "cta", label: "SHOP NOW!", url: "https://coralsanonymous.com", backgroundColor: "#3c8429", textColor: "#ffffff" },
+        ],
+        style: { fontFamily: "Arial", emailBackground: "#fff7f5", contentBackground: "#ffffff", textColor: "#080808", salePriceColor: "#e84218", buttonBackground: "#79e93c", buttonTextColor: "#000000", productAlignment: "center", productGap: 18, sectionPadding: 18, productImageWidth: 140, buttonRadius: 5, titleSize: 18, priceSize: 21 },
+      },
     };
     const data = {
       profiles: [],
@@ -177,6 +198,15 @@ const { chromium } = require("playwright");
       else await route.fulfill({ json: data });
     });
     await page.goto("http://127.0.0.1:" + server.address().port);
+    await page.getByRole("button", { name: "View email", exact: true }).click();
+    await page.getByRole("dialog").waitFor();
+    assert.equal(await page.getByText("Read-only email", { exact: true }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: "Save email", exact: true }).count(), 0);
+    assert.ok((await page.getByTitle("Email preview").getAttribute("srcdoc")).includes("Coco Worm"));
+    await page.getByLabel("Back to campaigns").click();
+    await page.getByRole("button", { name: "Duplicate", exact: true }).click();
+    assert.equal(await page.getByLabel("Campaign name").inputValue(), "Test campaign copy");
+    await page.getByRole("button", { name: "Back to campaigns", exact: true }).click();
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     assert.equal(await page.getByText("Dynamic segments", { exact: true }).count(), 1);
     assert.equal(
@@ -194,6 +224,19 @@ const { chromium } = require("playwright");
     await page.getByRole("button", { name: "Continue to email" }).click();
     await page.getByRole("button", { name: "Edit email and preview" }).click();
     await page.getByRole("dialog").waitFor();
+    await page.getByText("Product 1 · Coco Worm", { exact: true }).click();
+    await page.getByLabel("Product name").first().fill("Red and White Coco Worm");
+    await page.getByRole("button", { name: "Add full-width button" }).click();
+    assert.ok((await page.getByTitle("Email preview").getAttribute("srcdoc")).includes("Red and White Coco Worm"));
+    assert.equal((await page.getByTitle("Email preview").getAttribute("srcdoc")).match(/SHOP NOW!/g).length, 2);
+    await page.screenshot({ path: path.join(output, "campaign-editor-desktop.png") });
+    await page.getByRole("button", { name: "Mobile", exact: true }).click();
+    await page.screenshot({ path: path.join(output, "campaign-email-mobile-preview.png") });
+    await page.setViewportSize({ width: 390, height: 900 });
+    assert.ok(await page.getByRole("dialog").evaluate((el) => el.scrollWidth <= el.clientWidth));
+    await page.screenshot({ path: path.join(output, "campaign-editor-mobile-390.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole("button", { name: "Desktop", exact: true }).click();
     await page.getByRole("button", { name: "Footer", exact: true }).click();
     const toggle = page.getByLabel("Show business address in this email");
     assert.equal(await toggle.isChecked(), false);
@@ -214,6 +257,8 @@ const { chromium } = require("playwright");
     );
     assert.equal(writes.at(-1).action, "save-campaign");
     assert.equal(writes.at(-1).content.showPostalAddress, true);
+    assert.equal(writes.at(-1).content.campaignLayout.sections.length, 3);
+    assert.equal(writes.at(-1).content.campaignLayout.sections[0].products[0].title, "Red and White Coco Worm");
     await page.getByLabel("Back to campaign").click();
     await page.getByRole("button", { name: "3. Review & schedule" }).click();
     assert.equal(await page.getByLabel("16-hour Smart Sending").isChecked(), true);

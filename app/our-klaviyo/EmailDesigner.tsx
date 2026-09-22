@@ -9,6 +9,7 @@ import {
 } from "@/lib/marketing/rules";
 import EmailPreview from "./EmailPreview";
 import RichEmailCopy from "./RichEmailCopy";
+import CampaignEmailFields from "./CampaignEmailFields";
 
 function Artwork({
   label,
@@ -138,8 +139,10 @@ export default function EmailDesigner({
   editProducts = false,
   subjectEditable = true,
   backLabel = "Back to flow",
+  readOnly = false,
 }: {
   backLabel?: string;
+  readOnly?: boolean;
   editProducts?: boolean;
   subjectEditable?: boolean;
   recoveryLink?: boolean;
@@ -157,7 +160,7 @@ export default function EmailDesigner({
   status: string;
   onSubject: (value: string) => void;
   onContent: (key: keyof Content, value: Content[keyof Content]) => void;
-  onSave: () => Promise<boolean>;
+  onSave?: () => Promise<boolean>;
   onClose: () => void;
   onTest?: (
     to: string,
@@ -205,6 +208,7 @@ export default function EmailDesigner({
     onContent(key, value);
   }
   async function save() {
+    if (!onSave) return;
     setWork("save");
     setNotice("");
     try {
@@ -222,7 +226,7 @@ export default function EmailDesigner({
   return (
     <dialog
       ref={dialog}
-      className="mk-designer"
+      className={`mk-designer ${readOnly ? "is-read-only" : ""}`}
       aria-label="Email editor"
       onCancel={(e) => {
         e.preventDefault();
@@ -244,20 +248,22 @@ export default function EmailDesigner({
         </div>
         <div className="mk-designer-header-actions">
           <span className="mk-draft-badge">
-            {working || busy ? "Working…" : "Email draft"}
+            {readOnly ? "Read-only email" : working || busy ? "Working…" : "Email draft"}
           </span>
-          <button
-            className="mk-primary"
-            type="button"
-            disabled={busy || working || !!previewError}
-            onClick={save}
-          >
-            {work === "save" ? "Saving…" : "Save email"}
-          </button>
+          {!readOnly && (
+            <button
+              className="mk-primary"
+              type="button"
+              disabled={busy || working || !!previewError}
+              onClick={save}
+            >
+              {work === "save" ? "Saving…" : "Save email"}
+            </button>
+          )}
         </div>
       </header>
       <div className="mk-designer-body">
-        <aside className="mk-designer-sidebar">
+        {!readOnly && <aside className="mk-designer-sidebar">
           <nav className="mk-designer-tabs" aria-label="Email editing sections">
             {(["content", "artwork", "footer", "test"] as const)
               .filter((tab) =>
@@ -265,9 +271,10 @@ export default function EmailDesigner({
                   ? tab === "content" || tab === "footer"
                   : tab !== "artwork" ||
                     content.template === "b2b-wholesale" ||
-                    content.template === "cart-recovery" ||
-                    content.template === "welcome" ||
-                    content.template === "welcome-social",
+                     content.template === "cart-recovery" ||
+                     content.template === "welcome" ||
+                     content.template === "welcome-social" ||
+                     content.template === "campaign-sale",
               )
               .map((tab) => (
                 <button
@@ -288,7 +295,14 @@ export default function EmailDesigner({
           </nav>
           <div className="mk-designer-fields">
             {panel === "content" &&
-              (contentFields || (
+              (contentFields || (content.template === "campaign-sale" && content.campaignLayout ? (
+                <CampaignEmailFields
+                  content={content}
+                  subject={subject}
+                  onSubject={onSubject}
+                  onChange={changeContent}
+                />
+              ) : (
                 <>
                   <section className="mk-editor-section">
                     <h3>Inbox details</h3>
@@ -435,7 +449,7 @@ export default function EmailDesigner({
                     </section>
                   )}
                 </>
-              ))}
+              )))}
             {panel === "artwork" && (
               <>
                 <div className="mk-editor-section">
@@ -445,7 +459,7 @@ export default function EmailDesigner({
                     mobile.
                   </p>
                 </div>
-                {content.template?.startsWith("welcome") && (
+                {(content.template?.startsWith("welcome") || content.template === "campaign-sale") && (
                   <Artwork
                     label="Hero"
                     value={content.hero}
@@ -644,7 +658,7 @@ export default function EmailDesigner({
             <span className="mk-draft-dot" />{" "}
             <span>{status.replaceAll("Save flow", "Save email")}</span>
           </footer>
-        </aside>
+        </aside>}
         <section className="mk-designer-canvas" aria-label="Live email preview">
           <div className="mk-preview-toolbar">
             <div
