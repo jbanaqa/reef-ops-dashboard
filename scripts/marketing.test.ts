@@ -29,6 +29,7 @@ import {
   content,
   defaultCampaignContent,
   defaultContent,
+  defaultProductGridStyle,
   eligible,
   email,
   marketingSettings,
@@ -467,7 +468,7 @@ test("templates escape hostile content and reject unsafe link schemes", () => {
     content({ ...defaultContent, hero: "data:image/svg+xml,xxx" }),
   );
 });
-test("cart recovery renders a responsive two-column product grid", () => {
+test("cart recovery renders adjustable campaign-style product cards", () => {
   const html = render(
     content({
       ...defaultContent,
@@ -475,6 +476,11 @@ test("cart recovery renders a responsive two-column product grid", () => {
       heading: "Aloha Friend",
       body: "Your corals are waiting.",
       hero: "https://cdn.example.com/cart-art.jpg",
+      productGridStyle: {
+        ...defaultProductGridStyle,
+        productImageWidth: 105,
+        buttonLabel: "View coral",
+      },
       products: [
         {
           title: "Blue coral",
@@ -499,7 +505,11 @@ test("cart recovery renders a responsive two-column product grid", () => {
     "",
   );
   assert.match(html, /class="reef-cart-products"/);
+  assert.match(html, /class="reef-product-card reef-cart-product"/);
+  assert.match(html, /reef-cart-product\{display:block!important;width:100%!important/);
   assert.equal((html.match(/width="50%"/g) || []).length, 4);
+  assert.match(html, /width="105"/);
+  assert.match(html, />View coral<\/a>/);
   assert.match(html, /background="https:\/\/cdn\.example\.com\/cart-art\.jpg"/);
   assert.match(html, /Blue coral/);
   assert.doesNotMatch(html, /Product image/);

@@ -468,6 +468,47 @@ test("one editor can change a flow's visual layout without changing its template
   assert.ok(savedContent.campaignLayout);
 });
 
+test("abandoned cart editor controls its campaign-style product cards", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  const r = resource("abandoned-cart", "Cart email");
+  Object.assign(r.data.steps[0].content, { template: "cart-recovery" });
+  let saved: unknown;
+  const view = testing.render(
+    <FlowEditor
+      resource={r}
+      busy={false}
+      settings={defaultMarketingSettings}
+      save={async (data, enabled) => {
+        saved = data;
+        return { ...r, data, enabled };
+      }}
+    />,
+  );
+  testing.fireEvent.click(await view.findByText("Email #1 · Soft push"));
+  testing.fireEvent.click(view.getByRole("button", { name: "Layout" }));
+  assert.ok(view.getByText("Campaign-style cards", { exact: true }));
+  testing.fireEvent.change(view.getByLabelText("Product image width"), {
+    target: { value: "95" },
+  });
+  testing.fireEvent.click(
+    view.getByRole("checkbox", { name: "Show a button on each product" }),
+  );
+  testing.fireEvent.click(view.getByRole("button", { name: "Save email" }));
+  await testing.waitFor(() => assert.ok(saved));
+  const savedContent = (
+    saved as {
+      steps: {
+        content: {
+          productGridStyle: { productImageWidth: number; showButton: boolean };
+        };
+      }[];
+    }
+  ).steps[0].content;
+  assert.equal(savedContent.productGridStyle.productImageWidth, 95);
+  assert.equal(savedContent.productGridStyle.showButton, false);
+});
+
 test("campaign product grid controls update count and product order together", async () => {
   const testing = await import("@testing-library/react");
   cleanup = testing.cleanup;

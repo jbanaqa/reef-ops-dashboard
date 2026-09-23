@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Content,
+  defaultProductGridStyle,
   defaultCampaignContent,
   type EmailLayout,
   escapeHtml,
@@ -194,6 +195,10 @@ export default function EmailDesigner({
     "content" | "layout" | "artwork" | "footer" | "test"
   >("content");
   const visualLayout = content.layout || content.template || "standard";
+  const gridStyle = {
+    ...defaultProductGridStyle,
+    ...(content.productGridStyle || {}),
+  };
   const [mobile, setMobile] = useState(false);
   const [mobileWidth, setMobileWidth] = useState(375);
   const [recipient, setRecipient] = useState("");
@@ -228,6 +233,12 @@ export default function EmailDesigner({
   function changeContent(key: keyof Content, value: Content[keyof Content]) {
     setNotice("");
     onContent(key, value);
+  }
+  function changeProductGrid(
+    key: keyof typeof gridStyle,
+    value: (typeof gridStyle)[keyof typeof gridStyle],
+  ) {
+    changeContent("productGridStyle", { ...gridStyle, [key]: value });
   }
   async function save() {
     if (!onSave) return;
@@ -726,6 +737,156 @@ export default function EmailDesigner({
                   )}
                   </div>
                 </details>
+                {visualLayout === "cart-recovery" && (
+                  <details className="mk-editor-section mk-editor-disclosure" open>
+                    <summary>
+                      <span>Product grid</span>
+                      <small>Campaign-style cards</small>
+                    </summary>
+                    <div className="mk-editor-disclosure-body">
+                      <p>
+                        Live abandoned-cart recommendations appear two per row
+                        on desktop and one per row on mobile.
+                      </p>
+                      <label>
+                        Product image width <small>{gridStyle.productImageWidth}px</small>
+                        <input
+                          aria-label="Product image width"
+                          type="range"
+                          min="60"
+                          max="280"
+                          step="5"
+                          value={gridStyle.productImageWidth}
+                          onChange={(event) =>
+                            changeProductGrid("productImageWidth", Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Product alignment
+                        <select
+                          value={gridStyle.productAlignment}
+                          onChange={(event) =>
+                            changeProductGrid(
+                              "productAlignment",
+                              event.target.value as "left" | "center" | "right",
+                            )
+                          }
+                        >
+                          <option value="left">Left</option>
+                          <option value="center">Center</option>
+                          <option value="right">Right</option>
+                        </select>
+                      </label>
+                      <label>
+                        Space between products <small>{gridStyle.productGap}px</small>
+                        <input
+                          aria-label="Space between products"
+                          type="range"
+                          min="0"
+                          max="60"
+                          step="2"
+                          value={gridStyle.productGap}
+                          onChange={(event) =>
+                            changeProductGrid("productGap", Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Product title size <small>{gridStyle.titleSize}px</small>
+                        <input
+                          aria-label="Product title size"
+                          type="range"
+                          min="11"
+                          max="32"
+                          value={gridStyle.titleSize}
+                          onChange={(event) =>
+                            changeProductGrid("titleSize", Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Price size <small>{gridStyle.priceSize}px</small>
+                        <input
+                          aria-label="Price size"
+                          type="range"
+                          min="11"
+                          max="34"
+                          value={gridStyle.priceSize}
+                          onChange={(event) =>
+                            changeProductGrid("priceSize", Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Price color
+                        <input
+                          aria-label="Product price color"
+                          type="color"
+                          value={gridStyle.salePriceColor}
+                          onChange={(event) =>
+                            changeProductGrid("salePriceColor", event.target.value)
+                          }
+                        />
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input
+                          style={{ width: "auto", margin: 0 }}
+                          type="checkbox"
+                          checked={gridStyle.showButton}
+                          onChange={(event) =>
+                            changeProductGrid("showButton", event.target.checked)
+                          }
+                        />{" "}
+                        Show a button on each product
+                      </label>
+                      {gridStyle.showButton && (
+                        <>
+                          <label>
+                            Product button text
+                            <input
+                              maxLength={80}
+                              value={gridStyle.buttonLabel}
+                              onChange={(event) =>
+                                changeProductGrid("buttonLabel", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label>
+                            Button color
+                            <input
+                              aria-label="Product button color"
+                              type="color"
+                              value={gridStyle.buttonBackground}
+                              onChange={(event) =>
+                                changeProductGrid("buttonBackground", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label>
+                            Button text color
+                            <input
+                              aria-label="Product button text color"
+                              type="color"
+                              value={gridStyle.buttonTextColor}
+                              onChange={(event) =>
+                                changeProductGrid("buttonTextColor", event.target.value)
+                              }
+                            />
+                          </label>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          changeContent("productGridStyle", { ...defaultProductGridStyle })
+                        }
+                      >
+                        Restore product grid defaults
+                      </button>
+                    </div>
+                  </details>
+                )}
                 {visualLayout === "campaign-sale" && content.campaignLayout && (
                   <CampaignEmailFields
                     content={content}

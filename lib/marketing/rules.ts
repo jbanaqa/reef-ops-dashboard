@@ -151,6 +151,28 @@ export type CampaignEmailLayout = {
     priceSize: number;
   };
 };
+export type ProductGridStyle = CampaignEmailLayout["style"] & {
+  showButton: boolean;
+  buttonLabel: string;
+};
+export const defaultProductGridStyle: ProductGridStyle = {
+  fontFamily: "Arial",
+  emailBackground: "#fff7f5",
+  contentBackground: "#ffffff",
+  textColor: "#080808",
+  salePriceColor: "#e84218",
+  buttonBackground: "#79e93c",
+  buttonTextColor: "#000000",
+  productAlignment: "center",
+  productGap: 18,
+  sectionPadding: 18,
+  productImageWidth: 140,
+  buttonRadius: 5,
+  titleSize: 18,
+  priceSize: 21,
+  showButton: true,
+  buttonLabel: "Shop now",
+};
 export type Content = {
   heading: string;
   body: string;
@@ -208,6 +230,7 @@ export type Content = {
   footerWidth?: number;
   footerHeight?: number;
   products?: { title: string; url: string; image?: string; price?: string }[];
+  productGridStyle?: ProductGridStyle;
   campaignLayout?: CampaignEmailLayout;
 };
 export type MarketingOperations = {
@@ -505,45 +528,71 @@ function productHtml(c: Content) {
     )
     .join("");
 }
-function cartProductHtml(c: Content) {
-  const products = c.products || [];
+function productGridHtml(
+  products: CampaignEmailProduct[],
+  style: CampaignEmailLayout["style"],
+  className: string,
+) {
   if (!products.length) return "";
   const rows: string[] = [];
   for (let i = 0; i < products.length; i += 2) {
-    const cells = products
-      .slice(i, i + 2)
-      .map(
-        (p) =>
-          '<td valign="top" width="50%" style="width:50%;padding:12px 8px 18px;text-align:center">' +
-          '<a href="' +
-          escapeHtml(p.url) +
-          '" style="color:#122f35;text-decoration:none">' +
-          (p.image
-            ? '<img src="' +
-              escapeHtml(p.image) +
-              '" width="240" alt="' +
-              escapeHtml(p.title) +
-              '" style="display:block;width:100%;max-width:240px;height:auto;margin:0 auto 9px;background:#f1f4f4">'
-            : '<div style="width:100%;height:150px;background:#f1f4f4;margin:0 auto 9px">&nbsp;</div>') +
-          '<strong style="display:block;font-family:Georgia,serif;font-size:16px;line-height:1.25;text-decoration:underline">' +
-          escapeHtml(p.title) +
-          "</strong>" +
-          (p.price
-            ? '<span style="display:block;margin-top:7px;color:#0b9b91;font-size:14px">' +
-              escapeHtml(p.price) +
-              "</span>"
-            : "") +
-          "</a></td>",
+    const cells = products.slice(i, i + 2).map((product) => {
+      const imageWidth = product.imageWidth || style.productImageWidth;
+      const imageMargin =
+        style.productAlignment === "center"
+          ? "0 auto 10px"
+          : style.productAlignment === "right"
+            ? "0 0 10px auto"
+            : "0 auto 10px 0";
+      const price = product.showSalePrice !== false && product.salePrice
+        ? '<span style="color:' + escapeHtml(style.salePriceColor) + ";font-size:" + style.priceSize + 'px;font-weight:bold">' + escapeHtml(product.salePrice) + "</span>"
+        : "";
+      const compare = product.showCompareAtPrice !== false && product.compareAtPrice
+        ? ' <span style="color:' + escapeHtml(style.textColor) + ';font-size:13px;text-decoration:line-through">' + escapeHtml(product.compareAtPrice) + "</span>"
+        : "";
+      const button = product.showButton !== false
+        ? '<div style="margin-top:13px"><a href="' + escapeHtml(product.url) + '" style="display:inline-block;background:' + escapeHtml(style.buttonBackground) + ";color:" + escapeHtml(style.buttonTextColor) + ";border-radius:" + style.buttonRadius + 'px;padding:10px 14px;font-size:16px;font-weight:bold;text-decoration:none">' + escapeHtml(product.button ?? "Shop now") + "</a></div>"
+        : "";
+      return (
+        '<td class="reef-product-card ' + className + '" valign="top" width="50%" style="width:50%;padding:' +
+        Math.round(style.productGap / 2) + "px;text-align:" + style.productAlignment + ";color:" + escapeHtml(style.textColor) +
+        '"><a href="' + escapeHtml(product.url) + '" style="color:' + escapeHtml(style.textColor) + ';text-decoration:none">' +
+        (product.image
+          ? '<img src="' + escapeHtml(product.image) + '" alt="' + escapeHtml(product.title) + '" width="' + imageWidth + '" style="display:block;width:' + imageWidth + 'px;max-width:100%;height:auto;margin:' + imageMargin + '">'
+          : '<div style="width:' + imageWidth + "px;max-width:100%;height:" + imageWidth + "px;background:#f1f3f3;margin:" + imageMargin + '">&nbsp;</div>') +
+        '<strong style="display:block;font-size:' + style.titleSize + 'px;line-height:1.2">' + escapeHtml(product.title) +
+        '</strong></a><div style="margin-top:8px">' + price + compare + "</div>" + button + "</td>"
       );
+    });
     if (cells.length === 1)
       cells.push(
-        '<td width="50%" style="width:50%;padding:12px 8px 18px">&nbsp;</td>',
+        '<td class="reef-product-card ' + className + '" width="50%" style="width:50%">&nbsp;</td>',
       );
     rows.push("<tr>" + cells.join("") + "</tr>");
   }
+  return rows.join("");
+}
+export function productGridStyle(c: Content): ProductGridStyle {
+  return { ...defaultProductGridStyle, ...(c.productGridStyle || {}) };
+}
+function cartProductHtml(c: Content) {
+  const style = productGridStyle(c);
+  const products = (c.products || []).map((product, index) => ({
+    id: "cart-product-" + index,
+    title: product.title,
+    url: product.url,
+    image: product.image,
+    salePrice: product.price,
+    showCompareAtPrice: false,
+    showButton: style.showButton,
+    button: style.buttonLabel,
+  }));
+  if (!products.length) return "";
   return (
-    '<table role="presentation" class="reef-cart-products" width="100%" style="width:100%;border-collapse:collapse;table-layout:fixed;border-top:1px solid #71cbd2;margin-top:18px"><tbody>' +
-    rows.join("") +
+    '<table role="presentation" class="reef-cart-products" width="100%" style="width:100%;border-collapse:collapse;table-layout:fixed;border-top:1px solid #71cbd2;margin-top:18px;background:' +
+    escapeHtml(style.contentBackground) + ";font-family:" + escapeHtml(style.fontFamily) +
+    ',Arial,sans-serif"><tbody>' +
+    productGridHtml(products, style, "reef-cart-product") +
     "</tbody></table>"
   );
 }
@@ -570,6 +619,34 @@ export function content(value: unknown): Content {
       ? Math.min(max, Math.max(min, Math.round(result)))
       : fallback;
   };
+  const rawProductGridStyle =
+    c.productGridStyle || (c.template === "cart-recovery" ? defaultProductGridStyle : undefined);
+  const normalizedProductGridStyle: ProductGridStyle | undefined = rawProductGridStyle
+    ? {
+        fontFamily: (["Arial", "Verdana", "Georgia", "Trebuchet MS"] as const).includes(
+          rawProductGridStyle.fontFamily,
+        )
+          ? rawProductGridStyle.fontFamily
+          : defaultProductGridStyle.fontFamily,
+        emailBackground: color(rawProductGridStyle.emailBackground, defaultProductGridStyle.emailBackground),
+        contentBackground: color(rawProductGridStyle.contentBackground, defaultProductGridStyle.contentBackground),
+        textColor: color(rawProductGridStyle.textColor, defaultProductGridStyle.textColor),
+        salePriceColor: color(rawProductGridStyle.salePriceColor, defaultProductGridStyle.salePriceColor),
+        buttonBackground: color(rawProductGridStyle.buttonBackground, defaultProductGridStyle.buttonBackground),
+        buttonTextColor: color(rawProductGridStyle.buttonTextColor, defaultProductGridStyle.buttonTextColor),
+        productAlignment: ["left", "center", "right"].includes(rawProductGridStyle.productAlignment)
+          ? rawProductGridStyle.productAlignment
+          : defaultProductGridStyle.productAlignment,
+        productGap: bounded(rawProductGridStyle.productGap, defaultProductGridStyle.productGap, 0, 60),
+        sectionPadding: bounded(rawProductGridStyle.sectionPadding, defaultProductGridStyle.sectionPadding, 0, 60),
+        productImageWidth: bounded(rawProductGridStyle.productImageWidth, defaultProductGridStyle.productImageWidth, 60, 280),
+        buttonRadius: bounded(rawProductGridStyle.buttonRadius, defaultProductGridStyle.buttonRadius, 0, 40),
+        titleSize: bounded(rawProductGridStyle.titleSize, defaultProductGridStyle.titleSize, 11, 32),
+        priceSize: bounded(rawProductGridStyle.priceSize, defaultProductGridStyle.priceSize, 11, 34),
+        showButton: rawProductGridStyle.showButton !== false,
+        buttonLabel: String(rawProductGridStyle.buttonLabel || defaultProductGridStyle.buttonLabel).slice(0, 80),
+      }
+    : undefined;
   const rawLayout = c.campaignLayout;
   const campaignLayout: CampaignEmailLayout | undefined = rawLayout
     ? {
@@ -784,6 +861,7 @@ export function content(value: unknown): Content {
       image: p.image ? safeUrl(p.image) : undefined,
       price: String(p.price || "").slice(0, 80),
     })),
+    productGridStyle: normalizedProductGridStyle,
     campaignLayout,
   };
 }
@@ -984,7 +1062,7 @@ export function footerCopyright(
     .replaceAll("{{ organization }}", organizationName);
 }
 const emailHead =
-  '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:12px 10px!important}.reef-campaign-nav td{display:block!important;width:100%!important;padding:5px 10px!important}.reef-campaign-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-campaign-product img{max-width:100%!important;height:auto!important}}</style></head>';
+  '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:12px 10px!important}.reef-campaign-nav td{display:block!important;width:100%!important;padding:5px 10px!important}.reef-campaign-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-cart-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-product-card img{max-width:100%!important;height:auto!important}}</style></head>';
 
 function campaignSaleHtml(
   c: Content,
@@ -1093,57 +1171,7 @@ function campaignSaleHtml(
           e(section.label) +
           "</a></td></tr>"
         );
-      const rows: string[] = [];
-      for (let index = 0; index < section.products.length; index += 2) {
-        const cells = section.products.slice(index, index + 2).map((product) => {
-          const imageWidth = product.imageWidth || style.productImageWidth;
-          const imageMargin =
-            style.productAlignment === "center"
-              ? "0 auto 10px"
-              : style.productAlignment === "right"
-                ? "0 0 10px auto"
-                : "0 auto 10px 0";
-          const price = product.showSalePrice !== false && product.salePrice
-            ? '<span style="color:' + e(style.salePriceColor) + ";font-size:" + style.priceSize + 'px;font-weight:bold">' + e(product.salePrice) + "</span>"
-            : "";
-          const compare = product.showCompareAtPrice !== false && product.compareAtPrice
-            ? ' <span style="color:' + e(style.textColor) + ';font-size:13px;text-decoration:line-through">' + e(product.compareAtPrice) + "</span>"
-            : "";
-          const button = product.showButton !== false
-            ? '<div style="margin-top:13px"><a href="' + e(product.url) + '" style="display:inline-block;background:' + e(style.buttonBackground) + ";color:" + e(style.buttonTextColor) + ";border-radius:" + style.buttonRadius + 'px;padding:10px 14px;font-size:16px;font-weight:bold;text-decoration:none">' + e(product.button ?? "Shop now") + "</a></div>"
-            : "";
-          return (
-            '<td class="reef-campaign-product" valign="top" width="50%" style="width:50%;padding:' +
-            Math.round(style.productGap / 2) +
-            "px;text-align:" +
-            style.productAlignment +
-            ';color:' +
-            e(style.textColor) +
-            '"><a href="' +
-            e(product.url) +
-            '" style="color:' +
-            e(style.textColor) +
-            ';text-decoration:none">' +
-            (product.image
-              ? '<img src="' + e(product.image) + '" alt="' + e(product.title) + '" width="' + imageWidth + '" style="display:block;width:' + imageWidth + 'px;max-width:100%;height:auto;margin:' + imageMargin + '">'
-              : '<div style="height:' + imageWidth + 'px;background:#f1f3f3;line-height:' + imageWidth + 'px">&nbsp;</div>') +
-            '<strong style="display:block;font-size:' +
-            style.titleSize +
-            'px;line-height:1.2">' +
-            e(product.title) +
-            "</strong></a><div style=\"margin-top:8px\">" +
-            price +
-            compare +
-            "</div>" +
-            button +
-            "</td>"
-          );
-        });
-        if (cells.length === 1)
-          cells.push('<td class="reef-campaign-product" width="50%" style="width:50%">&nbsp;</td>');
-        rows.push("<tr>" + cells.join("") + "</tr>");
-      }
-      return '<tr><td style="padding:' + style.sectionPadding + 'px;background:' + e(section.backgroundColor || style.contentBackground) + '"><table role="presentation" width="100%" style="table-layout:fixed"><tbody>' + rows.join("") + "</tbody></table></td></tr>";
+      return '<tr><td style="padding:' + style.sectionPadding + 'px;background:' + e(section.backgroundColor || style.contentBackground) + '"><table role="presentation" width="100%" style="table-layout:fixed"><tbody>' + productGridHtml(section.products, style, "reef-campaign-product") + "</tbody></table></td></tr>";
     })
     .join("");
   const dynamicExpiry = c.couponExpiresAt
