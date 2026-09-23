@@ -645,7 +645,7 @@ export default function EmailDesigner({
                       {(content.products || []).map((p, i) => (
                         <fieldset key={i}>
                           <legend>Product {i + 1}</legend>
-                          {(["title", "url", "image", "price"] as const).map(
+                          {(["title", "url", "image", "price", "compareAtPrice"] as const).map(
                             (key) => (
                               <label key={key}>
                                 {key}

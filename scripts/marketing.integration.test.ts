@@ -2083,8 +2083,14 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
               status: "ACTIVE",
               tracksInventory: true,
               totalInventory: 3,
-              priceRangeV2: {
-                minVariantPrice: { amount: "25.00", currencyCode: "USD" },
+              variants: {
+                nodes: [
+                  {
+                    availableForSale: true,
+                    price: "25.00",
+                    compareAtPrice: "50.00",
+                  },
+                ],
               },
             })),
           },
@@ -3164,8 +3170,14 @@ test("cart recommendations exclude Shipping Protection and Shipping Box and back
               "https://coralsanonymous.com/products/" + id.split("/").at(-1),
             tracksInventory: true,
             totalInventory: 5,
-            priceRangeV2: {
-              minVariantPrice: { amount: "25.00", currencyCode: "USD" },
+            variants: {
+              nodes: [
+                {
+                  availableForSale: true,
+                  price: "25.00",
+                  compareAtPrice: "50.00",
+                },
+              ],
             },
           })),
         },
@@ -3182,6 +3194,8 @@ test("cart recommendations exclude Shipping Protection and Shipping Box and back
     assert.equal(batches, 2);
     assert.equal(result.length, 1);
     assert.equal(result[0].title, "Test coral");
+    assert.equal(result[0].price, "$25.00");
+    assert.equal(result[0].compareAtPrice, "$50.00");
   } finally {
     globalThis.fetch = previous;
   }

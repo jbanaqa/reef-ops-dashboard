@@ -229,7 +229,13 @@ export type Content = {
   logoHeight?: number;
   footerWidth?: number;
   footerHeight?: number;
-  products?: { title: string; url: string; image?: string; price?: string }[];
+  products?: {
+    title: string;
+    url: string;
+    image?: string;
+    price?: string;
+    compareAtPrice?: string;
+  }[];
   productGridStyle?: ProductGridStyle;
   campaignLayout?: CampaignEmailLayout;
 };
@@ -583,7 +589,8 @@ function cartProductHtml(c: Content) {
     url: product.url,
     image: product.image,
     salePrice: product.price,
-    showCompareAtPrice: false,
+    compareAtPrice: product.compareAtPrice,
+    showCompareAtPrice: true,
     showButton: style.showButton,
     button: style.buttonLabel,
   }));
@@ -860,6 +867,7 @@ export function content(value: unknown): Content {
       url: safeUrl(p.url),
       image: p.image ? safeUrl(p.image) : undefined,
       price: String(p.price || "").slice(0, 80),
+      compareAtPrice: String(p.compareAtPrice || "").slice(0, 80),
     })),
     productGridStyle: normalizedProductGridStyle,
     campaignLayout,
@@ -1117,7 +1125,8 @@ function campaignSaleHtml(
               url: product.url,
               image: product.image,
               salePrice: product.price,
-              showCompareAtPrice: false,
+              compareAtPrice: product.compareAtPrice,
+              showCompareAtPrice: true,
               button: c.button,
             })),
           },

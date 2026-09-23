@@ -68,6 +68,27 @@ const startingHtml = (c: Content) =>
         .map((line) => (line ? `<p>${escapeHtml(line)}</p>` : ""))
         .join("\n");
 
+const cartPreviewCatalog = [
+  ["Blueberry Gorgonian", "$15.00", "$29.99"],
+  ["Gold Sky Branching Hammer", "$40.00", "$79.99"],
+  ["Multicolor Mixed Zoa Colony", "$39.00", "$77.99"],
+  ["WYSIWYG Neon Green Bubble Coral", "$99.00", "$219.99"],
+  ["Red and White Coco Worm", "$40.00", "$79.99"],
+  ["Pink Candyland Zoa", "$24.99", "$49.99"],
+] as const;
+function cartPreviewProducts(count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const [title, price, compareAtPrice] =
+      cartPreviewCatalog[index % cartPreviewCatalog.length];
+    return {
+      title,
+      url: "https://coralsanonymous.com/cart",
+      price,
+      compareAtPrice,
+    };
+  });
+}
+
 function FlowEditorState({
   resource,
   busy,
@@ -298,17 +319,7 @@ function FlowEditorState({
             : flow.cart
               ? {
                   ...content,
-                  products: Array.from(
-                    { length: flow.cart.productCount },
-                    (_, i) => ({
-                      title:
-                        i === 0
-                          ? "Example coral from your cart"
-                          : "Example recommended coral",
-                      url: "https://coralsanonymous.com/cart",
-                      price: "Sample product",
-                    }),
-                  ),
+                  products: cartPreviewProducts(flow.cart.productCount),
                   ...(selected?.target.branch === "no"
                     ? { couponCode: "AC300-PREVIEW" }
                     : {}),
@@ -702,12 +713,8 @@ function FlowEditorState({
                         : flow.cart
                           ? {
                               ...c,
-                              products: Array.from(
-                                { length: flow.cart.productCount },
-                                () => ({
-                                  title: "Example coral",
-                                  url: "https://coralsanonymous.com/cart",
-                                }),
+                              products: cartPreviewProducts(
+                                flow.cart.productCount,
                               ),
                               ...(selected.target.branch === "no"
                                 ? { couponCode: "AC300-PREVIEW" }

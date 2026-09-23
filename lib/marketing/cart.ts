@@ -322,8 +322,25 @@ type Product = {
   totalInventory: number;
   tracksInventory: boolean;
   featuredImage?: { url: string } | null;
-  priceRangeV2: { minVariantPrice: { amount: string; currencyCode: string } };
+  variants: {
+    nodes: {
+      availableForSale: boolean;
+      price: string;
+      compareAtPrice: string | null;
+    }[];
+  };
 };
+function cartMoney(value: string | null, currency = "USD") {
+  if (!value) return undefined;
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString("en-US", {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+      })
+    : undefined;
+}
 export function rankedProducts(
   cart: string[],
   sales: Map<string, number>,
@@ -364,7 +381,7 @@ export async function cartProducts(
     const response = await shopifyGraphql<{
       data?: { nodes?: (Product | null)[] };
     }>(
-      `query CartProducts($ids: [ID!]!) { nodes(ids: $ids) { ... on Product { id title onlineStoreUrl status totalInventory tracksInventory featuredImage { url } priceRangeV2 { minVariantPrice { amount currencyCode } } } } }`,
+      `query CartProducts($ids: [ID!]!) { nodes(ids: $ids) { ... on Product { id title onlineStoreUrl status totalInventory tracksInventory featuredImage { url } variants(first: 100) { nodes { availableForSale price compareAtPrice } } } } }`,
       { ids: batch.map((id) => "gid://shopify/Product/" + id) },
     );
     if (!response.data?.nodes) throw new Error("Products could not be checked");
@@ -376,18 +393,26 @@ export async function cartProducts(
             p.status === "ACTIVE" &&
             !/\bshipping[\s-]+(?:protection|box(?:es)?)\b/i.test(p.title) &&
             !!p.onlineStoreUrl &&
+            p.variants.nodes.some((variant) => variant.availableForSale) &&
             (!p.tracksInventory || p.totalInventory > 0),
         )
         .slice(0, count - result.length)
-        .map((p) => ({
-          title: p.title,
-          url: p.onlineStoreUrl!,
-          image: p.featuredImage?.url,
-          price:
-            p.priceRangeV2.minVariantPrice.currencyCode +
-            " " +
-            p.priceRangeV2.minVariantPrice.amount,
-        })),
+        .map((p) => {
+          const variant = p.variants.nodes
+            .filter((item) => item.availableForSale)
+            .sort((a, b) => Number(a.price) - Number(b.price))[0];
+          const compareAtPrice =
+            Number(variant.compareAtPrice) > Number(variant.price)
+              ? cartMoney(variant.compareAtPrice)
+              : undefined;
+          return {
+            title: p.title,
+            url: p.onlineStoreUrl!,
+            image: p.featuredImage?.url,
+            price: cartMoney(variant.price),
+            compareAtPrice,
+          };
+        }),
     );
   }
   return result;

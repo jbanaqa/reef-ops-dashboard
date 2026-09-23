@@ -91,7 +91,16 @@ export function emailBody(
           )
         : undefined,
       (effectiveContent.products || [])
-        .map((p) => [p.title, p.price, p.url].filter(Boolean).join(" · "))
+        .map((p) =>
+          [
+            p.title,
+            p.price,
+            p.compareAtPrice ? "Was " + p.compareAtPrice : "",
+            p.url,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        )
         .join("\n"),
       effectiveContent.campaignLayout?.sections
         .flatMap((section) =>

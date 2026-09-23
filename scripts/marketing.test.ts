@@ -487,6 +487,7 @@ test("cart recovery renders adjustable campaign-style product cards", () => {
           url: "https://coralsanonymous.com/products/blue",
           image: "https://cdn.example.com/blue.jpg",
           price: "USD 24.00",
+          compareAtPrice: "USD 48.00",
         },
         {
           title: "Red coral",
@@ -510,6 +511,7 @@ test("cart recovery renders adjustable campaign-style product cards", () => {
   assert.equal((html.match(/width="50%"/g) || []).length, 4);
   assert.match(html, /width="105"/);
   assert.match(html, />View coral<\/a>/);
+  assert.match(html, /text-decoration:line-through">USD 48\.00/);
   assert.match(html, /background="https:\/\/cdn\.example\.com\/cart-art\.jpg"/);
   assert.match(html, /Blue coral/);
   assert.doesNotMatch(html, /Product image/);

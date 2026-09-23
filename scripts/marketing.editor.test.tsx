@@ -486,6 +486,13 @@ test("abandoned cart editor controls its campaign-style product cards", async ()
     />,
   );
   testing.fireEvent.click(await view.findByText("Email #1 · Soft push"));
+  const frame = view.getByTitle("Email preview") as HTMLIFrameElement;
+  assert.match(frame.getAttribute("srcdoc") || "", /Blueberry Gorgonian/);
+  assert.match(frame.getAttribute("srcdoc") || "", /\$29\.99/);
+  assert.doesNotMatch(
+    frame.getAttribute("srcdoc") || "",
+    /Sample Product|Example coral from your cart/,
+  );
   testing.fireEvent.click(view.getByRole("button", { name: "Layout" }));
   assert.ok(view.getByText("Campaign-style cards", { exact: true }));
   testing.fireEvent.change(view.getByLabelText("Product image width"), {
