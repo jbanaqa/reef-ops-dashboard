@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 export function proxy(request: NextRequest) {
   const publicOrigin = process.env.MARKETING_UNSUBSCRIBE_ORIGIN;
-  if (publicOrigin && request.nextUrl.hostname === new URL(publicOrigin).hostname) {
+  const requestHost = request.headers.get("host")?.split(":", 1)[0]?.toLowerCase();
+  if (publicOrigin && requestHost === new URL(publicOrigin).hostname.toLowerCase()) {
     if (request.nextUrl.pathname !== "/api/marketing/unsubscribe")
       return new NextResponse("Not found", { status: 404 });
     return NextResponse.next();

@@ -10,9 +10,9 @@ test("branded unsubscribe host exposes only the customer opt-out route", () => {
   process.env.MARKETING_UNSUBSCRIBE_ORIGIN = "https://unsubscribe.example.com";
   try {
     assert.equal(unsubscribeUrl("123").toString(), "https://unsubscribe.example.com/api/marketing/unsubscribe?token=123");
-    assert.equal(proxy(new NextRequest("https://unsubscribe.example.com/")).status, 404);
-    assert.equal(proxy(new NextRequest("https://unsubscribe.example.com/api/marketing")).status, 404);
-    assert.notEqual(proxy(new NextRequest("https://unsubscribe.example.com/api/marketing/unsubscribe?token=123")).status, 404);
+    assert.equal(proxy(new NextRequest("https://internal.example/", { headers: { host: "unsubscribe.example.com" } })).status, 404);
+    assert.equal(proxy(new NextRequest("https://internal.example/api/marketing", { headers: { host: "unsubscribe.example.com" } })).status, 404);
+    assert.notEqual(proxy(new NextRequest("https://internal.example/api/marketing/unsubscribe?token=123", { headers: { host: "unsubscribe.example.com" } })).status, 404);
     assert.notEqual(proxy(new NextRequest("https://app.example/api/marketing")).status, 404);
   } finally {
     if (previous === undefined) delete process.env.MARKETING_UNSUBSCRIBE_ORIGIN;
