@@ -885,6 +885,32 @@ test("every email layout uses the editable copyright footer controls", () => {
   );
   assert.doesNotMatch(hidden, /All rights reserved/);
 });
+test("every email layout uses the universal editable footer background", () => {
+  const layouts = [
+    [content({ ...defaultContent, template: "standard" }), "#ffffff"],
+    [content({ ...defaultContent, template: "b2b-wholesale" }), "#244b7b"],
+    [content({ ...defaultContent, template: "cart-recovery" }), "#8bd8e2"],
+    [content({ ...welcomeSteps[0].content }), "#f7f7f7"],
+    [content({ ...welcomeSteps[3].content }), "#f7f7f7"],
+    [content({ ...defaultCampaignContent }), "#050505"],
+  ] as const;
+  for (const [item, expected] of layouts)
+    assert.match(
+      render(item, "https://example.com/unsubscribe", ""),
+      new RegExp(`background:${expected}`),
+    );
+  for (const [item] of layouts) {
+    const customized = content({
+      ...item,
+      footerBackgroundColor: "#123456",
+    });
+    assert.equal(customized.footerBackgroundColor, "#123456");
+    assert.match(
+      render(customized, "https://example.com/unsubscribe", ""),
+      /background:#123456/,
+    );
+  }
+});
 test("generated welcome, coupon, social, and unsubscribe copy is editable", () => {
   const offer = render(
     content({

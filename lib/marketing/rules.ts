@@ -176,6 +176,7 @@ export type Content = {
   logoScale?: number;
   footerImage?: string;
   footerScale?: number;
+  footerBackgroundColor?: string;
   footerTitle?: string;
   showPostalAddress?: boolean;
   footerText?: string;
@@ -683,6 +684,10 @@ export function content(value: unknown): Content {
     logo: c.logo ? imageSource(c.logo) : undefined,
     logoScale: c.logo ? scale(c.logoScale, c.logoWidth, 260) : undefined,
     footerImage: c.footerImage ? imageSource(c.footerImage) : undefined,
+    footerBackgroundColor:
+      c.footerBackgroundColor === undefined
+        ? undefined
+        : color(c.footerBackgroundColor, "#ffffff"),
     footerTitle:
       c.footerTitle === undefined
         ? undefined
@@ -956,6 +961,15 @@ export const defaultGeneratedEmailCopy = {
   instagramUrl: "https://www.instagram.com/coralsanonymous/",
   facebookUrl: "https://www.facebook.com/coralsanonymousshop/",
 } as const;
+export function footerBackgroundColor(c: Content) {
+  if (c.footerBackgroundColor) return c.footerBackgroundColor;
+  const layout = c.layout || c.template || "standard";
+  if (layout === "campaign-sale") return "#050505";
+  if (layout === "welcome" || layout === "welcome-social") return "#f7f7f7";
+  if (layout === "cart-recovery") return "#8bd8e2";
+  if (layout === "b2b-wholesale") return "#244b7b";
+  return "#ffffff";
+}
 export function footerCopyright(
   c: Content,
   organizationName: string,
@@ -1190,7 +1204,9 @@ function campaignSaleHtml(
       ? '<img src="' + e(c.logo) + '" alt="' + e(organizationName) + '" width="' + Math.round(360 * (c.logoScale || 1)) + '" style="display:block;width:' + Math.round(360 * (c.logoScale || 1)) + 'px;max-width:100%;height:auto;margin:auto">'
       : '<strong style="font-size:27px;font-style:italic">' + e(organizationName.toUpperCase()) + "</strong>") +
     "</td></tr><tr><td style=\"padding:0 20px 8px\">" + nav + "</td></tr>" + hero + dynamicMessage + sections +
-    '<tr><td style="padding:24px;background:#050505;color:#fff;text-align:center;font-size:12px;line-height:1.6">' +
+    '<tr><td style="padding:24px;background:' +
+    e(footerBackgroundColor(c)) +
+    ';color:#fff;text-align:center;font-size:12px;line-height:1.6">' +
     (c.footerImage
       ? '<img src="' + e(c.footerImage) + '" alt="" width="' + Math.round(560 * (c.footerScale || 1)) + '" style="display:block;max-width:100%;height:auto;margin:0 auto 14px">'
       : "") +
@@ -1396,7 +1412,9 @@ export function render(
       e(c.url) +
       '" style="display:block;border-radius:4px;background:#e69a49;padding:12px 16px;color:white;font-size:17px;font-weight:bold;text-decoration:none">' +
       e(c.button) +
-      '</a></p></td></tr><tr><td style="background:#f7f7f7;padding:28px 20px;text-align:center;font-size:11px;line-height:1.6">' +
+      '</a></p></td></tr><tr><td style="background:' +
+      e(footerBackgroundColor(c)) +
+      ';padding:28px 20px;text-align:center;font-size:11px;line-height:1.6">' +
       (c.footerImage
         ? '<img src="' +
           e(c.footerImage) +
@@ -1493,7 +1511,9 @@ export function render(
       e(c.button) +
       '</a></p></td></tr></table></td></tr><tr><td style="padding:8px 28px 24px;background:white;text-align:center">' +
       cartProductHtml(c) +
-      '</td></tr><tr><td style="padding:26px;text-align:center;color:#254c53;font-size:12px;line-height:1.6">' +
+      '</td></tr><tr><td style="padding:26px;background:' +
+      e(footerBackgroundColor(c)) +
+      ';text-align:center;color:#254c53;font-size:12px;line-height:1.6">' +
       (c.footerImage
         ? '<img src="' +
           e(c.footerImage) +
@@ -1614,7 +1634,9 @@ export function render(
       e(c.url) +
       '">' +
       e(c.button) +
-      '</a></td></tr><tr><td style="padding:12px 18px 30px;background:#244b7b;text-align:center">' +
+      '</a></td></tr><tr><td style="padding:12px 18px 30px;background:' +
+      e(footerBackgroundColor(c)) +
+      ';text-align:center">' +
       footer +
       footerCopy +
       socialHtml(c) +
@@ -1665,7 +1687,9 @@ export function render(
     e(c.url) +
     '">' +
     e(c.button) +
-    '</a></p></td></tr><tr><td style="padding:24px;font-size:12px;text-align:center">' +
+    '</a></p></td></tr><tr><td style="padding:24px;background:' +
+    e(footerBackgroundColor(c)) +
+    ';font-size:12px;text-align:center">' +
     (footerTitle(c) ? "<strong>" + e(footerTitle(c)) + "</strong><br>" : "") +
     (c.footerText
       ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"

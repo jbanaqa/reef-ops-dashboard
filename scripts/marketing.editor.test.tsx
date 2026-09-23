@@ -315,6 +315,10 @@ test("footer fields save with the email while sender details remain visible", as
   );
   testing.fireEvent.click(await view.findByText("Footer test"));
   testing.fireEvent.click(view.getByRole("button", { name: "Footer" }));
+  assert.equal(
+    (view.getByLabelText("Footer background color") as HTMLInputElement).value,
+    "#244b7b",
+  );
   testing.fireEvent.change(view.getByLabelText("Footer heading"), {
     target: { value: "Thank you, partners" },
   });

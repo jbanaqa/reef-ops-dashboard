@@ -200,7 +200,18 @@ const { chromium } = require("playwright");
       await page.getByLabel("Intro line", { exact: true }).inputValue(),
       "",
     );
+    await page.getByRole("button", { name: "Footer", exact: true }).click();
+    assert.equal(
+      await page
+        .getByLabel("Footer background color", { exact: true })
+        .inputValue(),
+      "#244b7b",
+    );
+    await page
+      .getByLabel("Footer background color", { exact: true })
+      .fill("#123456");
     const deliveryFrame = page.frameLocator('iframe[title="Email preview"]');
+    await deliveryFrame.locator('td[style*="background:#123456"]').waitFor();
     assert.equal(
       await deliveryFrame
         .getByText("Your order is shipping out tomorrow at 8AM PST!", {

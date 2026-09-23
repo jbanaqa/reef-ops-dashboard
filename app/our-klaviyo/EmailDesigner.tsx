@@ -7,6 +7,7 @@ import {
   type EmailLayout,
   escapeHtml,
   imageSource,
+  footerBackgroundColor,
   footerTitle,
   defaultFooterCopyright,
   defaultGeneratedEmailCopy,
@@ -780,6 +781,29 @@ export default function EmailDesigner({
                   Add a closing message, contact details, or a note for your
                   customers.
                 </p>
+                <label>
+                  Footer background color
+                  <input
+                    aria-label="Footer background color"
+                    type="color"
+                    value={footerBackgroundColor(content)}
+                    onChange={(event) =>
+                      changeContent(
+                        "footerBackgroundColor",
+                        event.target.value,
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={content.footerBackgroundColor === undefined}
+                  onClick={() =>
+                    changeContent("footerBackgroundColor", undefined)
+                  }
+                >
+                  Use this layout&apos;s default footer color
+                </button>
                 <label>
                   Footer heading
                   <input
