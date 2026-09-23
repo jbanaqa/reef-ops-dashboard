@@ -533,6 +533,82 @@ test("Shopify delivery-date order tag schedules one upsell notice", async () => 
     await prisma.marketingMessage.count({ where: { flowKey: "delivery-upsell" } }),
     1,
   );
+  const changedDelivery = new Date(Date.now() + 35 * 86400000);
+  const changedTag = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })
+    .format(changedDelivery)
+    .replace(",", "");
+  const changedDate = deliveryDateFromTags([changedTag])!;
+  const changedDue = deliveryUpsellDueAt(changedDate, config.delivery!);
+  await ingest.ingestShopify("orders/updated", "delivery-order-9001-update-1", {
+    id: "9001",
+    tags: [changedTag],
+    customer: { id: "9001", email: "delivery@example.com" },
+  });
+  const rescheduled = await prisma.marketingMessage.findUniqueOrThrow({
+    where: { id: message.id },
+  });
+  assert.equal(rescheduled.status, "PENDING");
+  assert.equal(rescheduled.dueAt.toISOString(), changedDue.toISOString());
+  assert.equal(
+    await prisma.marketingMessage.count({ where: { flowKey: "delivery-upsell" } }),
+    1,
+  );
+  await ingest.ingestShopify("orders/updated", "delivery-order-9001-update-2", {
+    id: "9001",
+    tags: ["VIP"],
+    customer: { id: "9001", email: "delivery@example.com" },
+  });
+  const cancelled = await prisma.marketingMessage.findUniqueOrThrow({
+    where: { id: message.id },
+  });
+  assert.equal(cancelled.status, "CANCELLED");
+  assert.equal(cancelled.error, "Delivery date removed or invalid");
+  await ingest.ingestShopify("orders/updated", "delivery-order-9001-update-3", {
+    id: "9001",
+    tags: [changedTag],
+    customer: { id: "9001", email: "delivery@example.com" },
+  });
+  const restored = await prisma.marketingMessage.findUniqueOrThrow({
+    where: { id: message.id },
+  });
+  assert.equal(restored.status, "PENDING");
+  assert.equal(restored.dueAt.toISOString(), changedDue.toISOString());
+  const tooLateTag = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })
+    .format(new Date(Date.now() + 86400000))
+    .replace(",", "");
+  await ingest.ingestShopify("orders/updated", "delivery-order-9001-update-4", {
+    id: "9001",
+    tags: [tooLateTag],
+    customer: { id: "9001", email: "delivery@example.com" },
+  });
+  const tooLate = await prisma.marketingMessage.findUniqueOrThrow({
+    where: { id: message.id },
+  });
+  assert.equal(tooLate.status, "CANCELLED");
+  assert.equal(tooLate.error, "Delivery reminder window passed");
+  await ingest.ingestShopify("orders/updated", "delivery-order-9001-update-5", {
+    id: "9001",
+    tags: [changedTag],
+    customer: { id: "9001", email: "delivery@example.com" },
+  });
+  assert.equal(
+    (
+      await prisma.marketingMessage.findUniqueOrThrow({
+        where: { id: message.id },
+      })
+    ).status,
+    "PENDING",
+  );
   await prisma.marketingMessage.create({
     data: {
       shop,
@@ -556,6 +632,23 @@ test("Shopify delivery-date order tag schedules one upsell notice", async () => 
   });
   assert.equal(delivered.status, "SENT");
   assert.equal(sent.length, sentBefore + 1);
+  await ingest.ingestShopify("orders/updated", "delivery-order-9001-update-6", {
+    id: "9001",
+    tags: [tag],
+    customer: { id: "9001", email: "delivery@example.com" },
+  });
+  assert.equal(
+    (
+      await prisma.marketingMessage.findUniqueOrThrow({
+        where: { id: message.id },
+      })
+    ).status,
+    "SENT",
+  );
+  assert.equal(
+    await prisma.marketingMessage.count({ where: { flowKey: "delivery-upsell" } }),
+    1,
+  );
   sent.splice(sentBefore, 1);
 });
 

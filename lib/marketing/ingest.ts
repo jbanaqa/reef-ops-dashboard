@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
-import { atomic, consent, identify, json, record, shop } from "./store";
+import { atomic, consent, identify, json, record, shop, type Tx } from "./store";
 import { date } from "./rules";
 import { enroll } from "./flows";
 import {
@@ -165,6 +165,99 @@ async function hydrateCustomerTagPayload(
     );
   }
 }
+
+const deliveryScheduleErrors = [
+  "Delivery date removed or invalid",
+  "Delivery reminder window passed",
+];
+
+async function syncDeliveryUpsellAt(
+  tx: Tx,
+  profileId: string,
+  orderId: string,
+  at: Date,
+  dueAt: Date | null,
+) {
+  const existing = await tx.marketingMessage.findFirst({
+    where: {
+      shop: shop(),
+      profileId,
+      flowKey: "delivery-upsell",
+      key: { startsWith: `delivery-upsell:${profileId}:${orderId}:` },
+    },
+  });
+  if (!dueAt || dueAt <= new Date()) {
+    if (existing?.status === "PENDING")
+      await tx.marketingMessage.update({
+        where: { id: existing.id },
+        data: {
+          status: "CANCELLED",
+          error: dueAt
+            ? "Delivery reminder window passed"
+            : "Delivery date removed or invalid",
+        },
+      });
+    return;
+  }
+  if (
+    existing &&
+    (existing.status === "PENDING" ||
+      (existing.status === "CANCELLED" &&
+        deliveryScheduleErrors.includes(existing.error || "")))
+  ) {
+    await tx.marketingMessage.update({
+      where: { id: existing.id },
+      data: {
+        dueAt,
+        triggerAt: at,
+        status: "PENDING",
+        attemptedAt: null,
+        sentAt: null,
+        attempts: 0,
+        providerId: null,
+        error: null,
+      },
+    });
+    return;
+  }
+  await enroll(tx, "delivery-upsell", profileId, orderId, at, {
+    expectedDeliveryAt: dueAt,
+  });
+}
+
+async function syncTaggedDeliveryUpsell(
+  tx: Tx,
+  profileId: string,
+  orderId: string,
+  at: Date,
+  tags: Customer["tags"],
+) {
+  const deliveryDate = deliveryDateFromTags(tags);
+  if (!deliveryDate) {
+    await syncDeliveryUpsellAt(tx, profileId, orderId, at, null);
+    return;
+  }
+  const flow = await tx.marketingResource.findUnique({
+    where: {
+      shop_kind_key: {
+        shop: shop(),
+        kind: "FLOW",
+        key: "delivery-upsell",
+      },
+    },
+  });
+  if (!flow) return;
+  const config = validateFlow("delivery-upsell", flow.data);
+  if (!config.reviewed || !config.delivery) return;
+  await syncDeliveryUpsellAt(
+    tx,
+    profileId,
+    orderId,
+    at,
+    deliveryUpsellDueAt(deliveryDate, config.delivery),
+  );
+}
+
 export async function ingestShopify(
   topic: string,
   key: string,
@@ -358,39 +451,20 @@ export async function ingestShopify(
           data: { status: "CANCELLED", error: "Order placed" },
         });
       }
-      if (!historical) {
-        const deliveryDate = deliveryDateFromTags(p.tags);
-        if (deliveryDate) {
-          const flow = await tx.marketingResource.findUnique({
-            where: {
-              shop_kind_key: {
-                shop: shop(),
-                kind: "FLOW",
-                key: "delivery-upsell",
-              },
-            },
-          });
-          if (flow?.enabled) {
-            const config = validateFlow("delivery-upsell", flow.data);
-            if (config.reviewed && config.delivery) {
-              await enroll(
-                tx,
-                "delivery-upsell",
-                profile.id,
-                String(p.id),
-                at,
-                {
-                  expectedDeliveryAt: deliveryUpsellDueAt(
-                    deliveryDate,
-                    config.delivery,
-                  ),
-                },
-              );
-            }
-          }
-        }
-      }
     }
+    if (
+      ["orders/create", "orders/updated"].includes(topic) &&
+      !historical &&
+      !p.test &&
+      p.id
+    )
+      await syncTaggedDeliveryUpsell(
+        tx,
+        profile.id,
+        String(p.id),
+        at,
+        p.tags,
+      );
     if (
       ["checkouts/create", "checkouts/update"].includes(topic) &&
       !historical &&
@@ -415,13 +489,12 @@ export async function ingestShopify(
       );
     }
     if (topic === "delivery/scheduled" && !historical && p.expected_delivery_at)
-      await enroll(
+      await syncDeliveryUpsellAt(
         tx,
-        "delivery-upsell",
         profile.id,
         String(p.order_id || p.id),
         at,
-        { expectedDeliveryAt: date(p.expected_delivery_at) },
+        date(p.expected_delivery_at),
       );
     return { profileId: profile.id };
   });

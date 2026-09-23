@@ -37,6 +37,7 @@ export async function POST(request: Request) {
         "customers_email_marketing_consent/update",
         "customers_marketing_consent/update",
         "orders/create",
+        "orders/updated",
         "checkouts/create",
         "checkouts/update",
       ];
