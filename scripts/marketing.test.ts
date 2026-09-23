@@ -581,6 +581,23 @@ test("B2B HTML copy is sanitized and preserves explicit HTTPS links", () => {
   assert.ok(html.includes('href="https://example.com/unsubscribe"'));
   assert.ok(html.includes("Jane"));
 });
+test("B2B welcome compacts rich-editor paragraphs without changing authored spacing", () => {
+  const html = render(
+    {
+      ...defaultContent,
+      template: "b2b-wholesale",
+      body: "Hi Friend!\n\nWelcome",
+      bodyHtml:
+        '<p>Welcome to wholesale.</p><p><br></p><p>- First benefit</p><p>- Second benefit</p><p style="margin:24px 0">Custom spacing</p>',
+    },
+    "https://example.com/unsubscribe",
+    "",
+  );
+  assert.match(html, /<p style="margin:0 0 10px;line-height:1\.45">- First benefit<\/p>/);
+  assert.match(html, /<p style="margin:0 0 10px;line-height:1\.45">- Second benefit<\/p>/);
+  assert.doesNotMatch(html, /<p><br><\/p>/);
+  assert.match(html, /<p style="margin:24px 0;?">Custom spacing<\/p>/);
+});
 test("B2B full-layout HTML does not duplicate the heading or greeting", () => {
   const c = content({
     ...defaultContent,

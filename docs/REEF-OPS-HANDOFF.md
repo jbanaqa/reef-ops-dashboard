@@ -1,5 +1,9 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### B2B welcome spacing — September 23, 2026
+
+The B2B Wholesale layout now gives plain rich-editor paragraphs a compact 10px bottom margin and 1.45 line height, removes empty spacer paragraphs, and tightens default lists. Explicitly styled paragraphs and full-layout custom HTML retain their authored spacing. The plain-text fallback is rendered as paragraphs using the same spacing. This brings the three wholesale-benefit lines and sign-off closer to the supplied Klaviyo reference without changing saved wording, the heading, greeting, CTA, or shared footer. A desktop render was visually reviewed; marketing tests cover compact defaults and preservation of explicit styles.
+
 ### Abandoned-cart email styling — September 23, 2026
 
 The Cart Recovery visual layout now follows the supplied Klaviyo first-email screenshot: a centered 400px, 500px-tall ocean-texture panel over white-to-aqua side gutters, 32px Georgia-style bold italic outlined copy, and a separate aqua band with a 234px white pill CTA. The background is a newly generated clean texture based on the screenshot, optimized as `public/cart-ocean-texture.jpg` (about 82 KB); it is not a recovered Klaviyo source asset. The live heading and message remain editable text. The shared Layout tab exposes the default-texture toggle, lettering size, band color, and button width; the Artwork tab's Hero upload overrides the texture. Mobile preview uses 28px text in a 450px-high panel, with no horizontal overflow at 320px. The shared renderer applies the same layout to previews, tests, and delivery. Existing saved cart content is preserved.

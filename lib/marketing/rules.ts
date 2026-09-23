@@ -1755,7 +1755,8 @@ export function render(
         : c.introText,
       profileName,
     );
-    const plainBody = e(lines.slice(2).join(String.fromCharCode(10)))
+    const plainBody = ("<p>" + e(lines.slice(2).join("\n")) + "</p>")
+      .replace(/\n{2,}/g, "</p><p>")
       .replace(/\n/g, "<br>")
       .replace(/50-80%/g, '<span style="color:#f05a28">50-80%</span>')
       .replace(
@@ -1766,6 +1767,14 @@ export function render(
       c.bodyHtml !== undefined
         ? personalize(c.bodyHtml, profileName, true)
         : plainBody;
+    // The rich editor saves paragraphs for each line. Default browser margins
+    // make the three wholesale benefits look like unrelated sections in email.
+    // Keep explicitly styled paragraphs untouched while tightening plain ones.
+    const compactBodyHtml = bodyHtml
+      .replace(/<p>\s*(?:<br\s*\/?\s*>|&nbsp;)?\s*<\/p>/gi, "")
+      .replace(/<p>/gi, '<p style="margin:0 0 10px;line-height:1.45">')
+      .replace(/<ul>/gi, '<ul style="margin:8px 0 12px;padding-left:26px">')
+      .replace(/<ol>/gi, '<ol style="margin:8px 0 12px;padding-left:26px">');
     const customBody =
       !!c.bodyHtml?.trim() &&
       (/<h1\b/i.test(c.bodyHtml) ||
@@ -1805,8 +1814,8 @@ export function render(
               e(greeting) +
               "</p>"
             : "") +
-          '<div style="font-size:13px;line-height:1.55">' +
-          bodyHtml +
+          '<div style="font-size:13px;line-height:1.45">' +
+          compactBodyHtml +
           "</div>") +
       productHtml(c) +
       '</td></tr><tr><td style="padding:0 15px 8px;text-align:center"><a style="display:block;background:#ee984e;color:white;text-decoration:none;padding:13px 18px;font-weight:bold;font-size:16px" href="' +
