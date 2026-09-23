@@ -400,6 +400,16 @@ test("delivery notice exposes its personalized heading and every message sentenc
       .textContent || "",
     /first_name/,
   );
+  testing.fireEvent.click(view.getByRole("button", { name: "Footer" }));
+  assert.equal(
+    (view.getByLabelText("Social heading") as HTMLInputElement).value,
+    "Follow Us",
+  );
+  assert.equal(
+    (view.getByLabelText("Unsubscribe introduction") as HTMLTextAreaElement)
+      .value,
+    "No longer want to receive these emails?",
+  );
 });
 
 test("one editor can change a flow's visual layout without changing its template", async () => {

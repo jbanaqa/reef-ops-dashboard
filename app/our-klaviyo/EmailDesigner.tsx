@@ -362,16 +362,18 @@ export default function EmailDesigner({
                     ) : (
                       <p>Your heading is included in the message below.</p>
                     )}
-                    {(content.template === "b2b-wholesale" ||
-                      visualLayout === "b2b-wholesale") && (
+                    {!includesHeading &&
+                      (content.template === "b2b-wholesale" ||
+                        visualLayout === "b2b-wholesale") && (
                       <label>
                         Intro line
                         <input
                           aria-label="Intro line"
                           value={
-                            content.introText ??
-                            content.body.split("\n")[0] ??
-                            ""
+                            content.introText !== undefined
+                              ? content.introText
+                              : content.body.split("\n")[0] ||
+                                defaultGeneratedEmailCopy.b2bIntro
                           }
                           onChange={(event) =>
                             changeContent("introText", event.target.value)
@@ -832,6 +834,25 @@ export default function EmailDesigner({
                   </small>
                 </label>
                 <label>
+                  Social heading
+                  <input
+                    aria-label="Social heading"
+                    maxLength={100}
+                    value={
+                      content.footerSocialHeading ??
+                      (visualLayout === "campaign-sale"
+                        ? ""
+                        : defaultGeneratedEmailCopy.footerSocialHeading)
+                    }
+                    onChange={(event) =>
+                      changeContent("footerSocialHeading", event.target.value)
+                    }
+                  />
+                  <small>
+                    Appears above footer social icons. Leave blank to hide it.
+                  </small>
+                </label>
+                <label>
                   Unsubscribe introduction
                   <textarea
                     aria-label="Unsubscribe introduction"
@@ -839,9 +860,7 @@ export default function EmailDesigner({
                     maxLength={300}
                     value={
                       content.footerUnsubscribeText ??
-                      (content.template === "b2b-wholesale"
-                        ? "No longer want to receive these emails?"
-                        : "")
+                      defaultGeneratedEmailCopy.unsubscribeIntro
                     }
                     onChange={(e) =>
                       changeContent("footerUnsubscribeText", e.target.value)
@@ -869,7 +888,12 @@ export default function EmailDesigner({
                   <input
                     type="url"
                     placeholder="https://instagram.com/your-account"
-                    value={content.instagramUrl ?? ""}
+                    value={
+                      content.instagramUrl ??
+                      (visualLayout === "welcome-social"
+                        ? defaultGeneratedEmailCopy.instagramUrl
+                        : "")
+                    }
                     onChange={(e) =>
                       changeContent("instagramUrl", e.target.value || undefined)
                     }
@@ -887,7 +911,12 @@ export default function EmailDesigner({
                   <input
                     type="url"
                     placeholder="https://facebook.com/your-page"
-                    value={content.facebookUrl ?? ""}
+                    value={
+                      content.facebookUrl ??
+                      (visualLayout === "welcome-social"
+                        ? defaultGeneratedEmailCopy.facebookUrl
+                        : "")
+                    }
                     onChange={(e) =>
                       changeContent("facebookUrl", e.target.value || undefined)
                     }

@@ -934,6 +934,96 @@ test("generated welcome, coupon, social, and unsubscribe copy is editable", () =
   ])
     assert.match(social, new RegExp(expected));
 });
+test("rendered layouts do not reintroduce hidden or duplicated customer copy", () => {
+  const unsubscribe = "https://example.com/unsubscribe";
+  const organization = "Reef Operations";
+  const shared = {
+    footerSocialHeading: "Connect with Reef Operations",
+    footerUnsubscribeText: "Custom preference introduction",
+    instagramUrl: "https://www.instagram.com/coralsanonymous/",
+  };
+  const layouts = [
+    content({ ...defaultContent, ...shared, template: "standard" }),
+    content({
+      ...defaultContent,
+      ...shared,
+      template: "b2b-wholesale",
+      introText: "Custom introduction",
+    }),
+    content({ ...defaultContent, ...shared, template: "cart-recovery" }),
+    content({ ...welcomeSteps[0].content, ...shared }),
+    content({ ...welcomeSteps[3].content, ...shared }),
+    content({
+      ...defaultCampaignContent,
+      ...shared,
+      footerSocialHeading: "Campaign connections",
+    }),
+  ];
+  for (const item of layouts) {
+    const html = render(
+      item,
+      unsubscribe,
+      "123 Valid Street",
+      "Jaden Banawa",
+      organization,
+    );
+    assert.match(html, /Custom preference introduction/);
+    assert.doesNotMatch(html, /No longer want to receive these emails\?/);
+  }
+  for (const item of layouts.slice(0, 5))
+    assert.match(
+      render(item, unsubscribe, "", undefined, organization),
+      /Connect with Reef Operations/,
+    );
+  assert.match(
+    render(layouts[5], unsubscribe, "", undefined, organization),
+    /Campaign connections/,
+  );
+  const standard = render(layouts[0], unsubscribe, "", undefined, organization);
+  assert.match(standard, />REEF OPERATIONS<\/td>/);
+  assert.doesNotMatch(standard, />CORALS ANONYMOUS<\/td>/);
+
+  const blank = content({
+    ...welcomeSteps[0].content,
+    button: "",
+    welcomeHeroGreeting: "",
+    welcomeHeroText: "",
+    footerSocialHeading: "",
+    footerUnsubscribeText: "",
+  });
+  const blankHtml = render(blank, unsubscribe, "", "Jaden Banawa");
+  assert.equal(blank.button, "");
+  assert.doesNotMatch(blankHtml, /Thank you for subscribing|Save 10% off|Follow Us|No longer want/);
+
+  const cart = render(
+    content({
+      ...defaultContent,
+      template: "cart-recovery",
+      products: [
+        { title: "One visible coral title", url: "https://example.com/coral" },
+      ],
+    }),
+    unsubscribe,
+    "",
+  );
+  assert.equal((cart.match(/One visible coral title/g) || []).length, 1);
+
+  const campaign = structuredClone(defaultCampaignContent);
+  const productSection = campaign.campaignLayout!.sections.find(
+    (section) => section.type === "products",
+  );
+  if (!productSection || productSection.type !== "products")
+    throw new Error("Expected campaign product grid");
+  productSection.products = [
+    {
+      id: "single-title",
+      title: "One campaign coral title",
+      url: "https://example.com/campaign-coral",
+    },
+  ];
+  const campaignHtml = render(content(campaign), unsubscribe, "");
+  assert.equal((campaignHtml.match(/One campaign coral title/g) || []).length, 1);
+});
 test("cleared footer copy keeps the unsubscribe link and mailing address", () => {
   const html = render(
     content({

@@ -179,6 +179,7 @@ export type Content = {
   footerTitle?: string;
   showPostalAddress?: boolean;
   footerText?: string;
+  footerSocialHeading?: string;
   footerUnsubscribeText?: string;
   footerUnsubscribeLinkText?: string;
   showFooterCopyright?: boolean;
@@ -521,7 +522,7 @@ function cartProductHtml(c: Content) {
               '" width="240" alt="' +
               escapeHtml(p.title) +
               '" style="display:block;width:100%;max-width:240px;height:auto;margin:0 auto 9px;background:#f1f4f4">'
-            : '<div style="width:100%;height:150px;background:#f1f4f4;margin:0 auto 9px;color:#7b8789;font-size:12px;line-height:150px">' + escapeHtml(p.title) + "</div>") +
+            : '<div style="width:100%;height:150px;background:#f1f4f4;margin:0 auto 9px">&nbsp;</div>') +
           '<strong style="display:block;font-family:Georgia,serif;font-size:16px;line-height:1.25;text-decoration:underline">' +
           escapeHtml(p.title) +
           "</strong>" +
@@ -574,7 +575,7 @@ export function content(value: unknown): Content {
           ? safeUrl(rawLayout.heroLink).slice(0, 500)
           : undefined,
         navigation: (rawLayout.navigation || []).slice(0, 5).map((item) => ({
-          label: String(item.label || "Link").slice(0, 80),
+          label: String(item.label ?? "Link").slice(0, 80),
           url: safeUrl(item.url).slice(0, 500),
         })),
         sections: (rawLayout.sections || []).slice(0, 20).map((section, index) => {
@@ -582,7 +583,7 @@ export function content(value: unknown): Content {
             return {
               id: String(section.id || `banner-${index}`).slice(0, 100),
               type: "banner" as const,
-              text: String(section.text || "Promotional banner").slice(0, 200),
+              text: String(section.text ?? "Promotional banner").slice(0, 200),
               accent: String(section.accent || "").slice(0, 80) || undefined,
               url: safeUrl(section.url).slice(0, 500),
               backgroundColor: color(section.backgroundColor, "#ffffff"),
@@ -596,7 +597,7 @@ export function content(value: unknown): Content {
             return {
               id: String(section.id || `cta-${index}`).slice(0, 100),
               type: "cta" as const,
-              label: String(section.label || "Shop now").slice(0, 100),
+              label: String(section.label ?? "Shop now").slice(0, 100),
               url: safeUrl(section.url).slice(0, 500),
               backgroundColor: color(section.backgroundColor, "#3c8429"),
               textColor: color(section.textColor, "#ffffff"),
@@ -608,12 +609,12 @@ export function content(value: unknown): Content {
             feed: campaignProductFeed(section.feed),
             products: (section.products || []).slice(0, 40).map((product, productIndex) => ({
               id: String(product.id || `product-${index}-${productIndex}`).slice(0, 100),
-              title: String(product.title || "Product name").slice(0, 200),
+              title: String(product.title ?? "Product name").slice(0, 200),
               url: safeUrl(product.url).slice(0, 500),
               image: product.image ? safeUrl(product.image).slice(0, 500) : undefined,
               salePrice: String(product.salePrice || "").slice(0, 80),
               compareAtPrice: String(product.compareAtPrice || "").slice(0, 80),
-              button: String(product.button || "Shop now").slice(0, 80),
+              button: String(product.button ?? "Shop now").slice(0, 80),
               showSalePrice: product.showSalePrice !== false,
               showCompareAtPrice: product.showCompareAtPrice !== false,
               showButton: product.showButton !== false,
@@ -657,7 +658,7 @@ export function content(value: unknown): Content {
       c.introText === undefined
         ? undefined
         : String(c.introText).slice(0, 300),
-    button: String(c.button || "Shop now").slice(0, 80),
+    button: String(c.button ?? "Shop now").slice(0, 80),
     url: safeUrl(c.url),
     hero: c.hero ? imageSource(c.hero) : undefined,
     preview: String(c.preview || "").slice(0, 200),
@@ -690,6 +691,10 @@ export function content(value: unknown): Content {
       c.footerText === undefined
         ? undefined
         : String(c.footerText).slice(0, 2000),
+    footerSocialHeading:
+      c.footerSocialHeading === undefined
+        ? undefined
+        : String(c.footerSocialHeading).slice(0, 100),
     footerUnsubscribeText:
       c.footerUnsubscribeText === undefined
         ? undefined
@@ -830,9 +835,15 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
 }
 function socialHtml(c: Content) {
   if (!c.instagramUrl && !c.facebookUrl) return "";
+  const heading =
+    c.footerSocialHeading ?? defaultGeneratedEmailCopy.footerSocialHeading;
   return (
     '<div style="margin:24px 0 14px;text-align:center">' +
-    '<strong style="display:block;margin-bottom:12px;color:#122f35;font-size:18px">Follow Us</strong>' +
+    (heading
+      ? '<strong style="display:block;margin-bottom:12px;color:#122f35;font-size:18px">' +
+        escapeHtml(heading) +
+        "</strong>"
+      : "") +
     (c.instagramUrl
       ? '<a href="' +
         escapeHtml(c.instagramUrl) +
@@ -919,7 +930,10 @@ export function footerTitle(c: Content) {
 export const defaultFooterCopyright =
   "© {{ year }} {{ organization }} | All rights reserved.";
 export const defaultGeneratedEmailCopy = {
+  unsubscribeIntro: "No longer want to receive these emails?",
   unsubscribeLink: "Unsubscribe",
+  footerSocialHeading: "Follow Us",
+  b2bIntro: 'Hi {{ first_name|default:"Friend" }}!',
   welcomeCouponLabel: "Discount Code:",
   welcomeCouponLabelAbove: "10% OFF Your Entire Order:",
   welcomeCouponTerms: "One use. Cannot combine with other discounts.",
@@ -939,6 +953,8 @@ export const defaultGeneratedEmailCopy = {
   facebookHeading: "FACEBOOK",
   facebookHandle: "@coralsanonymousshop",
   facebookText: "CORAL SALES, PROMO CODES AND MORE!",
+  instagramUrl: "https://www.instagram.com/coralsanonymous/",
+  facebookUrl: "https://www.facebook.com/coralsanonymousshop/",
 } as const;
 export function footerCopyright(
   c: Content,
@@ -1077,7 +1093,7 @@ function campaignSaleHtml(
             ? ' <span style="color:' + e(style.textColor) + ';font-size:13px;text-decoration:line-through">' + e(product.compareAtPrice) + "</span>"
             : "";
           const button = product.showButton !== false
-            ? '<div style="margin-top:13px"><a href="' + e(product.url) + '" style="display:inline-block;background:' + e(style.buttonBackground) + ";color:" + e(style.buttonTextColor) + ";border-radius:" + style.buttonRadius + 'px;padding:10px 14px;font-size:16px;font-weight:bold;text-decoration:none">' + e(product.button || "Shop now") + "</a></div>"
+            ? '<div style="margin-top:13px"><a href="' + e(product.url) + '" style="display:inline-block;background:' + e(style.buttonBackground) + ";color:" + e(style.buttonTextColor) + ";border-radius:" + style.buttonRadius + 'px;padding:10px 14px;font-size:16px;font-weight:bold;text-decoration:none">' + e(product.button ?? "Shop now") + "</a></div>"
             : "";
           return (
             '<td class="reef-campaign-product" valign="top" width="50%" style="width:50%;padding:' +
@@ -1093,7 +1109,7 @@ function campaignSaleHtml(
             ';text-decoration:none">' +
             (product.image
               ? '<img src="' + e(product.image) + '" alt="' + e(product.title) + '" width="' + imageWidth + '" style="display:block;width:' + imageWidth + 'px;max-width:100%;height:auto;margin:' + imageMargin + '">'
-              : '<div style="height:' + imageWidth + 'px;background:#f1f3f3;color:#777;line-height:' + imageWidth + 'px;text-align:center">' + e(product.title) + "</div>") +
+              : '<div style="height:' + imageWidth + 'px;background:#f1f3f3;line-height:' + imageWidth + 'px">&nbsp;</div>') +
             '<strong style="display:block;font-size:' +
             style.titleSize +
             'px;line-height:1.2">' +
@@ -1181,6 +1197,11 @@ function campaignSaleHtml(
     (footerTitle(c)
       ? '<h2 style="margin:0 0 14px;color:#fff;font-size:18px">' + e(footerTitle(c)) + "</h2>"
       : "") +
+    (c.footerSocialHeading
+      ? '<strong style="display:block;margin:0 0 12px;color:#fff;font-size:18px">' +
+        e(c.footerSocialHeading) +
+        "</strong>"
+      : "") +
     (c.facebookUrl || c.instagramUrl
       ? '<p style="margin:0 0 14px;font-size:25px">' +
         (c.facebookUrl
@@ -1200,7 +1221,7 @@ function campaignSaleHtml(
         "</p>"
       : "") +
     '<p style="margin:12px 0">' + e(c.footerText || "") .replace(/\n/g, "<br>") + "</p><p>" +
-    e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
+    e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
     ' <a href="' + e(unsubscribe) + '" style="color:#fff">' +
     e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
     "</a></p><p>" + e(organizationName) + (address ? "<br>" + e(address) : "") + "</p>" +
@@ -1246,10 +1267,8 @@ export function render(
       bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", displayExpiry),
     };
     const social = layout === "welcome-social";
-    const instagram =
-      c.instagramUrl || "https://www.instagram.com/coralsanonymous/";
-    const facebook =
-      c.facebookUrl || "https://www.facebook.com/coralsanonymousshop/";
+    const instagram = c.instagramUrl || defaultGeneratedEmailCopy.instagramUrl;
+    const facebook = c.facebookUrl || defaultGeneratedEmailCopy.facebookUrl;
     const body =
       c.bodyHtml !== undefined
         ? personalize(c.bodyHtml, profileName, true)
@@ -1257,7 +1276,7 @@ export function render(
     const expiry = c.couponExpiresAt
       ? '<p style="font-size:12px;color:#555">' +
         e(
-          (c.couponExpiryText || defaultGeneratedEmailCopy.couponExpiry)
+          (c.couponExpiryText ?? defaultGeneratedEmailCopy.couponExpiry)
             .replace("{{ coupon_expires }}", displayExpiry),
         ) +
         (c.couponTerms === ""
@@ -1270,7 +1289,7 @@ export function render(
       c.couponCode && !social
         ? '<div style="text-align:center;padding:16px 0 28px"><h2 style="font-size:23px;margin:0 0 18px">' +
           e(
-            c.couponLabel ||
+            c.couponLabel ??
               (c.offerAboveBody
                 ? defaultGeneratedEmailCopy.welcomeCouponLabelAbove
                 : defaultGeneratedEmailCopy.welcomeCouponLabel),
@@ -1291,14 +1310,14 @@ export function render(
         ? '<div style="background:#8bd8e2;padding:44px 22px;text-align:center;border:1px solid #459ca4"><p style="font-size:25px;margin:0;color:#172e32;font-weight:bold">' +
           e(
             personalize(
-              c.welcomeHeroGreeting ||
+              c.welcomeHeroGreeting ??
                 defaultGeneratedEmailCopy.welcomeHeroGreeting,
               profileName,
             ),
           ) +
           '</p><p style="font-size:29px;line-height:1.25;font-weight:bold;margin:18px 0">' +
           e(
-            c.welcomeHeroText ||
+            c.welcomeHeroText ??
               (c.offerAboveBody
                 ? defaultGeneratedEmailCopy.welcomeHeroAbove
                 : defaultGeneratedEmailCopy.welcomeHeroBelow),
@@ -1317,7 +1336,7 @@ export function render(
       '" style="display:block;background:' +
       color +
       ';padding:28px 12px;color:white;text-decoration:none;text-align:center"><span style="font-size:12px;font-weight:bold">' +
-      e(c.socialFollowText || defaultGeneratedEmailCopy.socialFollow) +
+      e(c.socialFollowText ?? defaultGeneratedEmailCopy.socialFollow) +
       '</span><h2 style="font-size:23px;margin:12px 0">' +
       e(label) +
       '</h2><span style="font-size:12px">' +
@@ -1358,16 +1377,16 @@ export function render(
         ? '<table role="presentation" width="100%" style="table-layout:fixed;margin-top:24px"><tr>' +
           socialCard(
             instagram,
-            c.instagramHeading || defaultGeneratedEmailCopy.instagramHeading,
-            c.instagramHandle || defaultGeneratedEmailCopy.instagramHandle,
-            c.instagramText || defaultGeneratedEmailCopy.instagramText,
+            c.instagramHeading ?? defaultGeneratedEmailCopy.instagramHeading,
+            c.instagramHandle ?? defaultGeneratedEmailCopy.instagramHandle,
+            c.instagramText ?? defaultGeneratedEmailCopy.instagramText,
             "#c95379",
           ) +
           socialCard(
             facebook,
-            c.facebookHeading || defaultGeneratedEmailCopy.facebookHeading,
-            c.facebookHandle || defaultGeneratedEmailCopy.facebookHandle,
-            c.facebookText || defaultGeneratedEmailCopy.facebookText,
+            c.facebookHeading ?? defaultGeneratedEmailCopy.facebookHeading,
+            c.facebookHandle ?? defaultGeneratedEmailCopy.facebookHandle,
+            c.facebookText ?? defaultGeneratedEmailCopy.facebookText,
             "#606aff",
           ) +
           "</tr></table>"
@@ -1393,7 +1412,7 @@ export function render(
         ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
         : "") +
       "<p>" +
-      e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
+      e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
       ' <a href="' +
       e(unsubscribe) +
       '" style="color:#555">' +
@@ -1410,7 +1429,7 @@ export function render(
   }
   if (c.couponCode && layout !== "cart-recovery") {
     const line =
-      (c.couponLabel || defaultGeneratedEmailCopy.genericCouponLabel) +
+      (c.couponLabel ?? defaultGeneratedEmailCopy.genericCouponLabel) +
       " " +
       c.couponCode;
     c = {
@@ -1461,11 +1480,11 @@ export function render(
       "</div>" +
       (c.couponCode
         ? '<p style="font-size:14px;margin-top:30px">' +
-          e(c.couponLabel || defaultGeneratedEmailCopy.cartCouponLabel) +
+          e(c.couponLabel ?? defaultGeneratedEmailCopy.cartCouponLabel) +
           '</p><p style="font-weight:bold;font-size:22px;overflow-wrap:anywhere">' +
           e(c.couponCode) +
           '</p><p style="font-size:12px">' +
-          e(c.couponTerms || defaultGeneratedEmailCopy.cartCouponTerms) +
+          e(c.couponTerms ?? defaultGeneratedEmailCopy.cartCouponTerms) +
           "</p>"
         : "") +
       '<p style="margin:30px 0 8px"><a href="' +
@@ -1496,7 +1515,7 @@ export function render(
         ? "<p>" + e(footerCopyright(c, organizationName)) + "</p>"
         : "") +
       "<p>" +
-      e(c.footerUnsubscribeText || "No longer want to receive these emails?") +
+      e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
       ' <a style="color:#174f60" href="' +
       e(unsubscribe) +
       '">' +
@@ -1508,7 +1527,7 @@ export function render(
     const lines = c.body.split(String.fromCharCode(10));
     const greeting = personalize(
       c.introText === undefined
-        ? lines[0] || 'Hi {{ first_name|default:"Friend" }}!'
+        ? lines[0] || defaultGeneratedEmailCopy.b2bIntro
         : c.introText,
       profileName,
     );
@@ -1602,7 +1621,7 @@ export function render(
       '<p style="margin:18px 0 0;color:#9fb5d2;font-size:11px">' +
       e(organizationName) +
       '</p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
-      e(c.footerUnsubscribeText ?? "No longer want to receive these emails?") +
+      e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
       ' <a style="color:#ffd0a3" href="' +
       e(unsubscribe) +
       '">' +
@@ -1621,7 +1640,9 @@ export function render(
   return (
     "<!doctype html><html>" +
     emailHead +
-    '<body style="margin:0;background:#eef5f4;font-family:Arial,sans-serif;color:#123334"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:white"><tr><td style="padding:28px;text-align:center;background:#083b3b;color:white;font-size:25px;font-weight:bold">CORALS ANONYMOUS</td></tr><tr><td style="display:none">' +
+    '<body style="margin:0;background:#eef5f4;font-family:Arial,sans-serif;color:#123334"><table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed;background:white"><tr><td style="padding:28px;text-align:center;background:#083b3b;color:white;font-size:25px;font-weight:bold">' +
+    e(organizationName.toUpperCase()) +
+    '</td></tr><tr><td style="display:none">' +
     e(personalize(c.preview || "", profileName)) +
     "</td></tr>" +
     (c.hero
@@ -1657,7 +1678,7 @@ export function render(
       ? "<br>" + e(footerCopyright(c, organizationName))
       : "") +
     "<br>" +
-    e(c.footerUnsubscribeText ?? "") +
+    e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
     ' <a href="' +
     e(unsubscribe) +
     '">' +
