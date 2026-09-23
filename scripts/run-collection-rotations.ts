@@ -67,8 +67,10 @@ async function runScheduledRotations() {
       prisma,
       completedCount:
         existingScheduleRun.completedCount,
-      failedCount:
-        existingScheduleRun.failedCount,
+      // The recorded run already finished. Preserve its error counts in the
+      // rotation history, but do not fail every later cron tick in this same
+      // schedule window while correctly skipping a duplicate attempt.
+      failedCount: 0,
     };
   }
 
