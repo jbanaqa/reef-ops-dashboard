@@ -41,6 +41,8 @@ import {
   MarketingSettings,
   render,
   segment,
+  sharedEmailFooter,
+  withBranding,
 } from "@/lib/marketing/rules";
 import { resendProvider, setup } from "@/lib/marketing/delivery";
 import { processMarketingInbox, inboxUnresolved } from "@/lib/marketing/inbox";
@@ -62,14 +64,68 @@ async function loadMarketingSettings() {
   const row = await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
   });
-  return marketingSettings(
+  const settings = marketingSettings(
     row?.data,
     process.env.MARKETING_POSTAL_ADDRESS ||
       defaultMarketingSettings.postalAddress,
   );
+  if (settings.branding.footerConfigured) return settings;
+  const delivery = await prisma.marketingResource.findUnique({
+    where: {
+      shop_kind_key: {
+        shop: shop(),
+        kind: "FLOW",
+        key: "delivery-upsell",
+      },
+    },
+  });
+  const source =
+    (
+      delivery?.data as
+        | { steps?: { content?: unknown }[] }
+        | undefined
+    )?.steps?.[0]?.content || {
+      ...defaultContent,
+      template: "b2b-wholesale",
+      footerTitle: "Thank you for your business ❤️",
+      footerBackgroundColor: "#244b7b",
+      footerTextColor: "#ffffff",
+    };
+  const updated = marketingSettings({
+    ...settings,
+    branding: {
+      ...settings.branding,
+      ...sharedEmailFooter(
+        withBranding(content(source), settings.branding),
+      ),
+    },
+  });
+  await prisma.marketingResource.upsert({
+    where: {
+      shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" },
+    },
+    create: {
+      shop: shop(),
+      kind: "SETTINGS",
+      key: "global",
+      name: "Marketing settings",
+      data: json(updated),
+      enabled: true,
+    },
+    update: { data: json(updated), enabled: true },
+  });
+  return updated;
 }
-async function saveDiscoveredBranding(value: unknown) {
-  const discovered = extractEmailBranding(value);
+async function saveDiscoveredBranding(value: unknown, footerSource?: unknown) {
+  const extracted = extractEmailBranding(value);
+  const discovered = footerSource
+    ? { ...extracted, ...sharedEmailFooter(footerSource) }
+    : {
+        ...(extracted.logo ? { logo: extracted.logo } : {}),
+        ...(extracted.logoScale !== undefined
+          ? { logoScale: extracted.logoScale }
+          : {}),
+      };
   if (!Object.keys(discovered).length) return;
   const existing = await loadMarketingSettings();
   const updated = marketingSettings({
@@ -660,6 +716,10 @@ export async function POST(request: Request) {
         content(b.content),
         `campaign-test:${id}`,
       );
+      const testBranding = {
+        ...s.branding,
+        ...sharedEmailFooter(testContent),
+      };
       const providerId = await resendProvider.send({
         id,
         to,
@@ -668,7 +728,7 @@ export async function POST(request: Request) {
         content: testContent,
         address: s.postalAddress,
         organizationName: s.organizationName,
-        branding: s.branding,
+        branding: testBranding,
         internalPreview: true,
         unsubscribe: `${process.env.APP_BASE_URL}/api/marketing/unsubscribe?preview=1`,
       });
@@ -762,7 +822,7 @@ export async function POST(request: Request) {
         audience: json(parsed),
         ...campaignOptions(b),
       };
-      await saveDiscoveredBranding(data.content);
+      await saveDiscoveredBranding(data.content, b.brandingSource);
       if (b.id) {
         const result = await prisma.marketingCampaign.updateMany({
           where: { id: b.id, shop: shop(), status: "DRAFT" },
@@ -879,7 +939,7 @@ export async function POST(request: Request) {
           enabled: !!b.enabled,
         },
       });
-      await saveDiscoveredBranding(data);
+      await saveDiscoveredBranding(data, b.brandingSource);
       await atomic((tx) =>
         record(tx, {
           key: `staff:${crypto.randomUUID()}`,

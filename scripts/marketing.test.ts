@@ -38,6 +38,7 @@ import {
   render,
   safeUrl,
   segment,
+  sharedEmailFooter,
   textBody,
   withCoupon,
   personalize,
@@ -922,6 +923,50 @@ test("every email layout uses the universal editable footer background", () => {
       /background:#123456/,
     );
   }
+});
+test("one shared footer overrides every email layout consistently", () => {
+  const branding = sharedEmailFooter({
+    ...defaultContent,
+    template: "b2b-wholesale",
+    footerBackgroundColor: "#123456",
+    footerTextColor: "#fefefe",
+    footerTitle: "One footer everywhere",
+    footerText: "Shared customer support message",
+    footerSocialHeading: "Follow the reef",
+    footerUnsubscribeText: "Change your preferences?",
+    footerUnsubscribeLinkText: "Manage email",
+    footerCopyrightText: "© {{ year }} {{ organization }}",
+    showPostalAddress: true,
+    showFooterSocial: false,
+  });
+  const layouts = [
+    content({ ...defaultContent, template: "standard", footerTitle: "Old standard" }),
+    content({ ...defaultContent, template: "welcome", footerTitle: "Old welcome" }),
+    content({ ...defaultContent, template: "cart-recovery", footerTitle: "Old cart" }),
+    content({ ...defaultContent, template: "b2b-wholesale", footerTitle: "Old B2B" }),
+    content({
+      ...defaultCampaignContent,
+      footerTitle: "Old campaign",
+    }),
+  ];
+  const footers = layouts.map((layout) => {
+    const html = render(
+      layout,
+      "https://example.com/unsubscribe",
+      "123 Reef Lane",
+      undefined,
+      "Corals Anonymous",
+      branding,
+    );
+    const footer = html.match(
+      /<tr><td class="reef-email-footer"[\s\S]*?<\/td><\/tr>/,
+    )?.[0];
+    assert.ok(footer);
+    assert.match(footer, /One footer everywhere/);
+    assert.doesNotMatch(footer, /Old standard|Old welcome|Old cart|Old B2B|Old campaign/);
+    return footer;
+  });
+  assert.equal(new Set(footers).size, 1);
 });
 test("social media can be hidden from every footer without deleting its settings", () => {
   const layouts = [

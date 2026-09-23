@@ -5,7 +5,9 @@ import {
   Content,
   content as normalizeContent,
   defaultContent,
+  editSharedEmailFooter,
   escapeHtml,
+  isSharedFooterContentKey,
   MarketingSettings,
   render,
   withBranding,
@@ -98,7 +100,11 @@ function FlowEditorState({
 }: {
   resource: Resource;
   busy: boolean;
-  save: (data: Data, enabled: boolean) => void | Promise<unknown>;
+  save: (
+    data: Data,
+    enabled: boolean,
+    brandingSource?: Content,
+  ) => void | Promise<unknown>;
   settings: MarketingSettings;
   testEmail?: (
     to: string,
@@ -119,6 +125,7 @@ function FlowEditorState({
   const [flow, setFlow] = useState<Data>(() =>
     JSON.parse(JSON.stringify(initial)),
   );
+  const [brandingDraft, setBrandingDraft] = useState(settings.branding);
   const [enabled, setEnabled] = useState(
     (resource.key === "abandoned-cart" && !resource.data.cart) ||
       (resource.key === "welcome" && !resource.data.welcome) ||
@@ -132,7 +139,11 @@ function FlowEditorState({
   }, [flow, enabled]);
   async function saveFlow() {
     const submitted = JSON.stringify({ flow, enabled });
-    const result = (await save(flow, enabled)) as Resource | undefined;
+    const result = (await save(
+      flow,
+      enabled,
+      content || undefined,
+    )) as Resource | undefined;
     if (result?.data && JSON.stringify(latest.current) === submitted) {
       setFlow(result.data as unknown as Data);
       setEnabled(result.enabled);
@@ -292,7 +303,7 @@ function FlowEditorState({
           ? flow.orderBranch?.[selected.target.branch]?.content
           : null;
   const content = rawContent
-    ? withBranding(rawContent, settings.branding)
+    ? withBranding(rawContent, brandingDraft)
     : rawContent;
   const step =
     selected?.target.kind === "step" || selected?.target.kind === "wait"
@@ -330,7 +341,7 @@ function FlowEditorState({
         settings.postalAddress,
         undefined,
         settings.organizationName,
-        settings.branding,
+        brandingDraft,
       );
   } catch (error) {
     previewError =
@@ -691,9 +702,13 @@ function FlowEditorState({
             busy={busy}
             status={draftStatus}
             onSubject={setSubject}
-            onContent={(key, value) =>
-              updateContent(selected.target, key, value)
-            }
+            onContent={(key, value) => {
+              if (isSharedFooterContentKey(key))
+                setBrandingDraft((current) =>
+                  editSharedEmailFooter(current, key, value),
+                );
+              else updateContent(selected.target, key, value);
+            }}
             onSave={saveFlow}
             onClose={() => setSelected(null)}
             onTest={

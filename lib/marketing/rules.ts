@@ -199,6 +199,7 @@ export type Content = {
   footerImage?: string;
   footerScale?: number;
   footerBackgroundColor?: string;
+  footerTextColor?: string;
   footerTitle?: string;
   showPostalAddress?: boolean;
   showFooterSocial?: boolean;
@@ -248,13 +249,65 @@ export type MarketingOperations = {
 export type EmailBranding = {
   logo?: string;
   logoScale?: number;
+  footerConfigured?: boolean;
   footerImage?: string;
   footerScale?: number;
+  footerBackgroundColor?: string;
+  footerTextColor?: string;
+  footerTitle?: string;
+  footerText?: string;
+  footerSocialHeading?: string;
+  footerUnsubscribeText?: string;
+  footerUnsubscribeLinkText?: string;
+  footerCopyrightText?: string;
+  showPostalAddress?: boolean;
+  showFooterSocial?: boolean;
+  showFooterCopyright?: boolean;
   instagramUrl?: string;
   facebookUrl?: string;
   instagramIcon?: string;
   facebookIcon?: string;
 };
+export const sharedFooterContentKeys = [
+  "footerImage",
+  "footerScale",
+  "footerBackgroundColor",
+  "footerTextColor",
+  "footerTitle",
+  "footerText",
+  "footerSocialHeading",
+  "footerUnsubscribeText",
+  "footerUnsubscribeLinkText",
+  "footerCopyrightText",
+  "showPostalAddress",
+  "showFooterSocial",
+  "showFooterCopyright",
+  "instagramUrl",
+  "facebookUrl",
+  "instagramIcon",
+  "facebookIcon",
+] as const satisfies readonly (keyof Content)[];
+export type SharedFooterContentKey =
+  (typeof sharedFooterContentKeys)[number];
+const sharedFooterContentKeySet = new Set<keyof Content>(
+  sharedFooterContentKeys,
+);
+export function isSharedFooterContentKey(
+  key: keyof Content,
+): key is SharedFooterContentKey {
+  return sharedFooterContentKeySet.has(key);
+}
+export function editSharedEmailFooter(
+  branding: EmailBranding,
+  key: SharedFooterContentKey,
+  value: Content[keyof Content],
+): EmailBranding {
+  return {
+    ...branding,
+    footerConfigured: true,
+    [key]: value,
+  } as EmailBranding;
+}
 export type MarketingSettings = {
   postalAddress: string;
   organizationName: string;
@@ -339,6 +392,9 @@ export function marketingSettings(
       ),
     },
     branding: {
+      ...(branding.footerConfigured === true
+        ? { footerConfigured: true }
+        : {}),
       ...(brandingImage(branding.logo)
         ? { logo: brandingImage(branding.logo) }
         : {}),
@@ -350,6 +406,67 @@ export function marketingSettings(
         : {}),
       ...(brandingScale(branding.footerScale)
         ? { footerScale: brandingScale(branding.footerScale) }
+        : {}),
+      ...(branding.footerBackgroundColor
+        ? {
+            footerBackgroundColor: /^#[0-9a-f]{6}$/i.test(
+              branding.footerBackgroundColor,
+            )
+              ? branding.footerBackgroundColor
+              : "#244b7b",
+          }
+        : {}),
+      ...(branding.footerTextColor
+        ? {
+            footerTextColor: /^#[0-9a-f]{6}$/i.test(branding.footerTextColor)
+              ? branding.footerTextColor
+              : "#ffffff",
+          }
+        : {}),
+      ...(branding.footerTitle !== undefined
+        ? { footerTitle: String(branding.footerTitle).slice(0, 200) }
+        : {}),
+      ...(branding.footerText !== undefined
+        ? { footerText: String(branding.footerText).slice(0, 2000) }
+        : {}),
+      ...(branding.footerSocialHeading !== undefined
+        ? {
+            footerSocialHeading: String(branding.footerSocialHeading).slice(
+              0,
+              100,
+            ),
+          }
+        : {}),
+      ...(branding.footerUnsubscribeText !== undefined
+        ? {
+            footerUnsubscribeText: String(
+              branding.footerUnsubscribeText,
+            ).slice(0, 300),
+          }
+        : {}),
+      ...(branding.footerUnsubscribeLinkText !== undefined
+        ? {
+            footerUnsubscribeLinkText: String(
+              branding.footerUnsubscribeLinkText,
+            ).slice(0, 100),
+          }
+        : {}),
+      ...(branding.footerCopyrightText !== undefined
+        ? {
+            footerCopyrightText: String(branding.footerCopyrightText).slice(
+              0,
+              300,
+            ),
+          }
+        : {}),
+      ...(typeof branding.showPostalAddress === "boolean"
+        ? { showPostalAddress: branding.showPostalAddress }
+        : {}),
+      ...(typeof branding.showFooterSocial === "boolean"
+        ? { showFooterSocial: branding.showFooterSocial }
+        : {}),
+      ...(typeof branding.showFooterCopyright === "boolean"
+        ? { showFooterCopyright: branding.showFooterCopyright }
         : {}),
       ...(branding.instagramUrl
         ? { instagramUrl: safeUrl(branding.instagramUrl).slice(0, 500) }
@@ -774,6 +891,10 @@ export function content(value: unknown): Content {
       c.footerBackgroundColor === undefined
         ? undefined
         : color(c.footerBackgroundColor, "#ffffff"),
+    footerTextColor:
+      c.footerTextColor === undefined
+        ? undefined
+        : color(c.footerTextColor, "#ffffff"),
     footerTitle:
       c.footerTitle === undefined
         ? undefined
@@ -875,6 +996,27 @@ export function content(value: unknown): Content {
 }
 export function withBranding(c: Content, branding?: EmailBranding): Content {
   if (!branding) return c;
+  const sharedFooter = branding.footerConfigured
+    ? {
+        footerImage: branding.footerImage,
+        footerScale: branding.footerScale,
+        footerBackgroundColor: branding.footerBackgroundColor,
+        footerTextColor: branding.footerTextColor,
+        footerTitle: branding.footerTitle,
+        footerText: branding.footerText,
+        footerSocialHeading: branding.footerSocialHeading,
+        footerUnsubscribeText: branding.footerUnsubscribeText,
+        footerUnsubscribeLinkText: branding.footerUnsubscribeLinkText,
+        footerCopyrightText: branding.footerCopyrightText,
+        showPostalAddress: branding.showPostalAddress,
+        showFooterSocial: branding.showFooterSocial,
+        showFooterCopyright: branding.showFooterCopyright,
+        instagramUrl: branding.instagramUrl,
+        facebookUrl: branding.facebookUrl,
+        instagramIcon: branding.instagramIcon,
+        facebookIcon: branding.facebookIcon,
+      }
+    : {};
   return {
     ...c,
     ...(c.logo === undefined && branding.logo ? { logo: branding.logo } : {}),
@@ -899,6 +1041,7 @@ export function withBranding(c: Content, branding?: EmailBranding): Content {
     ...(c.facebookIcon === undefined && branding.facebookIcon
       ? { facebookIcon: branding.facebookIcon }
       : {}),
+    ...sharedFooter,
   };
 }
 export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
@@ -911,6 +1054,26 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
     if (typeof v.footerImage === "string" && v.footerImage)
       found.footerImage = v.footerImage;
     if (typeof v.footerScale === "number") found.footerScale = v.footerScale;
+    if (typeof v.footerBackgroundColor === "string")
+      found.footerBackgroundColor = v.footerBackgroundColor;
+    if (typeof v.footerTextColor === "string")
+      found.footerTextColor = v.footerTextColor;
+    if (typeof v.footerTitle === "string") found.footerTitle = v.footerTitle;
+    if (typeof v.footerText === "string") found.footerText = v.footerText;
+    if (typeof v.footerSocialHeading === "string")
+      found.footerSocialHeading = v.footerSocialHeading;
+    if (typeof v.footerUnsubscribeText === "string")
+      found.footerUnsubscribeText = v.footerUnsubscribeText;
+    if (typeof v.footerUnsubscribeLinkText === "string")
+      found.footerUnsubscribeLinkText = v.footerUnsubscribeLinkText;
+    if (typeof v.footerCopyrightText === "string")
+      found.footerCopyrightText = v.footerCopyrightText;
+    if (typeof v.showPostalAddress === "boolean")
+      found.showPostalAddress = v.showPostalAddress;
+    if (typeof v.showFooterSocial === "boolean")
+      found.showFooterSocial = v.showFooterSocial;
+    if (typeof v.showFooterCopyright === "boolean")
+      found.showFooterCopyright = v.showFooterCopyright;
     if (typeof v.instagramUrl === "string" && v.instagramUrl)
       found.instagramUrl = v.instagramUrl;
     if (typeof v.facebookUrl === "string" && v.facebookUrl)
@@ -926,38 +1089,26 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
   visit(value);
   return found;
 }
-function socialHtml(c: Content) {
-  if (c.showFooterSocial === false || (!c.instagramUrl && !c.facebookUrl))
-    return "";
-  const heading =
-    c.footerSocialHeading ?? defaultGeneratedEmailCopy.footerSocialHeading;
-  return (
-    '<div style="margin:24px 0 14px;text-align:center">' +
-    (heading
-      ? '<strong style="display:block;margin-bottom:12px;color:#122f35;font-size:18px">' +
-        escapeHtml(heading) +
-        "</strong>"
-      : "") +
-    (c.instagramUrl
-      ? '<a href="' +
-        escapeHtml(c.instagramUrl) +
-        '" style="display:inline-block;margin:0 9px;color:#122f35;font-size:24px;font-weight:bold;text-decoration:none;vertical-align:middle" aria-label="Instagram">' +
-        (c.instagramIcon
-          ? '<img src="' + escapeHtml(c.instagramIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
-          : "◎") +
-        "</a>"
-      : "") +
-    (c.facebookUrl
-      ? '<a href="' +
-        escapeHtml(c.facebookUrl) +
-        '" style="display:inline-block;margin:0 9px;color:#122f35;font-family:Arial,sans-serif;font-size:24px;font-weight:bold;text-decoration:none;vertical-align:middle" aria-label="Facebook">' +
-        (c.facebookIcon
-          ? '<img src="' + escapeHtml(c.facebookIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
-          : "f") +
-        "</a>"
-      : "") +
-    "</div>"
-  );
+export function sharedEmailFooter(value: unknown): EmailBranding {
+  const c = content(value);
+  return {
+    ...extractEmailBranding(c),
+    footerConfigured: true,
+    footerBackgroundColor: footerBackgroundColor(c),
+    footerTextColor: c.footerTextColor || "#ffffff",
+    footerTitle: footerTitle(c),
+    footerText: c.footerText ?? "",
+    footerSocialHeading:
+      c.footerSocialHeading ?? defaultGeneratedEmailCopy.footerSocialHeading,
+    footerUnsubscribeText:
+      c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro,
+    footerUnsubscribeLinkText:
+      c.footerUnsubscribeLinkText ?? defaultGeneratedEmailCopy.unsubscribeLink,
+    footerCopyrightText: c.footerCopyrightText ?? defaultFooterCopyright,
+    showPostalAddress: c.showPostalAddress === true,
+    showFooterSocial: c.showFooterSocial !== false,
+    showFooterCopyright: c.showFooterCopyright !== false,
+  };
 }
 export function segment(value: unknown): Segment {
   const s = (value || {}) as Segment;
@@ -1068,6 +1219,72 @@ export function footerCopyright(
   return (c.footerCopyrightText ?? defaultFooterCopyright)
     .replaceAll("{{ year }}", String(now.getFullYear()))
     .replaceAll("{{ organization }}", organizationName);
+}
+function universalFooterHtml(
+  c: Content,
+  unsubscribe: string,
+  address: string,
+  organizationName: string,
+) {
+  const e = escapeHtml;
+  const textColor = c.footerTextColor || "#ffffff";
+  const social =
+    c.showFooterSocial !== false && (c.facebookUrl || c.instagramUrl)
+      ? ((c.footerSocialHeading ??
+          defaultGeneratedEmailCopy.footerSocialHeading)
+          ? '<strong style="display:block;margin:18px 0 12px;font-size:18px">' +
+            e(
+              c.footerSocialHeading ??
+                defaultGeneratedEmailCopy.footerSocialHeading,
+            ) +
+            "</strong>"
+          : "") +
+        '<p style="margin:0 0 14px;font-size:25px">' +
+        (c.facebookUrl
+          ? '<a href="' + e(c.facebookUrl) + '" aria-label="Facebook" style="display:inline-block;color:' + e(textColor) + ';text-decoration:none;margin:0 12px;vertical-align:middle">' +
+            (c.facebookIcon
+              ? '<img src="' + e(c.facebookIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
+              : "f") +
+            "</a>"
+          : "") +
+        (c.instagramUrl
+          ? '<a href="' + e(c.instagramUrl) + '" aria-label="Instagram" style="display:inline-block;color:' + e(textColor) + ';text-decoration:none;margin:0 12px;vertical-align:middle">' +
+            (c.instagramIcon
+              ? '<img src="' + e(c.instagramIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
+              : "◎") +
+            "</a>"
+          : "") +
+        "</p>"
+      : "";
+  return (
+    '<tr><td class="reef-email-footer" style="padding:24px;background:' +
+    e(footerBackgroundColor(c)) +
+    ";color:" +
+    e(textColor) +
+    ';text-align:center;font-size:12px;line-height:1.6">' +
+    (c.footerImage
+      ? '<img src="' + e(c.footerImage) + '" alt="" width="' + Math.round(560 * (c.footerScale || 1)) + '" style="display:block;width:' + Math.round(560 * (c.footerScale || 1)) + 'px;max-width:100%;height:auto;margin:0 auto 14px">'
+      : "") +
+    (footerTitle(c)
+      ? '<h2 style="margin:0 0 14px;color:' + e(textColor) + ';font-size:18px">' + e(footerTitle(c)) + "</h2>"
+      : "") +
+    (c.footerText
+      ? '<p style="margin:12px 0">' + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
+      : "") +
+    social +
+    "<p>" +
+    e(organizationName) +
+    (address ? "<br>" + e(address) : "") +
+    "</p>" +
+    (footerCopyright(c, organizationName)
+      ? '<p style="margin:12px 0">' + e(footerCopyright(c, organizationName)) + "</p>"
+      : "") +
+    "<p>" +
+    e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
+    ' <a href="' + e(unsubscribe) + '" style="color:' + e(textColor) + ';text-decoration:underline">' +
+    e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
+    "</a></p></td></tr>"
+  );
 }
 const emailHead =
   '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:12px 10px!important}.reef-campaign-nav td{display:block!important;width:100%!important;padding:5px 10px!important}.reef-campaign-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-cart-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-product-card img{max-width:100%!important;height:auto!important}}</style></head>';
@@ -1244,47 +1461,8 @@ function campaignSaleHtml(
       ? '<img src="' + e(c.logo) + '" alt="' + e(organizationName) + '" width="' + Math.round(360 * (c.logoScale || 1)) + '" style="display:block;width:' + Math.round(360 * (c.logoScale || 1)) + 'px;max-width:100%;height:auto;margin:auto">'
       : '<strong style="font-size:27px;font-style:italic">' + e(organizationName.toUpperCase()) + "</strong>") +
     "</td></tr><tr><td style=\"padding:0 20px 8px\">" + nav + "</td></tr>" + hero + dynamicMessage + sections +
-    '<tr><td style="padding:24px;background:' +
-    e(footerBackgroundColor(c)) +
-    ';color:#fff;text-align:center;font-size:12px;line-height:1.6">' +
-    (c.footerImage
-      ? '<img src="' + e(c.footerImage) + '" alt="" width="' + Math.round(560 * (c.footerScale || 1)) + '" style="display:block;max-width:100%;height:auto;margin:0 auto 14px">'
-      : "") +
-    (footerTitle(c)
-      ? '<h2 style="margin:0 0 14px;color:#fff;font-size:18px">' + e(footerTitle(c)) + "</h2>"
-      : "") +
-    (c.showFooterSocial !== false && c.footerSocialHeading
-      ? '<strong style="display:block;margin:0 0 12px;color:#fff;font-size:18px">' +
-        e(c.footerSocialHeading) +
-        "</strong>"
-      : "") +
-    (c.showFooterSocial !== false && (c.facebookUrl || c.instagramUrl)
-      ? '<p style="margin:0 0 14px;font-size:25px">' +
-        (c.facebookUrl
-          ? '<a href="' + e(c.facebookUrl) + '" aria-label="Facebook" style="display:inline-block;color:#fff;text-decoration:none;margin:0 12px;vertical-align:middle">' +
-            (c.facebookIcon
-              ? '<img src="' + e(c.facebookIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
-              : "f") +
-            "</a>"
-          : "") +
-        (c.instagramUrl
-          ? '<a href="' + e(c.instagramUrl) + '" aria-label="Instagram" style="display:inline-block;color:#fff;text-decoration:none;margin:0 12px;vertical-align:middle">' +
-            (c.instagramIcon
-              ? '<img src="' + e(c.instagramIcon) + '" alt="" width="32" style="display:block;width:32px;max-width:32px;height:auto;border:0">'
-              : "◎") +
-            "</a>"
-          : "") +
-        "</p>"
-      : "") +
-    '<p style="margin:12px 0">' + e(c.footerText || "") .replace(/\n/g, "<br>") + "</p><p>" +
-    e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
-    ' <a href="' + e(unsubscribe) + '" style="color:#fff">' +
-    e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
-    "</a></p><p>" + e(organizationName) + (address ? "<br>" + e(address) : "") + "</p>" +
-    (footerCopyright(c, organizationName)
-      ? '<p style="margin:12px 0 0">' + e(footerCopyright(c, organizationName)) + "</p>"
-      : "") +
-    "</td></tr></table></td></tr></table></body></html>"
+    universalFooterHtml(c, unsubscribe, address, organizationName) +
+    "</table></td></tr></table></body></html>"
   );
 }
 
@@ -1452,37 +1630,14 @@ export function render(
       e(c.url) +
       '" style="display:block;border-radius:4px;background:#e69a49;padding:12px 16px;color:white;font-size:17px;font-weight:bold;text-decoration:none">' +
       e(c.button) +
-      '</a></p></td></tr><tr><td style="background:' +
-      e(footerBackgroundColor(c)) +
-      ';padding:28px 20px;text-align:center;font-size:11px;line-height:1.6">' +
-      (c.footerImage
-        ? '<img src="' +
-          e(c.footerImage) +
-          '" alt="" width="' +
-          Math.round(560 * (c.footerScale || 1)) +
-          '" style="max-width:100%;height:auto">'
-        : "") +
-      (c.footerTitle
-        ? '<h2 style="font-size:18px">' + e(c.footerTitle) + "</h2>"
-        : "") +
-      socialHtml({ ...c, instagramUrl: instagram, facebookUrl: facebook }) +
-      (c.footerText
-        ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
-        : "") +
-      "<p>" +
-      e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
-      ' <a href="' +
-      e(unsubscribe) +
-      '" style="color:#555">' +
-      e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
-      "</a></p><p>" +
-      e(organizationName) +
-      (address ? "<br>" + e(address) : "") +
-      "</p>" +
-      (footerCopyright(c, organizationName)
-        ? "<p>" + e(footerCopyright(c, organizationName)) + "</p>"
-        : "") +
-      "</td></tr></table></td></tr></table></body></html>"
+      "</a></p></td></tr>" +
+      universalFooterHtml(
+        { ...c, instagramUrl: instagram, facebookUrl: facebook },
+        unsubscribe,
+        address,
+        organizationName,
+      ) +
+      "</table></td></tr></table></body></html>"
     );
   }
   if (c.couponCode && layout !== "cart-recovery") {
@@ -1551,36 +1706,9 @@ export function render(
       e(c.button) +
       '</a></p></td></tr></table></td></tr><tr><td style="padding:8px 28px 24px;background:white;text-align:center">' +
       cartProductHtml(c) +
-      '</td></tr><tr><td style="padding:26px;background:' +
-      e(footerBackgroundColor(c)) +
-      ';text-align:center;color:#254c53;font-size:12px;line-height:1.6">' +
-      (c.footerImage
-        ? '<img src="' +
-          e(c.footerImage) +
-          '" alt="" width="' +
-          Math.round(560 * (c.footerScale || 1)) +
-          '" style="max-width:100%;height:auto">'
-        : "") +
-      (c.footerTitle ? "<h2>" + e(c.footerTitle) + "</h2>" : "") +
-      (c.footerText
-        ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
-        : "") +
-      socialHtml(c) +
-      "<p>" +
-      e(organizationName) +
-      "<br>" +
-      e(address) +
-      "</p>" +
-      (footerCopyright(c, organizationName)
-        ? "<p>" + e(footerCopyright(c, organizationName)) + "</p>"
-        : "") +
-      "<p>" +
-      e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
-      ' <a style="color:#174f60" href="' +
-      e(unsubscribe) +
-      '">' +
-      e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
-      "</a></p></td></tr></table></td></tr></table></body></html>"
+      "</td></tr>" +
+      universalFooterHtml(c, unsubscribe, address, organizationName) +
+      "</table></td></tr></table></body></html>"
     );
   }
   if (layout === "b2b-wholesale") {
@@ -1613,13 +1741,6 @@ export function render(
         Number(c.logoScale ?? (c.logoWidth ? c.logoWidth / 260 : 1)) || 1,
       ),
     );
-    const footerScale = Math.min(
-      2.5,
-      Math.max(
-        0.25,
-        Number(c.footerScale ?? (c.footerWidth ? c.footerWidth / 560 : 1)) || 1,
-      ),
-    );
     const logo = c.logo
       ? '<img src="' +
         e(c.logo) +
@@ -1629,24 +1750,6 @@ export function render(
       : '<strong style="font-size:24px;font-style:italic;color:#102d33">' +
         e(organizationName.toUpperCase()) +
         "</strong>";
-    const footer = c.footerImage
-      ? '<img src="' +
-        e(c.footerImage) +
-        '" alt="Thank you for your business" style="display:block;margin:0 auto;max-width:100%;width:' +
-        String(Math.round(560 * footerScale)) +
-        'px;height:auto;object-fit:contain">'
-      : "";
-    const footerCopy =
-      (footerTitle(c)
-        ? '<div style="margin-top:12px;font-size:29px;font-style:italic;font-weight:bold;color:white">' +
-          e(footerTitle(c)) +
-          "</div>"
-        : "") +
-      (c.footerText
-        ? '<p style="margin:16px 0;color:white;font-size:14px;line-height:1.6">' +
-          e(c.footerText).replace(/\n/g, "<br>") +
-          "</p>"
-        : "");
     return (
       "<!doctype html><html>" +
       emailHead +
@@ -1674,29 +1777,9 @@ export function render(
       e(c.url) +
       '">' +
       e(c.button) +
-      '</a></td></tr><tr><td style="padding:12px 18px 30px;background:' +
-      e(footerBackgroundColor(c)) +
-      ';text-align:center">' +
-      footer +
-      footerCopy +
-      socialHtml(c) +
-      '<p style="margin:18px 0 0;color:#9fb5d2;font-size:11px">' +
-      e(organizationName) +
-      '</p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
-      e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
-      ' <a style="color:#ffd0a3" href="' +
-      e(unsubscribe) +
-      '">' +
-      e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
-      '</a></p><p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
-      (address ? e(address) : "") +
-      "</p>" +
-      (footerCopyright(c, organizationName)
-        ? '<p style="margin:5px 0 0;color:#d7e3f2;font-size:12px">' +
-          e(footerCopyright(c, organizationName)) +
-          "</p>"
-        : "") +
-      "</td></tr></table></td></tr></table></body></html>"
+      "</a></td></tr>" +
+      universalFooterHtml(c, unsubscribe, address, organizationName) +
+      "</table></td></tr></table></body></html>"
     );
   }
   return (
@@ -1727,27 +1810,9 @@ export function render(
     e(c.url) +
     '">' +
     e(c.button) +
-    '</a></p></td></tr><tr><td style="padding:24px;background:' +
-    e(footerBackgroundColor(c)) +
-    ';font-size:12px;text-align:center">' +
-    (footerTitle(c) ? "<strong>" + e(footerTitle(c)) + "</strong><br>" : "") +
-    (c.footerText
-      ? "<p>" + e(c.footerText).replace(/\n/g, "<br>") + "</p>"
-      : "") +
-    socialHtml(c) +
-    e(organizationName) +
-    "<br>" +
-    e(address) +
-    (footerCopyright(c, organizationName)
-      ? "<br>" + e(footerCopyright(c, organizationName))
-      : "") +
-    "<br>" +
-    e(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro) +
-    ' <a href="' +
-    e(unsubscribe) +
-    '">' +
-    e(c.footerUnsubscribeLinkText || defaultGeneratedEmailCopy.unsubscribeLink) +
-    "</a></td></tr></table></td></tr></table></body></html>"
+    "</a></p></td></tr>" +
+    universalFooterHtml(c, unsubscribe, address, organizationName) +
+    "</table></td></tr></table></body></html>"
   );
 }
 export const defaultContent: Content = {

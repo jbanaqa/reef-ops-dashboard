@@ -7,6 +7,7 @@ import EmailPreview from "../app/our-klaviyo/EmailPreview";
 import { JSDOM } from "jsdom";
 import { readFile } from "node:fs/promises";
 import {
+  type Content,
   defaultCampaignContent,
   defaultContent,
   defaultMarketingSettings,
@@ -293,12 +294,13 @@ test("preview expands to the document height and retains scrolling fallback", as
   assert.equal(frame.style.width, "375px");
 });
 
-test("footer fields save with the email while sender details remain visible", async () => {
+test("footer fields save as shared branding while sender details remain visible", async () => {
   const testing = await import("@testing-library/react");
   cleanup = testing.cleanup;
   const r = resource("b2b-welcome", "Footer test");
   Object.assign(r.data.steps[0].content, { template: "b2b-wholesale" });
   let saved: unknown;
+  let savedFooter: Content | undefined;
   const view = testing.render(
     <FlowEditor
       resource={r}
@@ -307,8 +309,9 @@ test("footer fields save with the email while sender details remain visible", as
         ...defaultMarketingSettings,
         postalAddress: "123 Valid Street",
       }}
-      save={async (data, enabled) => {
+      save={async (data, enabled, brandingSource) => {
         saved = data;
+        savedFooter = brandingSource;
         return { ...r, data, enabled };
       }}
     />,
@@ -353,28 +356,17 @@ test("footer fields save with the email while sender details remain visible", as
   await testing.waitFor(() =>
     assert.ok(view.getByText("Email saved", { exact: true })),
   );
-  const result = saved as {
-    steps: {
-      content: {
-        footerTitle: string;
-        footerText: string;
-        showPostalAddress: boolean;
-        showFooterSocial: boolean;
-        footerCopyrightText?: string;
-        instagramIcon?: string;
-      };
-    }[];
-  };
-  assert.equal(result.steps[0].content.showPostalAddress, true);
-  assert.equal(result.steps[0].content.showFooterSocial, false);
-  assert.equal(result.steps[0].content.footerTitle, "Thank you, partners");
+  assert.ok(saved);
+  assert.equal(savedFooter?.showPostalAddress, true);
+  assert.equal(savedFooter?.showFooterSocial, false);
+  assert.equal(savedFooter?.footerTitle, "Thank you, partners");
   assert.equal(
-    result.steps[0].content.footerCopyrightText,
+    savedFooter?.footerCopyrightText,
     "© {{ year }} Reef Team",
   );
-  assert.match(result.steps[0].content.instagramIcon || "", /^data:image\/png;base64,/);
+  assert.match(savedFooter?.instagramIcon || "", /^data:image\/png;base64,/);
   assert.equal(
-    result.steps[0].content.footerText,
+    savedFooter?.footerText,
     "Contact our wholesale team.",
   );
 });

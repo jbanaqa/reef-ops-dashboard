@@ -13,6 +13,9 @@ import "./settings.css";
 import "./audiences.css";
 import {
   Content,
+  editSharedEmailFooter,
+  EmailBranding,
+  isSharedFooterContentKey,
   render,
   defaultCampaignContent,
   defaultMarketingSettings,
@@ -228,6 +231,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   const [popupDelayDraft, setPopupDelayDraft] = useState<string | null>(null);
   const [resource, setResource] = useState<Resource | null>(null);
   const [previewingCampaign, setPreviewingCampaign] = useState<Campaign | null>(null);
+  const [brandingDraft, setBrandingDraft] = useState<EmailBranding | null>(null);
   const templates: Resource[] = data
     ? [
         ...flowEmailTemplates(data.resources),
@@ -318,7 +322,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
       : resource
         ? (resource.data as unknown as Content)
         : campaign.content,
-    data?.settings.branding,
+    brandingDraft || data?.settings.branding,
   );
   let emailHtml = "",
     emailPreviewError = "";
@@ -330,7 +334,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
         data?.settings.postalAddress || "",
         undefined,
         data?.settings.organizationName,
-        data?.settings.branding,
+        brandingDraft || data?.settings.branding,
       );
     } catch (e) {
       emailPreviewError =
@@ -374,17 +378,26 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           onSubject={(subject) => {
             if (!resource) setCampaign((c) => ({ ...c, subject }));
           }}
-          onContent={(key, value) =>
-            resource
-              ? setResource((r) =>
-                  r ? { ...r, data: { ...r.data, [key]: value } } : r,
-                )
-              : update(key, value)
-          }
+          onContent={(key, value) => {
+            if (isSharedFooterContentKey(key))
+              setBrandingDraft((current) =>
+                editSharedEmailFooter(
+                  current || data?.settings.branding || {},
+                  key,
+                  value,
+                ),
+              );
+            else if (resource)
+              setResource((r) =>
+                r ? { ...r, data: { ...r.data, [key]: value } } : r,
+              );
+            else update(key, value);
+          }}
           onClose={() => {
             setEditingEmail(false);
             setResource(null);
             setPreviewingCampaign(null);
+            setBrandingDraft(null);
           }}
           onSave={async () =>
             !!(await run(async () => {
@@ -394,6 +407,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                   kind: "TEMPLATE",
                   name: `${resource.name} copy`,
                   data: resource.data,
+                  brandingSource: editingContent,
                 });
                 setResource({
                   ...resource,
@@ -403,8 +417,19 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                   sourceFlow: undefined,
                 });
               } else if (resource)
-                await action({ action: "save-resource", ...resource });
-              else await save();
+                await action({
+                  action: "save-resource",
+                  ...resource,
+                  brandingSource: editingContent,
+                });
+              else {
+                const r = await action({
+                  action: "save-campaign",
+                  ...campaign,
+                  brandingSource: editingContent,
+                });
+                setCampaign((current) => ({ ...current, id: r.id }));
+              }
               return true;
             }, "Email saved"))
           }
@@ -1061,7 +1086,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                   "Flow test email sent",
                 )
               }
-              save={(resource, flow, enabled) =>
+              save={(resource, flow, enabled, brandingSource) =>
                 run(
                   async () =>
                     action({
@@ -1071,6 +1096,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       name: resource.name,
                       data: flow,
                       enabled,
+                      brandingSource,
                     }),
                   "Flow saved; already queued messages keep their reviewed content.",
                 )

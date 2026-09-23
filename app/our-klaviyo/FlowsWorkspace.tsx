@@ -106,6 +106,7 @@ export default function FlowsWorkspace({
     resource: FlowResource,
     data: Record<string, unknown>,
     enabled: boolean,
+    brandingSource?: Content,
   ) => Promise<FlowResource | undefined>;
   testEmail: (
     to: string,
@@ -193,8 +194,8 @@ export default function FlowsWorkspace({
               busy={busy}
               setup={setup}
               settings={settings}
-              save={async (data, enabled) => {
-                const result = await save(selected, data, enabled);
+              save={async (data, enabled, brandingSource) => {
+                const result = await save(selected, data, enabled, brandingSource);
                 if (result) setSelected(result);
                 return result;
               }}
@@ -206,11 +207,12 @@ export default function FlowsWorkspace({
               busy={busy}
               settings={settings}
               testEmail={testEmail}
-              save={async (data, enabled) => {
+              save={async (data, enabled, brandingSource) => {
                 const result = await save(
                   selected,
                   data as unknown as Record<string, unknown>,
                   enabled,
+                  brandingSource,
                 );
                 if (result) setSelected(result);
                 return result;

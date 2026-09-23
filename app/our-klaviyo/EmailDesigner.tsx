@@ -956,6 +956,17 @@ export default function EmailDesigner({
                     }
                   />
                 </label>
+                <label>
+                  Footer text color
+                  <input
+                    aria-label="Footer text color"
+                    type="color"
+                    value={content.footerTextColor || "#ffffff"}
+                    onChange={(event) =>
+                      changeContent("footerTextColor", event.target.value)
+                    }
+                  />
+                </label>
                 <button
                   type="button"
                   disabled={content.footerBackgroundColor === undefined}

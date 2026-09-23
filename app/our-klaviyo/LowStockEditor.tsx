@@ -3,7 +3,10 @@ import EmailDesigner from "./EmailDesigner";
 import {
   render,
   defaultContent,
+  editSharedEmailFooter,
+  isSharedFooterContentKey,
   withBranding,
+  type Content,
   type MarketingSettings,
 } from "@/lib/marketing/rules";
 import { useEffect, useRef, useState } from "react";
@@ -137,10 +140,12 @@ export default function LowStockEditor({
   save: (
     data: Record<string, unknown>,
     enabled: boolean,
+    brandingSource?: Content,
   ) => Promise<FlowResource | undefined>;
 }) {
   const [panel, setPanel] = useState<StockPanel | null>(null);
   const [draft, setDraft] = useState<Draft>(() => initial(resource));
+  const [brandingDraft, setBrandingDraft] = useState(settings.branding);
   const [ready, setReady] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -226,7 +231,7 @@ export default function LowStockEditor({
   try {
     emailContent = withBranding(
       stockMessageContent(s, "EMAIL", sample),
-      settings.branding,
+      brandingDraft,
     );
     emailHtml = render(
       emailContent,
@@ -234,7 +239,7 @@ export default function LowStockEditor({
       settings.postalAddress,
       undefined,
       settings.organizationName,
-      settings.branding,
+      brandingDraft,
     );
   } catch (e) {
     emailPreviewError = e instanceof Error ? e.message : "Preview unavailable";
@@ -250,6 +255,7 @@ export default function LowStockEditor({
       const result = await save(
         { ...resource.data, stock, reviewed: draft.reviewed },
         draft.enabled,
+        emailContent,
       );
       if (result && JSON.stringify(current.current) === submitted) {
         setDraft(initial(result));
@@ -731,13 +737,18 @@ export default function LowStockEditor({
           organizationName={settings.organizationName}
           postalAddress={settings.postalAddress}
           onSubject={(value) => set("emailSubject", value)}
-          onContent={(key, value) =>
-            set("emailContent", {
-              ...defaultContent,
-              ...s.emailContent,
-              [key]: value,
-            })
-          }
+          onContent={(key, value) => {
+            if (isSharedFooterContentKey(key))
+              setBrandingDraft((current) =>
+                editSharedEmailFooter(current, key, value),
+              );
+            else
+              set("emailContent", {
+                ...defaultContent,
+                ...s.emailContent,
+                [key]: value,
+              });
+          }}
           onSave={saveFlow}
           onClose={() => setPanel(null)}
           contentFields={
