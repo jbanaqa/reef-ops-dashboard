@@ -1,4 +1,4 @@
-import { defaultContent, type Content, email } from "./rules";
+import { campaignProductFeed, defaultContent, type Content, email } from "./rules";
 import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
 import type { FlowConfig } from "./flow-config";
 
@@ -15,6 +15,11 @@ export const welcomeLabels = [
   "First reminder",
   "Final reminder",
   "Follow us on social media",
+];
+export const welcomeSocialNavigation = [
+  { label: "🔥 New Corals", url: "https://coralsanonymous.com/collections/new-arrivals" },
+  { label: "🏷️ Deal Busters", url: "https://coralsanonymous.com/collections/deal-busters" },
+  { label: "✚ Earn Points & Save!", url: "https://coralsanonymous.com/pages/rewards" },
 ];
 export const defaultWelcome: WelcomeConfig = {
   version: 1,
@@ -79,6 +84,8 @@ export const welcomeSteps = [
       heading: "Follow us on Social Media!",
       body: "Join our reefing community for daily coral posts, sales, promo codes, and more!",
       button: "Discover new corals",
+      socialNavigation: welcomeSocialNavigation,
+      socialProductFeed: campaignProductFeed({ key: "newnew1", limit: 6 }),
     },
   },
 ];
@@ -164,6 +171,10 @@ export function upgradeWelcomeStep(c: Content, index: number): Content {
     if (next.welcomeVariant === undefined) next = { ...next, welcomeVariant: "final-reminder" };
     if (next.body === originalWelcomeFinalBody && next.bodyHtml === undefined)
       next = { ...next, body: finalWelcomeBody };
+  }
+  if (index === 3 && next.template === "welcome-social") {
+    if (!next.socialNavigation) next = { ...next, socialNavigation: welcomeSocialNavigation };
+    if (!next.socialProductFeed) next = { ...next, socialProductFeed: campaignProductFeed({ key: "newnew1", limit: 6 }) };
   }
   return next;
 }

@@ -5,6 +5,7 @@ import { content, couponTimeLeft, eligible, type Content } from "./rules";
 import { json, record, shop, type Tx } from "./store";
 import { uniqueDiscount, type SavedDiscount } from "./discounts";
 import { welcomeLabels, upgradeWelcomeStep } from "./welcome-config";
+import { resolveWelcomeSocialProducts } from "./campaign-product-feed";
 
 export type WelcomeRun = {
   profileId: string;
@@ -278,13 +279,13 @@ export async function prepareWelcome(
   const destination = discount
     ? `https://coralsanonymous.com/discount/${encodeURIComponent(discount.code)}?redirect=${encodeURIComponent(url.pathname + url.search)}`
     : c.url;
-  return content({
+  return content(await resolveWelcomeSocialProducts({
     ...c,
     url: destination,
     body: c.body.replaceAll("{{ coupon_expires }}", expires).replaceAll("{{ coupon_time_left }}", couponTimeLeft(discount?.endsAt)),
     bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", expires).replaceAll("{{ coupon_time_left }}", couponTimeLeft(discount?.endsAt)),
     couponCode: discount?.code,
     couponExpiresAt: discount?.endsAt,
-  });
+  }, profileId));
 }
 export { welcomeLabels };

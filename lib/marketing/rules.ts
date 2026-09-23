@@ -230,6 +230,8 @@ export type Content = {
   facebookHeading?: string;
   facebookHandle?: string;
   facebookText?: string;
+  socialProductFeed?: CampaignProductFeed;
+  socialNavigation?: { label: string; url: string }[];
   instagramUrl?: string;
   facebookUrl?: string;
   instagramIcon?: string;
@@ -1000,6 +1002,13 @@ export function content(value: unknown): Content {
       c.facebookText === undefined
         ? undefined
         : String(c.facebookText).slice(0, 300),
+    socialProductFeed: c.socialProductFeed
+      ? campaignProductFeed(c.socialProductFeed)
+      : undefined,
+    socialNavigation: c.socialNavigation?.slice(0, 5).map((link) => ({
+      label: String(link.label || "").slice(0, 80),
+      url: safeUrl(link.url),
+    })),
     instagramUrl: c.instagramUrl
       ? safeUrl(c.instagramUrl).slice(0, 500)
       : undefined,
@@ -1634,6 +1643,58 @@ export function render(
       '</span><p style="font-weight:bold;font-size:16px;line-height:1.4;margin-top:28px">' +
       e(copy) +
       "</p></a></td>";
+    if (social) {
+      const navigation = c.socialNavigation || [
+        { label: "🔥 New Corals", url: "https://coralsanonymous.com/collections/new-arrivals" },
+        { label: "🏷️ Deal Busters", url: "https://coralsanonymous.com/collections/deal-busters" },
+        { label: "✚ Earn Points & Save!", url: "https://coralsanonymous.com/pages/rewards" },
+      ];
+      const socialHead = emailHead.replace("</style></head>",
+        "@media only screen and (max-width:480px){.reef-outer{padding:0!important}.reef-social-card{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-social-card-pad{padding:8px 18px!important}.reef-social-product{display:block!important;width:100%!important;box-sizing:border-box!important;padding:14px!important}.reef-social-nav td{font-size:12px!important;padding:8px 2px!important}.reef-social-product img{max-width:100%!important}}</style></head>");
+      const socialPanel = (url: string, name: string, handle: string, message: string, backgroundColor: string, backgroundImage: string, icon: string) =>
+        '<td class="reef-social-card" width="50%" valign="top" style="width:50%;padding:0 10px"><a href="' + e(url) + '" style="display:block;height:270px;box-sizing:border-box;background-color:' + backgroundColor + ';background-image:' + backgroundImage + ';background-size:cover;color:#fff;text-decoration:none;text-align:center;font-family:Arial,sans-serif;font-weight:900;letter-spacing:.5px;padding:34px 12px 12px">' +
+        '<div style="font-size:17px;line-height:1.1">━━ ' + e(c.socialFollowText ?? defaultGeneratedEmailCopy.socialFollow) + ' ━━</div>' +
+        '<div style="font-size:29px;line-height:1.05;margin:5px 0">' + e(name) + '</div>' +
+        '<div style="font-size:15px;line-height:1.1">' + e(handle) + '</div>' +
+        '<img src="' + e(icon) + '" alt="" width="46" height="46" style="display:block;width:46px;height:46px;margin:9px auto 7px">' +
+        '<div style="font-size:21px;line-height:1;letter-spacing:0">' + e(message) + '</div></a></td>';
+      const socialProducts = (c.products?.length ? c.products :
+        c.socialProductFeed ? Array.from({ length: c.socialProductFeed.limit }, (_, index) => ({ title: "Product name", url: c.url, image: "", price: "$X.XX", compareAtPrice: "", placeholder: true, index })) : []);
+      const socialImageWidth = c.productGridStyle?.productImageWidth || 168;
+      const socialImageHeight = Math.round(socialImageWidth * 124 / 168);
+      const additionalCopy =
+        (c.heading !== "Follow us on Social Media!" ? '<h1 style="font-size:23px;text-align:center;margin:0 0 10px">' + e(personalize(c.heading, profileName)) + '</h1>' : '') +
+        (c.body !== "Join our reefing community for daily coral posts, sales, promo codes, and more!" ? '<p style="font-size:16px;line-height:1.4;text-align:center;margin:0">' + e(personalize(c.body, profileName)).replace(/\n/g, '<br>') + '</p>' : '');
+      const productRows: string[] = [];
+      for (let index = 0; index < socialProducts.length; index += 3) {
+        const cells = socialProducts.slice(index, index + 3).map((product) =>
+          '<td class="reef-social-product" width="33%" valign="top" style="width:33%;padding:10px 8px 18px;text-align:center;font-family:Arial,sans-serif;color:#080808">' +
+          '<a href="' + e(product.url) + '" style="color:#080808;text-decoration:none">' +
+          (product.image
+            ? '<img src="' + e(product.image) + '" alt="' + e(product.title) + '" width="' + socialImageWidth + '" height="' + socialImageHeight + '" style="display:block;width:' + socialImageWidth + 'px;height:' + socialImageHeight + 'px;object-fit:cover;margin:0 auto 6px">'
+            : '<img src="https://reef-ops-dashboard-production.up.railway.app/product-image-placeholder.png" alt="" width="' + socialImageWidth + '" height="' + socialImageHeight + '" style="display:block;width:' + socialImageWidth + 'px;height:' + socialImageHeight + 'px;margin:0 auto 6px">') +
+          '<strong style="display:block;font-size:15px;line-height:1.15">' + e(product.title) + '</strong></a>' +
+          '<div style="font-size:14px;margin:6px 0">' + e(product.price || "") +
+          (product.compareAtPrice ? ' <s style="font-size:12px">' + e(product.compareAtPrice) + '</s>' : '') + '</div>' +
+          (c.productGridStyle?.showButton === false ? '' : '<a href="' + e(product.url) + '" style="display:inline-block;background:' + e(c.productGridStyle?.buttonBackground || '#e69a49') + ';color:' + e(c.productGridStyle?.buttonTextColor || '#fff') + ';border-radius:4px;padding:11px 10px;font-size:15px;font-weight:bold;text-decoration:none">' + e(c.productGridStyle?.buttonLabel || 'Shop now') + '</a>') + '</td>');
+        while (cells.length < 3) cells.push('<td width="33%"></td>');
+        productRows.push('<tr>' + cells.join("") + '</tr>');
+      }
+      return '<!doctype html><html>' + socialHead +
+        '<body style="margin:0;background:#f7f7f7;font-family:Arial,sans-serif;color:#080808"><table role="presentation" width="100%"><tr><td class="reef-outer" align="center" style="padding:0"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:#fff"><tr><td style="display:none;font-size:1px;max-height:0;overflow:hidden">' + e(personalize(c.preview || "", profileName)) + '</td></tr>' +
+        (c.logo ? '<tr><td class="reef-logo" align="center" style="padding:12px 16px"><img src="' + e(c.logo) + '" alt="' + e(organizationName) + '" width="' + Math.round(420 * (c.logoScale || 1)) + '" style="display:block;max-width:100%;height:auto"></td></tr>' : '') +
+        '<tr><td style="padding:0 18px 27px"><table role="presentation" class="reef-social-nav" width="100%" style="table-layout:fixed"><tr>' +
+        navigation.map((link) => '<td width="' + Math.floor(100 / Math.max(1, navigation.length)) + '%" align="center" style="font-size:14px;font-weight:bold;padding:7px 2px"><a href="' + e(link.url) + '" style="color:#080808;text-decoration:none">' + e(link.label) + '</a></td>').join("") +
+        '</tr></table></td></tr><tr><td class="reef-social-card-pad" style="padding:0 10px 27px"><table role="presentation" width="100%" style="table-layout:fixed"><tr>' +
+        socialPanel(instagram, c.instagramHeading ?? defaultGeneratedEmailCopy.instagramHeading, c.instagramHandle ?? defaultGeneratedEmailCopy.instagramHandle, c.instagramText ?? defaultGeneratedEmailCopy.instagramText, '#c95379', 'url(https://reef-ops-dashboard-production.up.railway.app/instagram-card-gradient.png)', c.instagramIcon || 'https://reef-ops-dashboard-production.up.railway.app/instagram-white.png') +
+        socialPanel(facebook, c.facebookHeading ?? defaultGeneratedEmailCopy.facebookHeading, c.facebookHandle ?? defaultGeneratedEmailCopy.facebookHandle, c.facebookText ?? defaultGeneratedEmailCopy.facebookText, '#526bef', 'none', c.facebookIcon || 'https://reef-ops-dashboard-production.up.railway.app/facebook-white.png') +
+        '</tr></table></td></tr>' +
+        (additionalCopy ? '<tr><td style="padding:0 24px 24px">' + additionalCopy + '</td></tr>' : '') +
+        (productRows.length ? '<tr><td style="padding:0 18px"><div style="border-top:1px solid #c9c9c9;margin:5px 0 26px"></div><table role="presentation" width="100%" style="table-layout:fixed">' + productRows.join("") + '</table></td></tr>' : '') +
+        (c.button !== "Discover new corals" ? '<tr><td style="padding:8px 24px 26px;text-align:center"><a href="' + e(c.url) + '" style="display:inline-block;background:#e69a49;color:#fff;border-radius:4px;padding:11px 20px;font-weight:bold;text-decoration:none">' + e(c.button) + '</a></td></tr>' : '') +
+        universalFooterHtml({ ...c, instagramUrl: instagram, facebookUrl: facebook }, unsubscribe, address, organizationName) +
+        '</table></td></tr></table></body></html>';
+    }
     if (illustratedReminder) {
       const reminderBanner = c.hero || "https://reef-ops-dashboard-production.up.railway.app/welcome-reminder-banner.png";
       const reminderHead = emailHead.replace(

@@ -404,6 +404,33 @@ test("welcome templates render the assigned offer, shared branding, date, and so
   assert.match(social, /FACEBOOK/);
   assert.doesNotMatch(social, /Discount Code:/);
 });
+test("last Welcome email has editable social cards, navigation, and a three-column product grid", () => {
+  const products = Array.from({ length: 6 }, (_, index) => ({
+    title: `Reef product ${index + 1}`,
+    url: `https://coralsanonymous.com/products/reef-${index + 1}`,
+    image: `https://example.com/reef-${index + 1}.jpg`,
+    price: "$19.99",
+    compareAtPrice: "$29.99",
+  }));
+  const html = render({ ...welcomeSteps[3].content, products, instagramText: "My Instagram message" }, "#unsubscribe", "", undefined, "Corals Anonymous", {
+    logo: "https://example.com/logo.png",
+    footerConfigured: true,
+    footerBackgroundColor: "#244b7b",
+    footerTitle: "Thank you for your business ❤️",
+  });
+  assert.match(html, /Deal Busters/);
+  assert.match(html, /My Instagram message/);
+  assert.match(html, /instagram-white.png/);
+  assert.match(html, /facebook-white.png/);
+  assert.match(html, /reef-social-product/);
+  assert.match(html, /Reef product 6/);
+  assert.match(html, /background:#244b7b/);
+  assert.doesNotMatch(html, /Discover new corals<\/a>/);
+  const upgraded = upgradeWelcomeStep({ ...welcomeSteps[3].content, socialProductFeed: undefined, socialNavigation: undefined, instagramText: "Custom copy" }, 3);
+  assert.equal(upgraded.instagramText, "Custom copy");
+  assert.equal(upgraded.socialProductFeed?.limit, 6);
+  assert.equal(upgraded.socialNavigation?.length, 3);
+});
 test("first welcome illustration is optional and the shared blue footer stays intact", () => {
   const branding = {
     footerConfigured: true,

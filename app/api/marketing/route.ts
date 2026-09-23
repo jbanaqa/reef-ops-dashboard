@@ -56,7 +56,7 @@ import {
 } from "@/lib/marketing/message-test";
 import { validateFlow } from "@/lib/marketing/flow-config";
 import { shopifyGraphql } from "@/lib/shopify";
-import { resolveCampaignProductFeeds } from "@/lib/marketing/campaign-product-feed";
+import { resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -698,6 +698,10 @@ export async function POST(request: Request) {
           content(b.content),
           `campaign-preview:${crypto.randomUUID()}`,
         ),
+      });
+    if (b.action === "preview-welcome-social-feed")
+      return Response.json({
+        content: await resolveWelcomeSocialProducts(content(b.content), `welcome-social-preview:${crypto.randomUUID()}`),
       });
     if (b.action === "test-email") {
       const to = email(b.to);

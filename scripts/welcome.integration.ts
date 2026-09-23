@@ -65,6 +65,20 @@ export function registerWelcomeTests(
       const url = String(input);
       if (url.includes("/graphql.json")) {
         const b = JSON.parse(String(init?.body));
+        if (b.query.includes("MarketingCampaignProducts"))
+          return Response.json({ data: { products: {
+            nodes: Array.from({ length: 6 }, (_, index) => ({
+              id: `gid://shopify/Product/${index + 1}`,
+              title: `Welcome coral ${index + 1}`,
+              handle: `welcome-coral-${index + 1}`,
+              tags: [],
+              createdAt: new Date(start - index * DAY).toISOString(),
+              onlineStoreUrl: `https://coralsanonymous.com/products/welcome-coral-${index + 1}`,
+              featuredImage: { url: `https://example.com/coral-${index + 1}.jpg` },
+              variants: { nodes: [{ id: `gid://shopify/ProductVariant/${index + 1}`, availableForSale: true, price: "19.99", compareAtPrice: "29.99", image: null }] },
+            })),
+            pageInfo: { hasNextPage: false, endCursor: null },
+          } } });
         if (b.query.includes("WelcomePurchaseCheck")) {
           if (failOrders)
             return Response.json({

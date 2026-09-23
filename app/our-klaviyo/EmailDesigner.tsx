@@ -12,6 +12,9 @@ import {
   footerTitle,
   defaultFooterCopyright,
   defaultGeneratedEmailCopy,
+  campaignProductFeed,
+  campaignProductFeeds,
+  campaignProductFeedOrders,
 } from "@/lib/marketing/rules";
 import EmailPreview from "./EmailPreview";
 import RichEmailCopy from "./RichEmailCopy";
@@ -205,6 +208,9 @@ export default function EmailDesigner({
   const [work, setWork] = useState<"save" | "test" | null>(null);
   const working = work !== null;
   const [notice, setNotice] = useState("");
+  const [socialFeedLoading, setSocialFeedLoading] = useState(false);
+  const [socialFeedError, setSocialFeedError] = useState("");
+  const socialFeed = content.socialProductFeed || campaignProductFeed({ key: "newnew1", limit: 6 })!;
   useEffect(() => {
     const node = dialog.current;
     const previous = document.activeElement as HTMLElement | null;
@@ -239,6 +245,37 @@ export default function EmailDesigner({
     value: (typeof gridStyle)[keyof typeof gridStyle],
   ) {
     changeContent("productGridStyle", { ...gridStyle, [key]: value });
+  }
+  function changeSocialGrid(key: keyof typeof gridStyle, value: (typeof gridStyle)[keyof typeof gridStyle]) {
+    changeContent("productGridStyle", {
+      ...defaultProductGridStyle,
+      buttonBackground: "#e69a49",
+      buttonTextColor: "#ffffff",
+      productImageWidth: 168,
+      ...(content.productGridStyle || {}),
+      [key]: value,
+    });
+  }
+  async function previewSocialProducts() {
+    setSocialFeedLoading(true);
+    setSocialFeedError("");
+    try {
+      const response = await fetch("/api/marketing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "preview-welcome-social-feed", content: { ...content, socialProductFeed: socialFeed } }),
+      });
+      const raw = await response.text();
+      let result: { content?: Content; error?: string };
+      try { result = JSON.parse(raw) as typeof result; }
+      catch { throw new Error("The product preview did not finish. Please try again."); }
+      if (!response.ok || !result.content) throw new Error(result.error || "Could not load products.");
+      changeContent("products", result.content.products || []);
+    } catch (error) {
+      setSocialFeedError(error instanceof Error ? error.message : "Could not load products.");
+    } finally {
+      setSocialFeedLoading(false);
+    }
   }
   async function save() {
     if (!onSave) return;
@@ -766,6 +803,49 @@ export default function EmailDesigner({
                         Show illustrated welcome banner
                       </label>
                       <p>The banner message remains editable in Content → Automatic text. A Hero image in Artwork replaces the illustrated banner.</p>
+                    </div>
+                  </details>
+                )}
+                {visualLayout === "welcome-social" && (
+                  <details className="mk-editor-section mk-editor-disclosure">
+                    <summary><span>Social email layout</span><small>Navigation and product feed</small></summary>
+                    <div className="mk-editor-disclosure-body">
+                      <p>The cards use the editable wording in Content → Automatic text. The six-product grid uses a live Shopify feed when this email is prepared to send.</p>
+                      {(content.socialNavigation || [
+                        { label: "🔥 New Corals", url: "https://coralsanonymous.com/collections/new-arrivals" },
+                        { label: "🏷️ Deal Busters", url: "https://coralsanonymous.com/collections/deal-busters" },
+                        { label: "✚ Earn Points & Save!", url: "https://coralsanonymous.com/pages/rewards" },
+                      ]).map((link, index, links) => (
+                        <fieldset key={index}>
+                          <legend>Navigation link {index + 1}</legend>
+                          <label>Text<input value={link.label} onChange={(event) => changeContent("socialNavigation", links.map((item, at) => at === index ? { ...item, label: event.target.value } : item))} /></label>
+                          <label>Destination<input type="url" value={link.url} onChange={(event) => changeContent("socialNavigation", links.map((item, at) => at === index ? { ...item, url: event.target.value } : item))} /></label>
+                        </fieldset>
+                      ))}
+                      <label>Product selection
+                        <select value={socialFeed.key} onChange={(event) => { changeContent("socialProductFeed", campaignProductFeed({ key: event.target.value, order: socialFeed.order, limit: socialFeed.limit })); changeContent("products", []); }}>
+                          {campaignProductFeeds.map((feed) => <option key={feed.key} value={feed.key}>{feed.name}</option>)}
+                        </select>
+                      </label>
+                      <label>Product order
+                        <select value={socialFeed.order} onChange={(event) => { changeContent("socialProductFeed", campaignProductFeed({ key: socialFeed.key, order: event.target.value, limit: socialFeed.limit })); changeContent("products", []); }}>
+                          {campaignProductFeedOrders.map((order) => <option key={order.value} value={order.value}>{order.label}</option>)}
+                        </select>
+                      </label>
+                      <label>Products shown
+                        <input type="number" min="1" max="12" value={socialFeed.limit} onChange={(event) => { changeContent("socialProductFeed", campaignProductFeed({ key: socialFeed.key, order: socialFeed.order, limit: Number(event.target.value) })); changeContent("products", []); }} />
+                      </label>
+                      <label>Product image width <small>{content.productGridStyle?.productImageWidth || 168}px</small>
+                        <input type="range" min="80" max="180" step="4" value={content.productGridStyle?.productImageWidth || 168} onChange={(event) => changeSocialGrid("productImageWidth", Number(event.target.value))} />
+                      </label>
+                      <label>Product button text
+                        <input value={content.productGridStyle?.buttonLabel || "Shop now"} onChange={(event) => changeSocialGrid("buttonLabel", event.target.value)} />
+                      </label>
+                      <label>Product button color
+                        <input type="color" value={content.productGridStyle?.buttonBackground || "#e69a49"} onChange={(event) => changeSocialGrid("buttonBackground", event.target.value)} />
+                      </label>
+                      <button type="button" disabled={socialFeedLoading} onClick={previewSocialProducts}>{socialFeedLoading ? "Loading products…" : "Refresh product preview"}</button>
+                      {socialFeedError && <p role="alert">{socialFeedError}</p>}
                     </div>
                   </details>
                 )}

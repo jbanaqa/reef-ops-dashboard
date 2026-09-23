@@ -257,3 +257,36 @@ export async function resolveCampaignProductFeeds(
     },
   } satisfies Content;
 }
+
+/** Resolve the Welcome social grid with the same Shopify selection as campaign feeds. */
+export async function resolveWelcomeSocialProducts(source: Content, seed: string) {
+  const feed = source.socialProductFeed;
+  if (!feed) return source;
+  const resolved = await resolveCampaignProductFeeds({
+    ...source,
+    campaignLayout: {
+      navigation: [],
+      sections: [{ id: "welcome-social-products", type: "products", feed, products: [] }],
+      style: source.campaignLayout?.style || {
+        fontFamily: "Arial", emailBackground: "#fff", contentBackground: "#fff",
+        textColor: "#080808", salePriceColor: "#e84218", buttonBackground: "#e69a49",
+        buttonTextColor: "#fff", productAlignment: "center", productGap: 12,
+        sectionPadding: 12, productImageWidth: 168, buttonRadius: 4,
+        titleSize: 15, priceSize: 15,
+      },
+    },
+  }, seed);
+  const section = resolved.campaignLayout?.sections[0];
+  const products = section?.type === "products" ? section.products : [];
+  if (!products.length) throw new Error("Welcome social product feed returned no eligible products.");
+  return {
+    ...source,
+    products: products.map((product) => ({
+      title: product.title,
+      url: product.url,
+      image: product.image,
+      price: product.salePrice,
+      compareAtPrice: product.compareAtPrice,
+    })),
+  } satisfies Content;
+}
