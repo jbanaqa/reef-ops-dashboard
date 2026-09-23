@@ -348,7 +348,7 @@ test("footer fields save as shared branding while sender details remain visible"
   assert.ok(view.getByLabelText("Unsubscribe introduction"));
   assert.ok(view.getByText(/123 Valid Street/));
   const addressToggle = view.getByLabelText(
-    "Show business address in this email",
+    "Show business address in every email footer",
   ) as HTMLInputElement;
   assert.equal(addressToggle.checked, false);
   testing.fireEvent.click(addressToggle);

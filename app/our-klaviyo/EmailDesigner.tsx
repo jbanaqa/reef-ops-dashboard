@@ -1167,8 +1167,8 @@ export default function EmailDesigner({
                 )}
                 <small>
                   The logo, footer artwork, social links, and social icons saved
-                  here become shared defaults for future emails. The
-                  Unsubscribe link stays in every email.
+                  here are shared by every flow, campaign, template, and future
+                  email. The Unsubscribe link stays in every email.
                 </small>
                 <h3 style={{ marginTop: 24 }}>Sender details</h3>
                 <label
@@ -1182,7 +1182,7 @@ export default function EmailDesigner({
                       changeContent("showPostalAddress", e.target.checked)
                     }
                   />{" "}
-                  Show business address in this email
+                  Show business address in every email footer
                 </label>
                 {!content.showPostalAddress && (
                   <small>

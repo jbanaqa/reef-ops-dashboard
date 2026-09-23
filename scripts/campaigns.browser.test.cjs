@@ -241,7 +241,7 @@ const { chromium } = require("playwright");
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole("button", { name: "Desktop", exact: true }).click();
     await page.getByRole("button", { name: "Footer", exact: true }).click();
-    const toggle = page.getByLabel("Show business address in this email");
+    const toggle = page.getByLabel("Show business address in every email footer");
     assert.equal(await toggle.isChecked(), false);
     assert.ok(
       !(await page.getByTitle("Email preview").getAttribute("srcdoc")).includes(
@@ -275,7 +275,7 @@ const { chromium } = require("playwright");
     );
     await page.getByRole("button", { name: "Review and edit" }).click();
     await page.getByRole("button", { name: "Footer", exact: true }).click();
-    await page.getByLabel("Show business address in this email").check();
+    await page.getByLabel("Show business address in every email footer").check();
     await page.getByRole("button", { name: "Save email", exact: true }).click();
     await page.waitForFunction(() =>
       document.body.textContent.includes("Email saved"),
