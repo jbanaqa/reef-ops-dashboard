@@ -231,6 +231,19 @@
   border-radius: 10px;
   overflow-wrap: anywhere;
 }
+.aw-tags span button {
+  border: 0;
+  background: transparent;
+  color: var(--aw-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.aw-tags span button:hover,
+.aw-tags span button:focus-visible {
+  color: var(--text-main);
+}
 .aw-tags .aw-no-tag {
   border: 0;
   color: var(--aw-muted);

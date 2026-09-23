@@ -461,6 +461,58 @@ export function registerWelcomeTests(
         "cleanup preserves Welcome's one-entry record",
       );
 
+      const { enrollExistingWelcomeTest, removeProfileFromList } =
+        await import("../lib/marketing/profile-testing");
+      const existingAddress = "welcome-existing@example.com";
+      const existingProfile = await store.atomic(async (tx) => {
+        const p = await store.identify(tx, { email: existingAddress });
+        await store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "shopify", new Date());
+        return tx.marketingProfile.update({
+          where: { id: p.id },
+          data: { lists: ["Mailable Subscribers", "Newsletter"] },
+        });
+      });
+      await assert.rejects(
+        enrollExistingWelcomeTest(existingProfile.id),
+        /Set the Welcome test audience/,
+      );
+      await prisma.marketingResource.update({
+        where: flowWhere,
+        data: {
+          data: store.json({
+            ...config,
+            welcome: { ...defaultWelcome, testEmail: existingAddress },
+          }),
+        },
+      });
+      await enrollExistingWelcomeTest(existingProfile.id);
+      assert.equal(
+        await prisma.marketingMessage.count({
+          where: { profileId: existingProfile.id, flowKey: "welcome" },
+        }),
+        4,
+      );
+      await assert.rejects(
+        enrollExistingWelcomeTest(existingProfile.id),
+        /already entered Welcome/,
+      );
+      assert.deepEqual(
+        (await removeProfileFromList(existingProfile.id, "Newsletter")).lists,
+        ["Mailable Subscribers"],
+      );
+      assert.equal(
+        (await prisma.marketingConsent.findFirstOrThrow({
+          where: { profileId: existingProfile.id, channel: "EMAIL" },
+        })).status,
+        "SUBSCRIBED",
+        "list removal does not change email consent",
+      );
+      await assert.rejects(
+        enrollExistingWelcomeTest(existingProfile.id),
+        /already entered Welcome/,
+        "removing a list does not reset Welcome history",
+      );
+
       time(80);
       await prisma.marketingResource.update({
         where: flowWhere,

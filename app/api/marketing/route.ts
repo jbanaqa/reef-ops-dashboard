@@ -55,6 +55,7 @@ import {
   sendTestMessageNow,
 } from "@/lib/marketing/message-test";
 import { validateFlow } from "@/lib/marketing/flow-config";
+import { enrollExistingWelcomeTest, removeProfileFromList } from "@/lib/marketing/profile-testing";
 import { shopifyGraphql } from "@/lib/shopify";
 import { resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
 
@@ -588,6 +589,16 @@ export async function POST(request: Request) {
     if (raw.length > 12000000) throw new Error("Request too large.");
     const b = JSON.parse(raw);
     if (b.action === "check-stock") return Response.json(await lowStock());
+    if (b.action === "remove-profile-list") {
+      if (typeof b.profileId !== "string" || typeof b.list !== "string")
+        throw new Error("Choose a contact and one of their lists.");
+      return Response.json(await removeProfileFromList(b.profileId, b.list));
+    }
+    if (b.action === "enroll-existing-welcome-test") {
+      if (typeof b.profileId !== "string")
+        throw new Error("Choose a contact first.");
+      return Response.json(await enrollExistingWelcomeTest(b.profileId));
+    }
     if (b.action === "preview-stock") {
       const s = validateStock(b.stock);
       const snapshot = await readStock(s);

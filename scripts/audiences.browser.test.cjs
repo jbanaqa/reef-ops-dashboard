@@ -74,7 +74,7 @@ const { chromium } = require("playwright");
       email: i === 0 ? "jaden@example.com" : "customer" + i + "@example.com",
       phone: null,
       tags: i % 2 === 0 ? ["b2b", "shop", "repeat customer"] : [],
-      lists: [],
+      lists: i === 0 ? ["Mailable Subscribers", "Newsletter"] : [],
       createdAt: "2026-09-09T12:00:00Z",
       lastOpenedAt: null,
       lastOrderAt: null,
@@ -133,6 +133,15 @@ const { chromium } = require("playwright");
           blocks++;
           profiles.find((p) => p.id === body.id).consents[0].suppressed = true;
           return route.fulfill({ json: { ok: true } });
+        }
+        if (body.action === "remove-profile-list") {
+          const target = profiles.find((p) => p.id === body.profileId);
+          target.lists = target.lists.filter((list) => list !== body.list);
+          return route.fulfill({ json: { lists: target.lists } });
+        }
+        if (body.action === "enroll-existing-welcome-test") {
+          assert.equal(body.profileId, "0");
+          return route.fulfill({ json: { enrolled: true } });
         }
         throw Error("Unexpected write " + body.action);
       }
@@ -407,6 +416,14 @@ const { chromium } = require("playwright");
       ),
       "View Jaden Banawa",
     );
+    await page.getByRole("button", { name: "View Jaden Banawa", exact: true }).click();
+    await page.getByRole("button", { name: "Remove from Newsletter" }).click();
+    await page.getByText("Removed from “Newsletter” in Reef Ops.").waitFor();
+    await page.getByText("Newsletter", { exact: true }).waitFor({ state: "hidden" });
+    await page.getByText("Test Welcome with this contact").click();
+    await page.getByRole("button", { name: "Enroll in Welcome test" }).click();
+    await page.getByText("Welcome test enrollment created.").waitFor();
+    await page.keyboard.press("Escape");
     await page.getByLabel("Search contacts", { exact: true }).fill("Jaden");
     await page.getByText("1 matching contacts").waitFor();
     await page.getByLabel("Search contacts", { exact: true }).fill("Nobody");

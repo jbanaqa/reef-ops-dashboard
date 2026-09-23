@@ -301,6 +301,7 @@ function eventLabel(e: Activity) {
     EMAIL_SUBSCRIBED: "Joined Mailable Subscribers",
     CONSENT_RECONCILED: "Email subscription restored from verified consent history",
     WELCOME_ENTERED: "Entered the welcome series",
+    PROFILE_LIST_REMOVED: "Removed from a Reef Ops audience list",
     FORM_EMAIL_SUBMITTED: "Email signup submitted",
     "checkouts/create": "Checkout started",
     "checkouts/update": "Checkout updated",
@@ -373,6 +374,41 @@ function ContactPanel({
       setError(
         e instanceof Error ? e.message : "Could not update preferences.",
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeList(list: string) {
+    if (!window.confirm(`Remove ${contact?.email || "this contact"} from “${list}” in Reef Ops? This does not unsubscribe them or reset previous flow runs.`)) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await post({ action: "remove-profile-list", profileId: id, list });
+      setNoticeSuccess(true);
+      setNotice(`Removed from “${list}” in Reef Ops. Email consent is unchanged.`);
+      refresh();
+      changed();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove this list.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function enrollWelcomeTest() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await post({ action: "enroll-existing-welcome-test", profileId: id });
+      setNoticeSuccess(true);
+      setNotice("Welcome test enrollment created. Open Messages to see the scheduled steps.");
+      refresh();
+      changed();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create a Welcome test enrollment.");
     } finally {
       setBusy(false);
     }
@@ -652,12 +688,27 @@ function ContactPanel({
                     <h4 className="aw-field-label">Audience lists</h4>
                     <div className="aw-tags">
                       {contact.lists.map((t) => (
-                        <span key={t}>{t}</span>
+                        <span key={t}>
+                          {t}{" "}
+                          <button type="button" disabled={busy || loading} onClick={() => removeList(t)} aria-label={`Remove from ${t}`} title={`Remove from ${t}`}>
+                            ×
+                          </button>
+                        </span>
                       ))}
                     </div>
+                    <p>List changes here do not change Shopify or Klaviyo consent. A later sync may restore externally managed lists.</p>
                   </>
                 )}
               </section>
+              <details className="aw-manage">
+                <summary>Test Welcome with this contact</summary>
+                <p>
+                  For an existing subscriber who has never entered Welcome, set the Welcome flow’s test audience to this exact email, then enroll them here. This does not change their lists or reset an earlier Welcome run.
+                </p>
+                <button type="button" disabled={busy || loading || !contact.email} onClick={enrollWelcomeTest}>
+                  {busy ? "Working…" : "Enroll in Welcome test"}
+                </button>
+              </details>
               <section className="aw-detail-section">
                 <h3>At a glance</h3>
                 <dl className="aw-facts">
