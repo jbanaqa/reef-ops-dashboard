@@ -19,7 +19,7 @@ const navigation = [
   ] },
   { label: "Customer insights", items: [{ href: "/feedback", label: "Customer intelligence", icon: "intelligence" }] },
 ];
-const marketingSections = ["overview", "campaigns", "flows", "forms", "audiences", "templates", "analytics", "settings"];
+const marketingSections = ["campaigns", "flows", "forms", "audiences", "analytics", "settings"];
 const pageTitles: Record<string, string> = {
   "/": "Overview", "/receive-shipment": "Receive shipment", "/inventory-monitor": "Inventory monitor", "/restock-waitlist": "Restock alerts",
   "/reorder-planner": "Reorder planner", "/reorder-planner/upload": "Upload supplier inventory",
