@@ -179,6 +179,7 @@ export type Content = {
   footerBackgroundColor?: string;
   footerTitle?: string;
   showPostalAddress?: boolean;
+  showFooterSocial?: boolean;
   footerText?: string;
   footerSocialHeading?: string;
   footerUnsubscribeText?: string;
@@ -649,6 +650,7 @@ export function content(value: unknown): Content {
     : undefined;
   return {
     showPostalAddress: c.showPostalAddress === true,
+    showFooterSocial: c.showFooterSocial !== false,
     heading: c.heading.slice(0, 200),
     body: c.body,
     bodyHtml:
@@ -839,7 +841,8 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
   return found;
 }
 function socialHtml(c: Content) {
-  if (!c.instagramUrl && !c.facebookUrl) return "";
+  if (c.showFooterSocial === false || (!c.instagramUrl && !c.facebookUrl))
+    return "";
   const heading =
     c.footerSocialHeading ?? defaultGeneratedEmailCopy.footerSocialHeading;
   return (
@@ -1213,12 +1216,12 @@ function campaignSaleHtml(
     (footerTitle(c)
       ? '<h2 style="margin:0 0 14px;color:#fff;font-size:18px">' + e(footerTitle(c)) + "</h2>"
       : "") +
-    (c.footerSocialHeading
+    (c.showFooterSocial !== false && c.footerSocialHeading
       ? '<strong style="display:block;margin:0 0 12px;color:#fff;font-size:18px">' +
         e(c.footerSocialHeading) +
         "</strong>"
       : "") +
-    (c.facebookUrl || c.instagramUrl
+    (c.showFooterSocial !== false && (c.facebookUrl || c.instagramUrl)
       ? '<p style="margin:0 0 14px;font-size:25px">' +
         (c.facebookUrl
           ? '<a href="' + e(c.facebookUrl) + '" aria-label="Facebook" style="display:inline-block;color:#fff;text-decoration:none;margin:0 12px;vertical-align:middle">' +

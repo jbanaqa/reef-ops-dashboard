@@ -857,25 +857,46 @@ export default function EmailDesigner({
                     {"{{ organization }}"} for the sender name from Settings.
                   </small>
                 </label>
-                <label>
-                  Social heading
+                <label
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
                   <input
-                    aria-label="Social heading"
-                    maxLength={100}
-                    value={
-                      content.footerSocialHeading ??
-                      (visualLayout === "campaign-sale"
-                        ? ""
-                        : defaultGeneratedEmailCopy.footerSocialHeading)
-                    }
+                    style={{ width: "auto", margin: 0 }}
+                    type="checkbox"
+                    checked={content.showFooterSocial !== false}
                     onChange={(event) =>
-                      changeContent("footerSocialHeading", event.target.value)
+                      changeContent("showFooterSocial", event.target.checked)
                     }
-                  />
-                  <small>
-                    Appears above footer social icons. Leave blank to hide it.
-                  </small>
+                  />{" "}
+                  Show social media in footer
                 </label>
+                {content.showFooterSocial !== false && (
+                  <>
+                    <label>
+                      Social heading
+                      <input
+                        aria-label="Social heading"
+                        maxLength={100}
+                        value={
+                          content.footerSocialHeading ??
+                          (visualLayout === "campaign-sale"
+                            ? ""
+                            : defaultGeneratedEmailCopy.footerSocialHeading)
+                        }
+                        onChange={(event) =>
+                          changeContent(
+                            "footerSocialHeading",
+                            event.target.value,
+                          )
+                        }
+                      />
+                      <small>
+                        Appears above footer social icons. Leave blank to hide
+                        it.
+                      </small>
+                    </label>
+                  </>
+                )}
                 <label>
                   Unsubscribe introduction
                   <textarea
@@ -907,57 +928,71 @@ export default function EmailDesigner({
                     }
                   />
                 </label>
-                <label>
-                  Instagram link
-                  <input
-                    type="url"
-                    placeholder="https://instagram.com/your-account"
-                    value={
-                      content.instagramUrl ??
-                      (visualLayout === "welcome-social"
-                        ? defaultGeneratedEmailCopy.instagramUrl
-                        : "")
-                    }
-                    onChange={(e) =>
-                      changeContent("instagramUrl", e.target.value || undefined)
-                    }
-                  />
-                </label>
-                <Artwork
-                  label="Instagram icon"
-                  value={content.instagramIcon}
-                  scale={1}
-                  maxFileBytes={500_000}
-                  onChange={(value) => changeContent("instagramIcon", value)}
-                />
-                <label>
-                  Facebook link
-                  <input
-                    type="url"
-                    placeholder="https://facebook.com/your-page"
-                    value={
-                      content.facebookUrl ??
-                      (visualLayout === "welcome-social"
-                        ? defaultGeneratedEmailCopy.facebookUrl
-                        : "")
-                    }
-                    onChange={(e) =>
-                      changeContent("facebookUrl", e.target.value || undefined)
-                    }
-                  />
-                </label>
-                <Artwork
-                  label="Facebook icon"
-                  value={content.facebookIcon}
-                  scale={1}
-                  maxFileBytes={500_000}
-                  onChange={(value) => changeContent("facebookIcon", value)}
-                />
-                <small>
-                  Square icons work best. Custom icons appear at 32 pixels in
-                  the email footer; the built-in symbols remain when no icon is
-                  uploaded.
-                </small>
+                {content.showFooterSocial !== false && (
+                  <>
+                    <label>
+                      Instagram link
+                      <input
+                        type="url"
+                        placeholder="https://instagram.com/your-account"
+                        value={
+                          content.instagramUrl ??
+                          (visualLayout === "welcome-social"
+                            ? defaultGeneratedEmailCopy.instagramUrl
+                            : "")
+                        }
+                        onChange={(e) =>
+                          changeContent(
+                            "instagramUrl",
+                            e.target.value || undefined,
+                          )
+                        }
+                      />
+                    </label>
+                    <Artwork
+                      label="Instagram icon"
+                      value={content.instagramIcon}
+                      scale={1}
+                      maxFileBytes={500_000}
+                      onChange={(value) =>
+                        changeContent("instagramIcon", value)
+                      }
+                    />
+                    <label>
+                      Facebook link
+                      <input
+                        type="url"
+                        placeholder="https://facebook.com/your-page"
+                        value={
+                          content.facebookUrl ??
+                          (visualLayout === "welcome-social"
+                            ? defaultGeneratedEmailCopy.facebookUrl
+                            : "")
+                        }
+                        onChange={(e) =>
+                          changeContent(
+                            "facebookUrl",
+                            e.target.value || undefined,
+                          )
+                        }
+                      />
+                    </label>
+                    <Artwork
+                      label="Facebook icon"
+                      value={content.facebookIcon}
+                      scale={1}
+                      maxFileBytes={500_000}
+                      onChange={(value) =>
+                        changeContent("facebookIcon", value)
+                      }
+                    />
+                    <small>
+                      Square icons work best. Custom icons appear at 32 pixels
+                      in the email footer; the built-in symbols remain when no
+                      icon is uploaded.
+                    </small>
+                  </>
+                )}
                 <small>
                   The logo, footer artwork, social links, and social icons saved
                   here become shared defaults for future emails. The

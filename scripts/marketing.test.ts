@@ -911,6 +911,33 @@ test("every email layout uses the universal editable footer background", () => {
     );
   }
 });
+test("social media can be hidden from every footer without deleting its settings", () => {
+  const layouts = [
+    content({ ...defaultContent, template: "standard" }),
+    content({ ...defaultContent, template: "b2b-wholesale" }),
+    content({ ...defaultContent, template: "cart-recovery" }),
+    content({ ...welcomeSteps[0].content }),
+    content({ ...welcomeSteps[3].content }),
+    content({ ...defaultCampaignContent }),
+  ];
+  for (const layout of layouts) {
+    const hidden = content({
+      ...layout,
+      showFooterSocial: false,
+      footerSocialHeading: "Footer links sentinel",
+      instagramUrl: "https://www.instagram.com/coralsanonymous/",
+      facebookUrl: "https://www.facebook.com/coralsanonymousshop/",
+    });
+    assert.equal(hidden.showFooterSocial, false);
+    assert.equal(
+      hidden.instagramUrl,
+      "https://www.instagram.com/coralsanonymous/",
+    );
+    const html = render(hidden, "https://example.com/unsubscribe", "");
+    assert.doesNotMatch(html, /Footer links sentinel/);
+    assert.doesNotMatch(html, /aria-label="(?:Instagram|Facebook)"/);
+  }
+});
 test("generated welcome, coupon, social, and unsubscribe copy is editable", () => {
   const offer = render(
     content({

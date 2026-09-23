@@ -336,6 +336,13 @@ test("footer fields save with the email while sender details remain visible", as
     },
   });
   await testing.waitFor(() => assert.ok(view.getByText("Remove instagram icon")));
+  const socialToggle = view.getByLabelText(
+    "Show social media in footer",
+  ) as HTMLInputElement;
+  assert.equal(socialToggle.checked, true);
+  testing.fireEvent.click(socialToggle);
+  assert.equal(view.queryByLabelText("Social heading"), null);
+  assert.ok(view.getByLabelText("Unsubscribe introduction"));
   assert.ok(view.getByText(/123 Valid Street/));
   const addressToggle = view.getByLabelText(
     "Show business address in this email",
@@ -352,12 +359,14 @@ test("footer fields save with the email while sender details remain visible", as
         footerTitle: string;
         footerText: string;
         showPostalAddress: boolean;
+        showFooterSocial: boolean;
         footerCopyrightText?: string;
         instagramIcon?: string;
       };
     }[];
   };
   assert.equal(result.steps[0].content.showPostalAddress, true);
+  assert.equal(result.steps[0].content.showFooterSocial, false);
   assert.equal(result.steps[0].content.footerTitle, "Thank you, partners");
   assert.equal(
     result.steps[0].content.footerCopyrightText,
