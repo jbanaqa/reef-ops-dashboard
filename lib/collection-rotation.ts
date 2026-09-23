@@ -10,6 +10,43 @@ const COLLECTION_PAGE_SIZE = 100;
 const MAX_MOVES_PER_JOB = 250;
 const JOB_POLL_INTERVAL_MS = 1_500;
 const JOB_TIMEOUT_MS = 120_000;
+// A deploy or terminated cron process can leave a run marked Running forever.
+// Allow ample time for a real multi-chunk reorder before recovering it.
+const STALE_RUN_AFTER_MS = 3 * 60 * 60 * 1_000;
+
+async function assertNoActiveCollectionOperation(
+  shop: string,
+  collectionId: string
+) {
+  const staleBefore = new Date(Date.now() - STALE_RUN_AFTER_MS);
+
+  await prisma.collectionRotationRun.updateMany({
+    where: {
+      shop,
+      shopifyCollectionId: collectionId,
+      status: "Running",
+      startedAt: { lt: staleBefore },
+    },
+    data: {
+      status: "Failed",
+      errorMessage: "The collection operation stopped before it could finish.",
+      completedAt: new Date(),
+    },
+  });
+
+  const activeRun = await prisma.collectionRotationRun.findFirst({
+    where: {
+      shop,
+      shopifyCollectionId: collectionId,
+      status: "Running",
+    },
+    select: { id: true },
+  });
+
+  if (activeRun) {
+    throw new Error("This collection already has an operation in progress.");
+  }
+}
 
 type ShopifyUserError = {
   field?: string[] | null;
@@ -822,24 +859,7 @@ export async function shuffleCollection(
     );
   }
 
-  const existingRun =
-    await prisma.collectionRotationRun.findFirst({
-      where: {
-        shop,
-        shopifyCollectionId:
-          originalCollection.id,
-        status: "Running",
-      },
-      select: {
-        id: true,
-      },
-    });
-
-  if (existingRun) {
-    throw new Error(
-      "This collection already has an operation in progress."
-    );
-  }
+  await assertNoActiveCollectionOperation(shop, originalCollection.id);
 
   const rotation =
     await prisma.collectionRotation.upsert({
@@ -1136,24 +1156,7 @@ export async function undoLastCollectionShuffle(
     );
   }
 
-  const existingRun =
-    await prisma.collectionRotationRun.findFirst({
-      where: {
-        shop,
-        shopifyCollectionId:
-          collection.id,
-        status: "Running",
-      },
-      select: {
-        id: true,
-      },
-    });
-
-  if (existingRun) {
-    throw new Error(
-      "This collection already has an operation in progress."
-    );
-  }
+  await assertNoActiveCollectionOperation(shop, collection.id);
 
   const originalRun =
     await prisma.collectionRotationRun.findFirst({
