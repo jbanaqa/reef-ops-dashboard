@@ -1,5 +1,10 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Welcome reminder emails — September 23, 2026
+
+The second and third Welcome Series emails now use a shared 500×200 crisp clownfish/coral banner (`public/welcome-reminder-banner.png`) modeled on the supplied Klaviyo screenshots, with live editable message text over the blank speech bubble. Their coupon heading, code pill, orange CTA, and compact spacing match the references; the third email adds an orange expiry line. `{{ coupon_time_left }}` resolves to the real assigned coupon's remaining days at preparation, so the visible wording cannot claim a fixed seven days when the actual expiration differs. The first reminder keeps the reference's pale image area and outline icon by default; staff can upload a replacement image in Artwork or hide that area in Layout. Saved customized body copy and artwork are preserved by the Welcome draft upgrade. The shared blue “Thank you for your business” footer remains unchanged, as do scheduling, coupon assignment, eligibility, and send guards.
+
+
 ### B2B welcome spacing — September 23, 2026
 
 The B2B Wholesale layout now gives plain rich-editor paragraphs a compact 10px bottom margin and 1.45 line height, removes empty spacer paragraphs, and tightens default lists. Explicitly styled paragraphs and full-layout custom HTML retain their authored spacing. The plain-text fallback is rendered as paragraphs using the same spacing. This brings the three wholesale-benefit lines and sign-off closer to the supplied Klaviyo reference without changing saved wording, the heading, greeting, CTA, or shared footer. A desktop render was visually reviewed; marketing tests cover compact defaults and preservation of explicit styles.

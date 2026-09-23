@@ -493,23 +493,22 @@ export default function EmailDesigner({
                         )}
                         {visualLayout === "welcome" && (
                           <>
-                            <label>
-                              Welcome banner greeting
-                              <input
-                                value={
-                                  content.welcomeHeroGreeting ??
-                                  (content.offerAboveBody
-                                    ? defaultGeneratedEmailCopy.welcomeFirstHeroGreeting
-                                    : defaultGeneratedEmailCopy.welcomeHeroGreeting)
-                                }
-                                onChange={(event) =>
-                                  changeContent(
-                                    "welcomeHeroGreeting",
-                                    event.target.value,
-                                  )
-                                }
-                              />
-                            </label>
+                            {(content.offerAboveBody || !content.welcomeVariant || content.welcomeVariant === "standard") && (
+                              <label>
+                                Welcome banner greeting
+                                <input
+                                  value={
+                                    content.welcomeHeroGreeting ??
+                                    (content.offerAboveBody
+                                      ? defaultGeneratedEmailCopy.welcomeFirstHeroGreeting
+                                      : defaultGeneratedEmailCopy.welcomeHeroGreeting)
+                                  }
+                                  onChange={(event) =>
+                                    changeContent("welcomeHeroGreeting", event.target.value)
+                                  }
+                                />
+                              </label>
+                            )}
                             <label>
                               Welcome banner message
                               <textarea
@@ -739,10 +738,23 @@ export default function EmailDesigner({
                   )}
                   </div>
                 </details>
-                {visualLayout === "welcome" && content.offerAboveBody && (
+                {visualLayout === "welcome" && (
                   <details className="mk-editor-section mk-editor-disclosure">
                     <summary><span>Welcome illustration</span><small>Clownfish and coral background</small></summary>
                     <div className="mk-editor-disclosure-body">
+                      {!content.offerAboveBody && (
+                        <label>
+                          Banner style
+                          <select
+                            value={content.welcomeVariant || "standard"}
+                            onChange={(event) => changeContent("welcomeVariant", event.target.value as "standard" | "reminder" | "final-reminder")}
+                          >
+                            <option value="standard">Standard</option>
+                            <option value="reminder">Offer reminder</option>
+                            <option value="final-reminder">Final reminder</option>
+                          </select>
+                        </label>
+                      )}
                       <label>
                         <input
                           type="checkbox"
@@ -753,7 +765,17 @@ export default function EmailDesigner({
                         />
                         Show illustrated welcome banner
                       </label>
-                      <p>The greeting and banner message remain editable in Content → Automatic text. A Hero image in Artwork replaces this illustration.</p>
+                      {!content.offerAboveBody && content.welcomeVariant === "reminder" && (
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={content.showWelcomeFeaturePanel !== false}
+                            onChange={(event) => changeContent("showWelcomeFeaturePanel", event.target.checked)}
+                          />
+                          Show image area below the coupon
+                        </label>
+                      )}
+                      <p>The banner message remains editable in Content → Automatic text. A Hero image in Artwork replaces the illustrated banner.</p>
                     </div>
                   </details>
                 )}
@@ -995,6 +1017,14 @@ export default function EmailDesigner({
                   scale={1}
                   onChange={(value) => changeContent("hero", value)}
                 />
+                {visualLayout === "welcome" && content.welcomeVariant === "reminder" && (
+                  <Artwork
+                    label="Reminder image area"
+                    value={content.welcomeFeatureImage}
+                    scale={1}
+                    onChange={(value) => changeContent("welcomeFeatureImage", value)}
+                  />
+                )}
                 <Artwork
                   label="Logo"
                   value={content.logo}

@@ -47,6 +47,7 @@ export function emailBody(
     "logo",
     "footerImage",
     "hero",
+    "welcomeFeatureImage",
     "instagramIcon",
     "facebookIcon",
   ] as const) {

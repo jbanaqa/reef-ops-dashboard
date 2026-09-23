@@ -1,10 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
 import { type FlowConfig, validateFlow } from "./flow-config";
-import { content, eligible, type Content } from "./rules";
+import { content, couponTimeLeft, eligible, type Content } from "./rules";
 import { json, record, shop, type Tx } from "./store";
 import { uniqueDiscount, type SavedDiscount } from "./discounts";
-import { welcomeLabels } from "./welcome-config";
+import { welcomeLabels, upgradeWelcomeStep } from "./welcome-config";
 
 export type WelcomeRun = {
   profileId: string;
@@ -262,6 +262,7 @@ export async function prepareWelcome(
   });
   if (live && (live.data as unknown as FlowConfig).welcome)
     c = validateFlow("welcome", live.data).steps[step].content;
+  c = upgradeWelcomeStep(c, step);
   const expires = discount
     ? new Intl.DateTimeFormat("en-US", {
         timeZone: run.timezone,
@@ -280,8 +281,8 @@ export async function prepareWelcome(
   return content({
     ...c,
     url: destination,
-    body: c.body.replaceAll("{{ coupon_expires }}", expires),
-    bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", expires),
+    body: c.body.replaceAll("{{ coupon_expires }}", expires).replaceAll("{{ coupon_time_left }}", couponTimeLeft(discount?.endsAt)),
+    bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", expires).replaceAll("{{ coupon_time_left }}", couponTimeLeft(discount?.endsAt)),
     couponCode: discount?.code,
     couponExpiresAt: discount?.endsAt,
   });

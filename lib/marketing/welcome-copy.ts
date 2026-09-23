@@ -12,3 +12,10 @@ export const firstWelcomeBodyHtml = [
   '<p style="margin:0 0 16px">✨ High-quality, healthy corals and anemones<br>✨ Rare and unique selections from around the world<br>✨ The best deals for our fellow reefers who can’t get enough of that “reefer-high”</p>',
   '<p style="margin:0">Got questions or just want to talk reefing? Reach us anytime at <span style="color:#dc843d;text-decoration:underline">happyreefing@coralsanonymous.com</span> — we love hearing from our fellow reefers.</p>',
 ].join("");
+
+export const originalWelcomeReminderBody =
+  "Your first order is waiting. Explore our corals and anemones and use your personal code to save 10% on your order.";
+export const originalWelcomeFinalBody =
+  "Your discount code is going to expire on {{ coupon_expires }}. Treat your reef before your offer ends!";
+export const finalWelcomeBody =
+  "Your discount code is going to expire in {{ coupon_time_left }}";

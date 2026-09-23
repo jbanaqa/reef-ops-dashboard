@@ -1,6 +1,6 @@
 import { FilterXSS } from "xss";
 import { decode } from "he";
-import { firstWelcomeBody, firstWelcomeBodyHtml } from "./welcome-copy";
+import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
 export const channels = [
   "EMAIL",
   "SMS_MARKETING",
@@ -220,7 +220,10 @@ export type Content = {
   couponExpiryFallbackText?: string;
   welcomeHeroGreeting?: string;
   welcomeHeroText?: string;
+  welcomeVariant?: "standard" | "reminder" | "final-reminder";
   showWelcomeIllustration?: boolean;
+  showWelcomeFeaturePanel?: boolean;
+  welcomeFeatureImage?: string;
   socialFollowText?: string;
   instagramHeading?: string;
   instagramHandle?: string;
@@ -615,14 +618,16 @@ export function personalize(value: string, name = "", html = false) {
       html ? escapeHtml(first || fallback) : first || fallback,
   );
 }
+export function couponTimeLeft(expiresAt?: string, now = new Date()) {
+  if (!expiresAt) return "soon";
+  const days = Math.max(1, Math.ceil((new Date(expiresAt).getTime() - +now) / DAY));
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
 export function textBody(c: Content, name = "") {
   return personalize(
-    (c.bodyHtml !== undefined ? htmlText(c.bodyHtml) : c.body).replaceAll(
-      "{{ coupon_expires }}",
-      c.couponExpiresAt ||
-        c.couponExpiryFallbackText ||
-        defaultGeneratedEmailCopy.couponExpiryFallback,
-    ),
+    (c.bodyHtml !== undefined ? htmlText(c.bodyHtml) : c.body)
+      .replaceAll("{{ coupon_expires }}", c.couponExpiresAt || c.couponExpiryFallbackText || defaultGeneratedEmailCopy.couponExpiryFallback)
+      .replaceAll("{{ coupon_time_left }}", couponTimeLeft(c.couponExpiresAt)),
     name,
   );
 }
@@ -730,7 +735,7 @@ export function content(value: unknown): Content {
   if (!value || typeof value !== "object")
     throw new Error("Message content is required.");
   const c = value as Content;
-  if (!c.heading?.trim() || !c.body?.trim() || c.body.length > 20000)
+  if (!c.heading?.trim() || (!c.body?.trim() && !(c.template === "welcome" && c.welcomeVariant === "reminder")) || c.body.length > 20000)
     throw new Error("Add a heading and message (up to 20,000 characters).");
   const scale = (value: unknown, legacyWidth: unknown, base: number) => {
     const fallback = legacyWidth != null ? Number(legacyWidth) / base : 1;
@@ -963,7 +968,12 @@ export function content(value: unknown): Content {
       c.welcomeHeroText === undefined
         ? undefined
         : String(c.welcomeHeroText).slice(0, 500),
+    welcomeVariant: c.welcomeVariant && (["standard", "reminder", "final-reminder"] as const).includes(c.welcomeVariant)
+      ? c.welcomeVariant
+      : undefined,
     showWelcomeIllustration: c.showWelcomeIllustration !== false,
+    showWelcomeFeaturePanel: c.showWelcomeFeaturePanel !== false,
+    welcomeFeatureImage: c.welcomeFeatureImage ? imageSource(c.welcomeFeatureImage) : undefined,
     socialFollowText:
       c.socialFollowText === undefined
         ? undefined
@@ -1211,7 +1221,7 @@ export const defaultGeneratedEmailCopy = {
   welcomeHeroGreeting: '{{ first_name|default:"Aloha" }},',
   welcomeFirstHeroGreeting: 'Aloha {{ first_name|default:"Friend" }},',
   welcomeHeroAbove: "Thank you\nfor subscribing\nto our newsletter!",
-  welcomeHeroBelow: "Save 10% off\nyour entire order!",
+  welcomeHeroBelow: "Save 10% Off\nyour entire\norder!",
   socialFollow: "FOLLOW US ON",
   instagramHeading: "INSTAGRAM",
   instagramHandle: "@coralsanonymous",
@@ -1518,10 +1528,15 @@ export function render(
         defaultGeneratedEmailCopy.couponExpiryFallback;
     c = {
       ...c,
-      body: c.body.replaceAll("{{ coupon_expires }}", displayExpiry),
-      bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", displayExpiry),
+      body: c.body.replaceAll("{{ coupon_expires }}", displayExpiry).replaceAll("{{ coupon_time_left }}", couponTimeLeft(c.couponExpiresAt)),
+      bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", displayExpiry).replaceAll("{{ coupon_time_left }}", couponTimeLeft(c.couponExpiresAt)),
     };
     const social = layout === "welcome-social";
+    const reminderVariant = c.welcomeVariant ??
+      (c.heading === "Claim Your 10% OFF Discount Now!" ? "reminder" :
+        c.heading === "Time is Running Out!" ? "final-reminder" : "standard");
+    const illustratedReminder = layout === "welcome" && !c.offerAboveBody &&
+      c.showWelcomeIllustration !== false && reminderVariant !== "standard";
     const illustratedWelcome =
       layout === "welcome" &&
       c.offerAboveBody === true &&
@@ -1541,12 +1556,19 @@ export function render(
         : defaultGeneratedEmailCopy.welcomeHeroBelow);
     const instagram = c.instagramUrl || defaultGeneratedEmailCopy.instagramUrl;
     const facebook = c.facebookUrl || defaultGeneratedEmailCopy.facebookUrl;
+    const reminderBody = reminderVariant === "reminder" && c.body === originalWelcomeReminderBody
+      ? ""
+      : reminderVariant === "final-reminder" &&
+        (c.body === originalWelcomeFinalBody ||
+          (c.body.startsWith("Your discount code is going to expire on ") && c.body.endsWith("Treat your reef before your offer ends!")))
+        ? finalWelcomeBody.replaceAll("{{ coupon_time_left }}", couponTimeLeft(c.couponExpiresAt))
+        : c.body;
     const body =
       c.bodyHtml !== undefined
         ? personalize(c.bodyHtml, profileName, true)
         : c.offerAboveBody && c.body === firstWelcomeBody
           ? personalize(firstWelcomeBodyHtml, profileName, true)
-        : e(personalize(c.body, profileName)).replace(/\n/g, "<br>");
+        : e(personalize(reminderBody, profileName)).replace(/\n/g, "<br>");
     const expiry = c.couponExpiresAt
       ? '<p style="font-size:12px;color:#555">' +
         e(
@@ -1614,6 +1636,42 @@ export function render(
       '</span><p style="font-weight:bold;font-size:16px;line-height:1.4;margin-top:28px">' +
       e(copy) +
       "</p></a></td>";
+    if (illustratedReminder) {
+      const reminderBanner = c.hero || "https://reef-ops-dashboard-production.up.railway.app/welcome-reminder-banner.png";
+      const reminderHead = emailHead.replace(
+        "</style></head>",
+        '@media only screen and (max-width:480px){.reef-outer{padding:0!important}.reef-reminder-hero-wrap{padding:0 8px!important}.reef-reminder-hero{height:137px!important;padding:19px 23% 0 46%!important;background-size:100% 100%!important}.reef-reminder-hero-text{font-size:13px!important;line-height:1.1!important}.reef-reminder-heart{font-size:15px!important}.reef-reminder-copy{padding:14px 16px 8px!important}.reef-reminder-copy h1{font-size:23px!important;margin-bottom:26px!important}.reef-reminder-copy .reef-reminder-expiry,.reef-reminder-copy .reef-reminder-expiry *{font-size:19px!important;line-height:1.25!important}.reef-reminder-copy .reef-reminder-offer{font-size:24px!important;line-height:1.15!important}.reef-reminder-copy .reef-reminder-code{font-size:22px!important}.reef-reminder-copy .reef-reminder-button{font-size:15px!important;line-height:1.2!important}}@media only screen and (max-width:360px){.reef-reminder-hero{height:115px!important;padding-top:14px!important}.reef-reminder-hero-text{font-size:11px!important}.reef-reminder-heart{font-size:13px!important}.reef-reminder-copy h1{font-size:21px!important}}</style></head>',
+      );
+      const feature = reminderVariant === "reminder" && c.showWelcomeFeaturePanel !== false
+        ? '<tr><td style="background:#f8fafc;text-align:center;height:120px">' +
+          (c.welcomeFeatureImage
+            ? '<img src="' + e(c.welcomeFeatureImage) + '" alt="" width="560" style="display:block;max-width:100%;max-height:120px;object-fit:contain;margin:auto">'
+            : '<img src="https://reef-ops-dashboard-production.up.railway.app/welcome-image-placeholder.png" alt="" width="74" height="74" style="width:74px;height:74px;margin:auto">') +
+          '</td></tr>'
+        : "";
+      return (
+        '<!doctype html><html>' + reminderHead +
+        '<body style="margin:0;background:#f7f7f7;font-family:Arial,sans-serif;color:#080808"><table role="presentation" width="100%"><tr><td class="reef-outer" align="center" style="padding:0"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:white"><tr><td style="display:none;font-size:1px;max-height:0;overflow:hidden">' +
+        e(personalize(c.preview || "", profileName)) +
+        '</td></tr><tr><td class="reef-reminder-hero-wrap" style="padding:0 50px"><table role="presentation" width="100%" style="width:100%;max-width:500px;table-layout:fixed;margin:auto"><tr><td class="reef-reminder-hero" height="200" background="' + e(reminderBanner) + '" style="height:200px;box-sizing:border-box;vertical-align:top;padding:30px 23% 0 46%;background-color:#85d9e2;background-image:url(' + e(reminderBanner) + ');background-size:100% 100%;background-position:center"><table role="presentation" width="100%"><tr><td width="20" valign="middle" style="padding:0 2px 0 0"><span class="reef-reminder-heart" style="color:#d86670;font-size:18px;line-height:1">♥</span></td><td><p class="reef-reminder-hero-text" style="font-family:Bahnschrift Condensed,Impact,Arial Narrow,Arial,sans-serif;font-size:18px;line-height:1.08;font-weight:700;text-align:center;color:#101010;margin:0">' +
+        e(heroText).replace(/\n/g, '<br>') +
+        '</p></td></tr></table></td></tr></table></td></tr><tr><td class="reef-reminder-copy reef-copy" style="padding:16px 17px 8px;text-align:center;font-size:16px;line-height:1.4"><h1 style="font-size:28px;line-height:1.2;margin:0 0 ' + (reminderVariant === "final-reminder" ? '10px' : '36px') + '">' +
+        e(personalize(c.heading, profileName)) +
+        '</h1>' +
+        (body ? '<div class="reef-reminder-expiry" style="color:' + (reminderVariant === "final-reminder" ? '#d64f23' : '#080808') + ';font-size:22px;line-height:1.25;margin:0 0 42px">' + body + '</div>' : '') +
+        (c.couponCode ? '<div style="padding:0 0 ' + (reminderVariant === "final-reminder" ? '30px' : '8px') + '"><h2 class="reef-reminder-offer" style="font-size:27px;line-height:1.15;margin:0 0 16px">' +
+          e(c.couponLabel ?? defaultGeneratedEmailCopy.welcomeCouponLabel) +
+          '</h2><span class="reef-reminder-code" style="display:inline-block;border:1px solid #e3e8ec;border-radius:24px;padding:4px 10px;font-size:26px;font-weight:900;line-height:1.15;overflow-wrap:anywhere">' +
+          e(c.couponCode) + '</span>' +
+          (c.couponTerms !== undefined || c.couponExpiryText !== undefined ? expiry : '') +
+          '</div>' : '') +
+        '</td></tr>' + feature +
+        '<tr><td style="padding:10px 17px ' + (reminderVariant === "final-reminder" ? '9px' : '28px') + '"><a class="reef-reminder-button" href="' + e(c.url) + '" style="display:block;text-align:center;border-radius:4px;background:#e69a49;padding:7px 12px;color:white;font-size:17px;font-weight:bold;text-decoration:none;line-height:1.1">' +
+        e(c.button) + '</a></td></tr>' +
+        universalFooterHtml({ ...c, instagramUrl: instagram, facebookUrl: facebook }, unsubscribe, address, organizationName) +
+        '</table></td></tr></table></body></html>'
+      );
+    }
     return (
       "<!doctype html><html>" +
       (illustratedWelcome

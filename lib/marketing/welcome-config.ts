@@ -1,5 +1,5 @@
 import { defaultContent, type Content, email } from "./rules";
-import { firstWelcomeBody, firstWelcomeBodyHtml } from "./welcome-copy";
+import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
 import type { FlowConfig } from "./flow-config";
 
 export type WelcomeConfig = {
@@ -50,8 +50,9 @@ export const welcomeSteps = [
     subject: "⏳ Shop Now & Save 10% OFF Your First Order! ⏳",
     content: {
       ...base,
+      welcomeVariant: "reminder" as const,
       heading: "Claim Your 10% OFF Discount Now!",
-      body: "Your first order is waiting. Explore our corals and anemones and use your personal code to save 10% on your order.",
+      body: "",
       button: "Use my 10% OFF code now!",
     },
   },
@@ -61,9 +62,10 @@ export const welcomeSteps = [
     subject: "⏳ Final Reminder: 10% Off Discount Code Ending! ⏳",
     content: {
       ...base,
+      welcomeVariant: "final-reminder" as const,
       heading: "Time is Running Out!",
       preview: "Your personal 10% discount is expiring soon.",
-      body: "Your discount code is going to expire on {{ coupon_expires }}. Treat your reef before your offer ends!",
+      body: finalWelcomeBody,
       button: "Use my 10% OFF code now!",
     },
   },
@@ -118,19 +120,13 @@ export function validateWelcome(value: unknown): WelcomeConfig {
 /** Only replace untouched scaffold copy; saved copy and artwork survive an upgrade. */
 export function welcomeDraft(f: FlowConfig): FlowConfig {
   if (f.welcome) {
-    const first = f.steps[0];
-    if (
-      !first ||
-      first.content.body !== firstWelcomeBody ||
-      first.content.bodyHtml !== undefined
-    ) return f;
-    return {
-      ...f,
-      steps: [
-        { ...first, content: { ...first.content, bodyHtml: firstWelcomeBodyHtml } },
-        ...f.steps.slice(1),
-      ],
-    };
+    const steps = f.steps.map((step, index) => {
+      const upgraded = upgradeWelcomeStep(step.content, index);
+      return upgraded === step.content ? step : { ...step, content: upgraded };
+    });
+    return steps.every((step, index) => step === f.steps[index])
+      ? f
+      : { ...f, steps };
   }
   return {
     ...f,
@@ -152,4 +148,22 @@ export function welcomeDraft(f: FlowConfig): FlowConfig {
       };
     }),
   };
+}
+
+/** Apply presentation updates to saved Welcome steps without overwriting staff copy. */
+export function upgradeWelcomeStep(c: Content, index: number): Content {
+  let next = c;
+  if (index === 0 && c.body === firstWelcomeBody && c.bodyHtml === undefined)
+    next = { ...next, bodyHtml: firstWelcomeBodyHtml };
+  if (index === 1) {
+    if (next.welcomeVariant === undefined) next = { ...next, welcomeVariant: "reminder" };
+    if (next.body === originalWelcomeReminderBody && next.bodyHtml === undefined)
+      next = { ...next, body: "" };
+  }
+  if (index === 2) {
+    if (next.welcomeVariant === undefined) next = { ...next, welcomeVariant: "final-reminder" };
+    if (next.body === originalWelcomeFinalBody && next.bodyHtml === undefined)
+      next = { ...next, body: finalWelcomeBody };
+  }
+  return next;
 }

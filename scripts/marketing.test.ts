@@ -6,6 +6,7 @@ import {
   welcomeDraft,
   welcomeSteps,
   defaultWelcome,
+  upgradeWelcomeStep,
 } from "../lib/marketing/welcome-config";
 
 test("templates show each saved flow email without replacing saved copy", () => {
@@ -28,6 +29,7 @@ test("templates show each saved flow email without replacing saved copy", () => 
 });
 import {
   content,
+  couponTimeLeft,
   defaultCampaignContent,
   defaultContent,
   defaultProductGridStyle,
@@ -396,7 +398,7 @@ test("welcome templates render the assigned offer, shared branding, date, and so
     "",
   );
   assert.doesNotMatch(reminder, /\{\{ coupon_expires \}\}/);
-  assert.match(reminder, /October 1, 2026/);
+  assert.match(reminder, /expire in \d+ days/);
   const social = render(welcomeSteps[3].content, "#unsubscribe", "");
   assert.match(social, /INSTAGRAM/);
   assert.match(social, /FACEBOOK/);
@@ -417,6 +419,39 @@ test("first welcome illustration is optional and the shared blue footer stays in
   const custom = render({ ...welcomeSteps[0].content, hero: "https://example.com/custom-hero.jpg" }, "#unsubscribe", "");
   assert.match(custom, /custom-hero.jpg/);
   assert.doesNotMatch(custom, /welcome-hero-crisp.png/);
+});
+test("welcome reminders match the compact banner and preserve personal offer details", () => {
+  const branding = { footerConfigured: true, footerBackgroundColor: "#244b7b", footerTitle: "Thank you for your business ❤️" };
+  const code = "NEWSLETTER10-TEST";
+  const reminder = render({ ...welcomeSteps[1].content, couponCode: code }, "#unsubscribe", "", undefined, "Corals Anonymous", branding);
+  assert.match(reminder, /welcome-reminder-banner.png/);
+  assert.match(reminder, /Claim Your 10% OFF Discount Now!/);
+  assert.match(reminder, /Discount Code:/);
+  assert.match(reminder, /NEWSLETTER10-TEST/);
+  assert.match(reminder, /welcome-image-placeholder.png/);
+  assert.match(reminder, /Use my 10% OFF code now!/);
+  assert.match(reminder, /Thank you for your business/);
+  assert.doesNotMatch(reminder, /Your first order is waiting/);
+
+  assert.equal(couponTimeLeft("2026-10-01T12:00:00Z", new Date("2026-09-24T12:00:00Z")), "7 days");
+  assert.equal(couponTimeLeft("2026-10-01T12:00:00Z", new Date("2026-09-30T12:00:00Z")), "1 day");
+  const final = render({ ...welcomeSteps[2].content, couponCode: code, couponExpiresAt: new Date(Date.now() + 4 * 86400000).toISOString() }, "#unsubscribe", "", undefined, "Corals Anonymous", branding);
+  assert.match(final, /expire in 4 days/);
+  assert.match(final, /color:#d64f23/);
+  assert.doesNotMatch(final, /welcome-image-placeholder.png/);
+  assert.match(final, /background:#244b7b/);
+
+  const saved = upgradeWelcomeStep({ ...welcomeSteps[1].content, body: "My custom reminder", welcomeVariant: undefined }, 1);
+  assert.equal(saved.body, "My custom reminder");
+  assert.equal(saved.welcomeVariant, "reminder");
+  const customized = render({ ...saved, couponCode: code, welcomeHeroText: "My custom banner", showWelcomeFeaturePanel: false }, "#unsubscribe", "");
+  assert.match(customized, /My custom banner/);
+  assert.match(customized, /My custom reminder/);
+  assert.doesNotMatch(customized, /welcome-image-placeholder.png/);
+  const artwork = render({ ...saved, couponCode: code, hero: "https://example.com/my-banner.png", welcomeFeatureImage: "https://example.com/my-offer.png" }, "#unsubscribe", "");
+  assert.match(artwork, /my-banner.png/);
+  assert.match(artwork, /my-offer.png/);
+  assert.match(artwork, /reef-reminder-offer/);
 });
 test("suppression always overrides subscribed status", () => {
   assert.equal(eligible({ status: "SUBSCRIBED", suppressed: true }), false);
@@ -841,6 +876,20 @@ test("uploaded artwork becomes inline email attachments", () => {
   assert.ok(!payload.html.includes("data:image"));
   assert.equal(payload.attachments?.[0].content, "YWJj");
   assert.equal(payload.attachments?.[1].content, "ZGVm");
+  const reminder = emailBody(
+    {
+      id: "welcome-artwork",
+      channel: "EMAIL",
+      subject: "Reminder",
+      to: "test@example.com",
+      unsubscribe: "https://example.com/u",
+      content: { ...welcomeSteps[1].content, couponCode: "CODE", welcomeFeatureImage: "data:image/png;base64,YWJj" },
+    },
+    "Address",
+    "Company",
+  );
+  assert.match(reminder.html, /src="cid:marketing-welcomeFeatureImage"/);
+  assert.equal(reminder.attachments?.[0].content, "YWJj");
 });
 
 test("clearing HTML copy does not resurrect the previous plain-text message", () => {
