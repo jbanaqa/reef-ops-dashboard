@@ -1,5 +1,9 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Abandoned-cart email styling — September 23, 2026
+
+The Cart Recovery visual layout now follows the supplied Klaviyo first-email screenshot: a centered 400px, 500px-tall ocean-texture panel over white-to-aqua side gutters, 32px Georgia-style bold italic outlined copy, and a separate aqua band with a 234px white pill CTA. The background is a newly generated clean texture based on the screenshot, optimized as `public/cart-ocean-texture.jpg` (about 82 KB); it is not a recovered Klaviyo source asset. The live heading and message remain editable text. The shared Layout tab exposes the default-texture toggle, lettering size, band color, and button width; the Artwork tab's Hero upload overrides the texture. Mobile preview uses 28px text in a 450px-high panel, with no horizontal overflow at 320px. The shared renderer applies the same layout to previews, tests, and delivery. Existing saved cart content is preserved.
+
 ### Campaign product feeds — September 22, 2026
 
 Campaign Sale product grids now support named dynamic Shopify feeds as well as manual products. New campaign drafts reproduce the three supplied Klaviyo selections: `anniversarysalesale` matches any of A50/A55/A60/A65, selects six products in random order; `newnewdiscount` matches any of AW50/AW55/AW60/AW65, selects the newest twelve; `newnew1` selects the newest twelve eligible products across all categories. Tag matching is case-insensitive and OR-based. `DONT DISCOUNT`, A70/AW70, and ASALE are not included because they were absent from the actual feed-selection summaries the user chose as the source of truth.

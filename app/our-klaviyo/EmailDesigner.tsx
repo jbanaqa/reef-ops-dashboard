@@ -740,6 +740,68 @@ export default function EmailDesigner({
                 {visualLayout === "cart-recovery" && (
                   <details className="mk-editor-section mk-editor-disclosure" open>
                     <summary>
+                      <span>Cart hero</span>
+                      <small>Ocean artwork, lettering, and button band</small>
+                    </summary>
+                    <div className="mk-editor-disclosure-body">
+                      <p>
+                        The ocean texture is the default. Upload Hero artwork in
+                        the Artwork tab to replace it while keeping the message editable.
+                      </p>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={content.showCartOceanTexture !== false}
+                          onChange={(event) =>
+                            changeContent("showCartOceanTexture", event.target.checked)
+                          }
+                        />
+                        Show default ocean texture when no Hero image is uploaded
+                      </label>
+                      <label>
+                        Lettering size <small>{content.cartHeroTextSize ?? 32}px</small>
+                        <input
+                          aria-label="Cart hero lettering size"
+                          type="range"
+                          min="22"
+                          max="42"
+                          value={content.cartHeroTextSize ?? 32}
+                          onChange={(event) =>
+                            changeContent("cartHeroTextSize", Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Button band color
+                        <input
+                          aria-label="Cart button band color"
+                          type="color"
+                          value={content.cartHeroBandColor ?? "#95dce5"}
+                          onChange={(event) =>
+                            changeContent("cartHeroBandColor", event.target.value)
+                          }
+                        />
+                      </label>
+                      <label>
+                        Button width <small>{content.cartHeroButtonWidth ?? 234}px</small>
+                        <input
+                          aria-label="Cart hero button width"
+                          type="range"
+                          min="140"
+                          max="360"
+                          step="2"
+                          value={content.cartHeroButtonWidth ?? 234}
+                          onChange={(event) =>
+                            changeContent("cartHeroButtonWidth", Number(event.target.value))
+                          }
+                        />
+                      </label>
+                    </div>
+                  </details>
+                )}
+                {visualLayout === "cart-recovery" && (
+                  <details className="mk-editor-section mk-editor-disclosure" open>
+                    <summary>
                       <span>Product grid</span>
                       <small>Campaign-style cards</small>
                     </summary>

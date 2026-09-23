@@ -181,6 +181,10 @@ export type Content = {
   button: string;
   url: string;
   hero?: string;
+  showCartOceanTexture?: boolean;
+  cartHeroTextSize?: number;
+  cartHeroBandColor?: string;
+  cartHeroButtonWidth?: number;
   preview?: string;
   template?:
     | "standard"
@@ -865,6 +869,19 @@ export function content(value: unknown): Content {
     button: String(c.button ?? "Shop now").slice(0, 80),
     url: safeUrl(c.url),
     hero: c.hero ? imageSource(c.hero) : undefined,
+    showCartOceanTexture: c.showCartOceanTexture !== false,
+    cartHeroTextSize:
+      c.cartHeroTextSize === undefined
+        ? undefined
+        : bounded(c.cartHeroTextSize, 32, 22, 42),
+    cartHeroBandColor:
+      c.cartHeroBandColor === undefined
+        ? undefined
+        : color(c.cartHeroBandColor, "#95dce5"),
+    cartHeroButtonWidth:
+      c.cartHeroButtonWidth === undefined
+        ? undefined
+        : bounded(c.cartHeroButtonWidth, 234, 140, 360),
     preview: String(c.preview || "").slice(0, 200),
     template:
       c.template === "welcome" || c.template === "welcome-social"
@@ -1287,7 +1304,7 @@ function universalFooterHtml(
   );
 }
 const emailHead =
-  '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-logo{padding:12px 10px!important}.reef-campaign-nav td{display:block!important;width:100%!important;padding:5px 10px!important}.reef-campaign-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-cart-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-product-card img{max-width:100%!important;height:auto!important}}</style></head>';
+  '<head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%!important}table{border-spacing:0}img{max-width:100%!important;height:auto}td{overflow-wrap:anywhere;word-break:normal}.reef-copy *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}.reef-copy a{word-break:break-word}@media only screen and (max-width:480px){.reef-outer{padding:8px!important}.reef-copy{padding:24px 20px!important;font-size:15px!important}.reef-copy div,.reef-copy p,.reef-copy li{font-size:15px!important;line-height:1.6!important}.reef-copy h1{font-size:25px!important;line-height:1.2!important;margin-bottom:24px!important}.reef-copy.reef-cart-hero{height:450px!important;padding:52px 16px 40px!important}.reef-cart-copy h1{font-size:28px!important;line-height:1.35!important;margin-bottom:8px!important}.reef-cart-copy .reef-cart-message,.reef-cart-copy .reef-cart-message p,.reef-cart-copy .reef-cart-message div{font-size:28px!important;line-height:1.35!important}.reef-logo{padding:12px 10px!important}.reef-campaign-nav td{display:block!important;width:100%!important;padding:5px 10px!important}.reef-campaign-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-cart-product{display:block!important;width:100%!important;box-sizing:border-box!important}.reef-product-card img{max-width:100%!important;height:auto!important}}</style></head>';
 
 function campaignSaleHtml(
   c: Content,
@@ -1658,6 +1675,16 @@ export function render(
       c.bodyHtml !== undefined
         ? personalize(c.bodyHtml, profileName, true)
         : e(personalize(c.body, profileName)).replace(/\n/g, "<br>");
+    const oceanImage =
+      c.hero ||
+      (c.showCartOceanTexture === false
+        ? undefined
+        : "https://reef-ops-dashboard-production.up.railway.app/cart-ocean-texture.jpg");
+    const bandColor = c.cartHeroBandColor || "#95dce5";
+    const textSize = c.cartHeroTextSize || 32;
+    const buttonWidth = c.cartHeroButtonWidth || 234;
+    const outlinedText =
+      "color:#ffffff;text-shadow:-1px -1px 0 #17282c,1px -1px 0 #17282c,-1px 1px 0 #17282c,1px 1px 0 #17282c,2px 3px 1px #17282c;-webkit-text-stroke:1px #17282c;";
     const logo = c.logo
       ? '<img src="' +
         e(c.logo) +
@@ -1672,23 +1699,28 @@ export function render(
     return (
       "<!doctype html><html>" +
       emailHead +
-      '<body style="background:#eff8f8;margin:0;font-family:Arial,sans-serif"><table role="presentation" width="100%"><tr><td align="center" class="reef-outer" style="padding:16px"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:#8bd8e2"><tr><td class="reef-logo" style="background:white;padding:24px;text-align:center">' +
+      '<body style="background:#ffffff;margin:0;font-family:Arial,sans-serif"><table role="presentation" width="100%"><tr><td align="center" class="reef-outer" style="padding:0"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:#ffffff"><tr><td class="reef-logo" style="background:#ffffff;padding:24px;text-align:center">' +
       '<span style="display:none;max-height:0;overflow:hidden;mso-hide:all">' +
       e(personalize(c.preview || "", profileName)) +
       "</span>" +
       logo +
-      '</td></tr><tr><td align="center" style="padding:0;background:#82d2dc"><table role="presentation" width="100%" style="width:100%;max-width:600px;table-layout:fixed"><tr><td class="reef-copy reef-cart-copy"' +
-      (c.hero ? ' background="' + e(c.hero) + '"' : "") +
-      ' style="padding:58px 42px 28px;text-align:center;color:white;background-color:#70b8c2;' +
-      (c.hero
-        ? "background-image:url(" +
-          e(c.hero) +
-          ");background-size:cover;background-position:center;"
-        : "background-image:linear-gradient(135deg,#91d6dd,#5896a4,#91d6dd);") +
+      '</td></tr><tr><td align="center" style="padding:14px 0 0;background:' +
+      e(bandColor) +
+      ';background-image:linear-gradient(to bottom,#ffffff 0%,#ffffff 58%,' +
+      e(bandColor) + ' 58%,' + e(bandColor) +
+      ' 100%)"><table role="presentation" width="400" style="width:100%;max-width:400px;table-layout:fixed"><tr><td class="reef-copy reef-cart-copy reef-cart-hero"' +
+      (oceanImage ? ' background="' + e(oceanImage) + '"' : "") +
+      ' height="500" style="height:500px;box-sizing:border-box;vertical-align:top;padding:68px 20px 42px;text-align:center;background-color:#79bfca;' +
+      (oceanImage
+        ? "background-image:url('" + e(oceanImage) +
+          "');background-size:cover;background-position:center;"
+        : "") +
       '">' +
-      '<h1 style="font-family:Georgia,serif;font-style:italic;font-size:30px;line-height:1.3;color:white;text-shadow:1px 2px 2px #173e46">' +
+      '<h1 style="font-family:Georgia,Times New Roman,serif;font-style:italic;font-weight:700;font-size:' +
+      textSize + 'px;line-height:1.36;margin:0 0 8px;' + outlinedText + '">' +
       e(personalize(c.heading, profileName)) +
-      '</h1><div style="font-family:Georgia,serif;font-style:italic;font-weight:bold;font-size:23px;line-height:1.55;color:white;text-shadow:1px 2px 2px #173e46">' +
+      '</h1><div class="reef-cart-message" style="font-family:Georgia,Times New Roman,serif;font-style:italic;font-weight:700;font-size:' +
+      textSize + 'px;line-height:1.36;' + outlinedText + '">' +
       copy +
       "</div>" +
       (c.couponCode
@@ -1700,11 +1732,15 @@ export function render(
           e(c.couponTerms ?? defaultGeneratedEmailCopy.cartCouponTerms) +
           "</p>"
         : "") +
-      '<p style="margin:30px 0 8px"><a href="' +
+      '</td></tr></table></td></tr><tr><td align="center" style="padding:9px 20px 43px;background:' +
+      e(bandColor) +
+      ';border-top:1px solid #87c5cf"><a href="' +
       e(c.url) +
-      '" style="display:inline-block;max-width:100%;box-sizing:border-box;background:white;border-radius:32px;padding:16px 28px;color:#12333b;font-size:13px;font-weight:bold;text-decoration:none">' +
+      '" style="display:inline-block;max-width:100%;box-sizing:border-box;width:' +
+      buttonWidth +
+      'px;background:#ffffff;border-radius:28px;padding:13px 12px;color:#000000;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;text-align:center;text-decoration:none">' +
       e(c.button) +
-      '</a></p></td></tr></table></td></tr><tr><td style="padding:8px 28px 24px;background:white;text-align:center">' +
+      '</a></td></tr><tr><td style="padding:8px 28px 24px;background:white;text-align:center">' +
       cartProductHtml(c) +
       "</td></tr>" +
       universalFooterHtml(c, unsubscribe, address, organizationName) +

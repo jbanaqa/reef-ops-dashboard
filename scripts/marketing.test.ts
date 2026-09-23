@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { flowEmailTemplates } from "../lib/marketing/flow-email-templates";
+import { cartEmail } from "../lib/marketing/cart-config";
 import {
   welcomeDraft,
   welcomeSteps,
@@ -753,6 +754,32 @@ test("campaign sale plain-text fallback includes products and section links", ()
   );
   assert.match(payload.text, /Featured coral · \$0\.00 · Was \$0\.00/);
   assert.match(payload.text, /SHOP NOW!: https:\/\/coralsanonymous\.com/);
+});
+test("cart recovery uses the editable ocean hero and a separate aqua button band", () => {
+  const first = cartEmail("first").content;
+  const html = render(first, "https://example.com/unsubscribe", "");
+  assert.match(html, /background="https:\/\/reef-ops-dashboard-production\.up\.railway\.app\/cart-ocean-texture\.jpg"/);
+  assert.match(html, /width="400" style="width:100%;max-width:400px/);
+  assert.match(html, /reef-cart-message/);
+  assert.match(html, /padding:9px 20px 43px;background:#95dce5/);
+  assert.match(html, /width:234px;background:#ffffff;border-radius:28px/);
+
+  const customized = render(
+    { ...first, hero: "https://cdn.example.com/custom-ocean.jpg", cartHeroTextSize: 36,
+      cartHeroBandColor: "#76c9dd", cartHeroButtonWidth: 280 },
+    "https://example.com/unsubscribe",
+    "",
+  );
+  assert.match(customized, /background="https:\/\/cdn\.example\.com\/custom-ocean\.jpg"/);
+  assert.match(customized, /font-size:36px/);
+  assert.match(customized, /padding:9px 20px 43px;background:#76c9dd/);
+  assert.match(customized, /width:280px;background:#ffffff/);
+  const plain = render(
+    { ...first, showCartOceanTexture: false },
+    "https://example.com/unsubscribe",
+    "",
+  );
+  assert.doesNotMatch(plain, /cart-ocean-texture\.jpg/);
 });
 test("uploaded artwork becomes inline email attachments", () => {
   const payload = emailBody(
