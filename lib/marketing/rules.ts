@@ -222,7 +222,6 @@ export type Content = {
   welcomeHeroText?: string;
   welcomeVariant?: "standard" | "reminder" | "final-reminder";
   showWelcomeIllustration?: boolean;
-  showWelcomeFeaturePanel?: boolean;
   welcomeFeatureImage?: string;
   socialFollowText?: string;
   instagramHeading?: string;
@@ -972,7 +971,6 @@ export function content(value: unknown): Content {
       ? c.welcomeVariant
       : undefined,
     showWelcomeIllustration: c.showWelcomeIllustration !== false,
-    showWelcomeFeaturePanel: c.showWelcomeFeaturePanel !== false,
     welcomeFeatureImage: c.welcomeFeatureImage ? imageSource(c.welcomeFeatureImage) : undefined,
     socialFollowText:
       c.socialFollowText === undefined
@@ -1640,20 +1638,20 @@ export function render(
       const reminderBanner = c.hero || "https://reef-ops-dashboard-production.up.railway.app/welcome-reminder-banner.png";
       const reminderHead = emailHead.replace(
         "</style></head>",
-        '@media only screen and (max-width:480px){.reef-outer{padding:0!important}.reef-reminder-hero-wrap{padding:0 8px!important}.reef-reminder-hero{height:137px!important;padding:19px 23% 0 46%!important;background-size:100% 100%!important}.reef-reminder-hero-text{font-size:13px!important;line-height:1.1!important}.reef-reminder-heart{font-size:15px!important}.reef-reminder-copy{padding:14px 16px 8px!important}.reef-reminder-copy h1{font-size:23px!important;margin-bottom:26px!important}.reef-reminder-copy .reef-reminder-expiry,.reef-reminder-copy .reef-reminder-expiry *{font-size:19px!important;line-height:1.25!important}.reef-reminder-copy .reef-reminder-offer{font-size:24px!important;line-height:1.15!important}.reef-reminder-copy .reef-reminder-code{font-size:22px!important}.reef-reminder-copy .reef-reminder-button{font-size:15px!important;line-height:1.2!important}}@media only screen and (max-width:360px){.reef-reminder-hero{height:115px!important;padding-top:14px!important}.reef-reminder-hero-text{font-size:11px!important}.reef-reminder-heart{font-size:13px!important}.reef-reminder-copy h1{font-size:21px!important}}</style></head>',
+        '@media only screen and (max-width:480px){.reef-outer{padding:0!important}.reef-reminder-hero-wrap{padding:0 8px!important}.reef-reminder-hero{height:137px!important;padding:22px 31% 0 45%!important;background-size:100% 100%!important}.reef-reminder-hero-text{font-size:13px!important;line-height:1.1!important}.reef-reminder-heart{font-size:15px!important}.reef-reminder-copy{padding:14px 16px 8px!important}.reef-reminder-copy h1{font-size:23px!important;margin-bottom:26px!important}.reef-reminder-copy .reef-reminder-expiry,.reef-reminder-copy .reef-reminder-expiry *{font-size:19px!important;line-height:1.25!important}.reef-reminder-copy .reef-reminder-offer{font-size:24px!important;line-height:1.15!important}.reef-reminder-copy .reef-reminder-code{font-size:22px!important}.reef-reminder-copy .reef-reminder-button{font-size:15px!important;line-height:1.2!important}}@media only screen and (max-width:360px){.reef-reminder-hero{height:115px!important;padding-top:17px!important}.reef-reminder-hero-text{font-size:11px!important}.reef-reminder-heart-cell{display:none!important}.reef-reminder-copy h1{font-size:21px!important}}</style></head>',
       );
-      const feature = reminderVariant === "reminder" && c.showWelcomeFeaturePanel !== false
+      const feature = reminderVariant === "reminder" && c.welcomeFeatureImage
         ? '<tr><td style="background:#f8fafc;text-align:center;height:120px">' +
-          (c.welcomeFeatureImage
-            ? '<img src="' + e(c.welcomeFeatureImage) + '" alt="" width="560" style="display:block;max-width:100%;max-height:120px;object-fit:contain;margin:auto">'
-            : '<img src="https://reef-ops-dashboard-production.up.railway.app/welcome-image-placeholder.png" alt="" width="74" height="74" style="width:74px;height:74px;margin:auto">') +
+          '<img src="' + e(c.welcomeFeatureImage) + '" alt="" width="560" style="display:block;max-width:100%;max-height:120px;object-fit:contain;margin:auto">' +
           '</td></tr>'
         : "";
       return (
         '<!doctype html><html>' + reminderHead +
         '<body style="margin:0;background:#f7f7f7;font-family:Arial,sans-serif;color:#080808"><table role="presentation" width="100%"><tr><td class="reef-outer" align="center" style="padding:0"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:white"><tr><td style="display:none;font-size:1px;max-height:0;overflow:hidden">' +
         e(personalize(c.preview || "", profileName)) +
-        '</td></tr><tr><td class="reef-reminder-hero-wrap" style="padding:0 50px"><table role="presentation" width="100%" style="width:100%;max-width:500px;table-layout:fixed;margin:auto"><tr><td class="reef-reminder-hero" height="200" background="' + e(reminderBanner) + '" style="height:200px;box-sizing:border-box;vertical-align:top;padding:30px 23% 0 46%;background-color:#85d9e2;background-image:url(' + e(reminderBanner) + ');background-size:100% 100%;background-position:center"><table role="presentation" width="100%"><tr><td width="20" valign="middle" style="padding:0 2px 0 0"><span class="reef-reminder-heart" style="color:#d86670;font-size:18px;line-height:1">♥</span></td><td><p class="reef-reminder-hero-text" style="font-family:Bahnschrift Condensed,Impact,Arial Narrow,Arial,sans-serif;font-size:18px;line-height:1.08;font-weight:700;text-align:center;color:#101010;margin:0">' +
+        '</td></tr>' +
+        (c.logo ? '<tr><td class="reef-logo" align="center" style="padding:20px 20px 14px"><img src="' + e(c.logo) + '" alt="' + e(organizationName) + '" width="' + Math.round(260 * (c.logoScale || 1)) + '" style="max-width:100%;height:auto"></td></tr>' : '') +
+        '<tr><td class="reef-reminder-hero-wrap" style="padding:0 50px"><table role="presentation" width="100%" style="width:100%;max-width:500px;table-layout:fixed;margin:auto"><tr><td class="reef-reminder-hero" height="200" background="' + e(reminderBanner) + '" style="height:200px;box-sizing:border-box;vertical-align:top;padding:35px 31% 0 45%;background-color:#85d9e2;background-image:url(' + e(reminderBanner) + ');background-size:100% 100%;background-position:center"><table role="presentation" width="100%"><tr><td class="reef-reminder-heart-cell" width="16" valign="middle" style="padding:0 2px 0 0"><span class="reef-reminder-heart" style="color:#d86670;font-size:18px;line-height:1">♥</span></td><td><p class="reef-reminder-hero-text" style="font-family:Bahnschrift Condensed,Impact,Arial Narrow,Arial,sans-serif;font-size:18px;line-height:1.08;font-weight:700;text-align:center;color:#101010;margin:0">' +
         e(heroText).replace(/\n/g, '<br>') +
         '</p></td></tr></table></td></tr></table></td></tr><tr><td class="reef-reminder-copy reef-copy" style="padding:16px 17px 8px;text-align:center;font-size:16px;line-height:1.4"><h1 style="font-size:28px;line-height:1.2;margin:0 0 ' + (reminderVariant === "final-reminder" ? '10px' : '36px') + '">' +
         e(personalize(c.heading, profileName)) +
@@ -1682,7 +1680,7 @@ export function render(
       '"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:white"><tr><td style="display:none;font-size:1px;max-height:0;overflow:hidden">' +
       e(personalize(c.preview || "", profileName)) +
       "</td></tr>" +
-      (c.logo && !illustratedWelcome
+      (c.logo
         ? '<tr><td class="reef-logo" align="center" style="padding:20px"><img src="' +
           e(c.logo) +
           '" alt="' +

@@ -765,16 +765,6 @@ export default function EmailDesigner({
                         />
                         Show illustrated welcome banner
                       </label>
-                      {!content.offerAboveBody && content.welcomeVariant === "reminder" && (
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={content.showWelcomeFeaturePanel !== false}
-                            onChange={(event) => changeContent("showWelcomeFeaturePanel", event.target.checked)}
-                          />
-                          Show image area below the coupon
-                        </label>
-                      )}
                       <p>The banner message remains editable in Content → Automatic text. A Hero image in Artwork replaces the illustrated banner.</p>
                     </div>
                   </details>
@@ -1019,7 +1009,7 @@ export default function EmailDesigner({
                 />
                 {visualLayout === "welcome" && content.welcomeVariant === "reminder" && (
                   <Artwork
-                    label="Reminder image area"
+                    label="Optional reminder image"
                     value={content.welcomeFeatureImage}
                     scale={1}
                     onChange={(value) => changeContent("welcomeFeatureImage", value)}

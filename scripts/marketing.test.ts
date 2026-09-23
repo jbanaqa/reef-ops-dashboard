@@ -379,7 +379,7 @@ test("welcome templates render the assigned offer, shared branding, date, and so
     { logo: "https://example.com/logo.png" },
   );
   assert.match(html, /welcome-hero-crisp.png/);
-  assert.doesNotMatch(html, /example.com\/logo.png/);
+  assert.match(html, /example.com\/logo.png/);
   assert.match(html, /Aloha Jane/);
   assert.match(html, /<strong>Corals Anonymous!<\/strong>/);
   assert.match(html, /<strong>reefing\.<\/strong>/);
@@ -409,9 +409,11 @@ test("first welcome illustration is optional and the shared blue footer stays in
     footerConfigured: true,
     footerBackgroundColor: "#244b7b",
     footerTitle: "Thank you for your business ❤️",
+    logo: "https://example.com/logo.png",
   };
   const first = render(welcomeSteps[0].content, "#unsubscribe", "", undefined, "Corals Anonymous", branding);
   assert.match(first, /welcome-hero-crisp.png/);
+  assert.match(first, /example.com\/logo.png/);
   assert.match(first, /background:#244b7b/);
   assert.match(first, /Thank you for your business/);
   const plain = render({ ...welcomeSteps[0].content, showWelcomeIllustration: false }, "#unsubscribe", "");
@@ -421,14 +423,15 @@ test("first welcome illustration is optional and the shared blue footer stays in
   assert.doesNotMatch(custom, /welcome-hero-crisp.png/);
 });
 test("welcome reminders match the compact banner and preserve personal offer details", () => {
-  const branding = { footerConfigured: true, footerBackgroundColor: "#244b7b", footerTitle: "Thank you for your business ❤️" };
+  const branding = { footerConfigured: true, footerBackgroundColor: "#244b7b", footerTitle: "Thank you for your business ❤️", logo: "https://example.com/logo.png" };
   const code = "NEWSLETTER10-TEST";
   const reminder = render({ ...welcomeSteps[1].content, couponCode: code }, "#unsubscribe", "", undefined, "Corals Anonymous", branding);
   assert.match(reminder, /welcome-reminder-banner.png/);
   assert.match(reminder, /Claim Your 10% OFF Discount Now!/);
   assert.match(reminder, /Discount Code:/);
   assert.match(reminder, /NEWSLETTER10-TEST/);
-  assert.match(reminder, /welcome-image-placeholder.png/);
+  assert.match(reminder, /example.com\/logo.png/);
+  assert.doesNotMatch(reminder, /welcome-image-placeholder.png/);
   assert.match(reminder, /Use my 10% OFF code now!/);
   assert.match(reminder, /Thank you for your business/);
   assert.doesNotMatch(reminder, /Your first order is waiting/);
@@ -439,12 +442,13 @@ test("welcome reminders match the compact banner and preserve personal offer det
   assert.match(final, /expire in 4 days/);
   assert.match(final, /color:#d64f23/);
   assert.doesNotMatch(final, /welcome-image-placeholder.png/);
+  assert.match(final, /example.com\/logo.png/);
   assert.match(final, /background:#244b7b/);
 
   const saved = upgradeWelcomeStep({ ...welcomeSteps[1].content, body: "My custom reminder", welcomeVariant: undefined }, 1);
   assert.equal(saved.body, "My custom reminder");
   assert.equal(saved.welcomeVariant, "reminder");
-  const customized = render({ ...saved, couponCode: code, welcomeHeroText: "My custom banner", showWelcomeFeaturePanel: false }, "#unsubscribe", "");
+  const customized = render({ ...saved, couponCode: code, welcomeHeroText: "My custom banner" }, "#unsubscribe", "");
   assert.match(customized, /My custom banner/);
   assert.match(customized, /My custom reminder/);
   assert.doesNotMatch(customized, /welcome-image-placeholder.png/);
