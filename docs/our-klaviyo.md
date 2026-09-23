@@ -77,6 +77,7 @@ MARKETING_SEND_ENABLED=false
 MARKETING_MIGRATION_CONFIRMED=false
 MARKETING_FORM_ENABLED=false
 MARKETING_STOREFRONT_ORIGIN=https://coralsanonymous.com
+MARKETING_PREVIEW_SHOP_ID=YOUR_NUMERIC_SHOPIFY_STORE_ID
 MARKETING_WELCOME_COUPON=YOUR_EXISTING_10_PERCENT_FIRST_ORDER_CODE
 ```
 
@@ -101,6 +102,8 @@ Recipient timezone is required for SMS. Customer marketing texts use 10:00–20:
 ## Storefront installation
 
 Host `public/reef-marketing.js` on the storefront's asset/CDN system, then load it with a script tag whose `data-endpoint` is `https://YOUR-REEF-OPS-HOST/api/marketing/storefront`. The current dashboard proxy protects static paths, so loading `/reef-marketing.js` directly from Reef Ops requires an explicit asset exception or copying the asset to Shopify. Set `data-known-customer="true"` when the theme recognizes a logged-in customer; existing confirmed/submitted visitors are also suppressed through local storage. Previously imported profiles on a completely anonymous browser cannot be recognized until they identify themselves.
+
+Shopify share-preview links can use a rotating `https://TOKEN-STOREID.shopifypreview.com` origin instead of the main storefront domain. Set `MARKETING_PREVIEW_SHOP_ID` to this store's numeric Shopify ID to allow only its HTTPS preview hosts through the signup endpoint's CORS check. This setting is optional when previews stay on the configured storefront origin.
 
 Use `shopify/reef-marketing-custom-pixel.js` for customer events, replacing the placeholder origin and requiring marketing/analytics permission in Shopify pixel settings. Validate actual sandbox Origin behavior before connecting: the endpoint accepts only the configured storefront origin. The theme helper `window.reefMarketingEvent` must only be invoked after customer privacy permits marketing analytics. Form action events record the signup funnel, while optional behavior tracking must honor storefront consent.
 

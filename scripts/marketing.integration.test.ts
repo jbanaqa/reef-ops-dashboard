@@ -3013,6 +3013,7 @@ test("Shopify opaque-origin pixels record anonymous views but cannot change cons
   });
   const saved = settings.data;
   const savedOrigin = process.env.MARKETING_STOREFRONT_ORIGIN;
+  const savedPreviewShopId = process.env.MARKETING_PREVIEW_SHOP_ID;
   const body = {
     action: "event",
     type: "PRODUCT_VIEWED",
@@ -3068,6 +3069,20 @@ test("Shopify opaque-origin pixels record anonymous views but cannot change cons
         .headers.get("access-control-allow-origin"),
       "https://store.example",
     );
+    process.env.MARKETING_PREVIEW_SHOP_ID = "44306890912";
+    const preview = "https://gs1bacm7d2ropgu4-44306890912.shopifypreview.com";
+    assert.equal(route.OPTIONS(request({}, preview, "OPTIONS")).status, 204);
+    assert.equal(
+      route.OPTIONS(request({}, preview, "OPTIONS")).headers.get("access-control-allow-origin"),
+      preview,
+    );
+    for (const invalid of [
+      "http://gs1bacm7d2ropgu4-44306890912.shopifypreview.com",
+      "https://gs1bacm7d2ropgu4-11111111111.shopifypreview.com",
+      "https://gs1bacm7d2ropgu4-44306890912.shopifypreview.com.evil.example",
+      "https://other.shopifypreview.com",
+    ])
+      assert.equal(route.OPTIONS(request({}, invalid, "OPTIONS")).status, 403);
     for (const origin of [null, "https://unrelated.example"]) {
       assert.equal(route.OPTIONS(request({}, origin, "OPTIONS")).status, 403);
       assert.equal((await route.POST(request(body, origin))).status, 403);
@@ -3130,6 +3145,9 @@ test("Shopify opaque-origin pixels record anonymous views but cannot change cons
     if (savedOrigin === undefined)
       delete process.env.MARKETING_STOREFRONT_ORIGIN;
     else process.env.MARKETING_STOREFRONT_ORIGIN = savedOrigin;
+    if (savedPreviewShopId === undefined)
+      delete process.env.MARKETING_PREVIEW_SHOP_ID;
+    else process.env.MARKETING_PREVIEW_SHOP_ID = savedPreviewShopId;
     await prisma.marketingResource.update({
       where: { id: settings.id },
       data: { data: store.json(saved) },

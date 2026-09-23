@@ -27,7 +27,26 @@ const allowedOrigin = (request: Request) => {
   const storefront = process.env.MARKETING_STOREFRONT_ORIGIN;
   // Anonymous Shopify pixels do not depend on the separate signup-form origin.
   if (origin === "null") return origin;
-  return storefront && origin === storefront ? origin : null;
+  if (storefront && origin === storefront) return origin;
+  // Shopify's share-preview link uses a short-lived hostname on a different
+  // domain. Accept only previews belonging to this configured Shopify store.
+  const previewShopId = process.env.MARKETING_PREVIEW_SHOP_ID;
+  if (!origin || !previewShopId || !/^\d+$/.test(previewShopId)) return null;
+  try {
+    const url = new URL(origin);
+    const suffix = `-${previewShopId}.shopifypreview.com`;
+    const prefix = url.hostname.endsWith(suffix)
+      ? url.hostname.slice(0, -suffix.length)
+      : "";
+    return url.protocol === "https:" &&
+      url.origin === origin &&
+      !url.port &&
+      /^[a-z0-9]+$/.test(prefix)
+      ? origin
+      : null;
+  } catch {
+    return null;
+  }
 };
 const headers = (origin: string) => ({
   "Access-Control-Allow-Origin": origin,
