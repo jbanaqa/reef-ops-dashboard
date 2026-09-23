@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export function proxy(request: NextRequest) {
+  const publicOrigin = process.env.MARKETING_UNSUBSCRIBE_ORIGIN;
+  if (publicOrigin && request.nextUrl.hostname === new URL(publicOrigin).hostname) {
+    if (request.nextUrl.pathname !== "/api/marketing/unsubscribe")
+      return new NextResponse("Not found", { status: 404 });
+    return NextResponse.next();
+  }
+  if (request.nextUrl.pathname.startsWith("/api/")) return NextResponse.next();
   if (process.env.DASHBOARD_AUTH_DISABLED === "true")
     return NextResponse.next();
   const username = process.env.DASHBOARD_USERNAME;
@@ -39,6 +46,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico).*)",
+    "/((?!_next/static|_next/image|favicon.ico).*)",
   ],
 };

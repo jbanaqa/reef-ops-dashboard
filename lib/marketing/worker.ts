@@ -30,6 +30,7 @@ import type { DeliveryUpsellConfig } from "./delivery-upsell-config";
 import { resolveCampaignProductFeeds } from "./campaign-product-feed";
 import { inboxUnresolved, processMarketingInbox } from "./inbox";
 import { canConfirmEmailResubscription } from "./confirmation";
+import { syncShopifyEmailUnsubscribes, unsubscribeUrl } from "./unsubscribe";
 import {
   resolveCampaignAudience,
   resolvedAudienceMatches,
@@ -47,6 +48,9 @@ import {
 
 export async function runMarketing(onlyMessageId?: string) {
   const inbox = onlyMessageId ? null : await processMarketingInbox();
+  if (!onlyMessageId) await syncShopifyEmailUnsubscribes().catch((error) => {
+    console.error("Shopify unsubscribe synchronization failed:", error);
+  });
   const settingsRow = await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
   });
@@ -1162,10 +1166,7 @@ export async function runMarketing(onlyMessageId?: string) {
         address: settings.postalAddress,
         organizationName: settings.organizationName,
         branding: settings.branding,
-        unsubscribe:
-          process.env.APP_BASE_URL +
-          "/api/marketing/unsubscribe?token=" +
-          message.token,
+        unsubscribe: unsubscribeUrl(message.token),
       });
       await atomic(async (tx) => {
         await tx.marketingMessage.update({

@@ -1,6 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { NextRequest } from "next/server";
+import { proxy } from "../proxy";
+import { unsubscribeUrl } from "../lib/marketing/unsubscribe";
 import { flowEmailTemplates } from "../lib/marketing/flow-email-templates";
+
+test("branded unsubscribe host exposes only the customer opt-out route", () => {
+  const previous = process.env.MARKETING_UNSUBSCRIBE_ORIGIN;
+  process.env.MARKETING_UNSUBSCRIBE_ORIGIN = "https://unsubscribe.example.com";
+  try {
+    assert.equal(unsubscribeUrl("123").toString(), "https://unsubscribe.example.com/api/marketing/unsubscribe?token=123");
+    assert.equal(proxy(new NextRequest("https://unsubscribe.example.com/")).status, 404);
+    assert.equal(proxy(new NextRequest("https://unsubscribe.example.com/api/marketing")).status, 404);
+    assert.notEqual(proxy(new NextRequest("https://unsubscribe.example.com/api/marketing/unsubscribe?token=123")).status, 404);
+    assert.notEqual(proxy(new NextRequest("https://app.example/api/marketing")).status, 404);
+  } finally {
+    if (previous === undefined) delete process.env.MARKETING_UNSUBSCRIBE_ORIGIN;
+    else process.env.MARKETING_UNSUBSCRIBE_ORIGIN = previous;
+  }
+});
 import { cartEmail } from "../lib/marketing/cart-config";
 import {
   welcomeDraft,

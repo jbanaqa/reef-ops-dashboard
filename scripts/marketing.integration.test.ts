@@ -36,6 +36,8 @@ let customer = {
 };
 const originalFetch = globalThis.fetch;
 let klaviyoPages: Record<string, unknown>[] = [];
+const shopifyUnsubscribeUpdates: Record<string, unknown>[] = [];
+let shopifyUnsubscribeUnavailable = false;
 before(async () => {
   console.log("integration: creating isolated database");
   db = await PGlite.create();
@@ -103,8 +105,25 @@ before(async () => {
     }
     if (url.includes("/oauth/access_token"))
       return Response.json({ access_token: "mock" });
-    if (url.includes("/graphql.json"))
+    if (url.includes("/graphql.json")) {
+      const payload = JSON.parse(String(init?.body));
+      if (payload.query?.includes("FindCustomerForUnsubscribe")) {
+        if (shopifyUnsubscribeUnavailable) return new Response("Unavailable", { status: 503 });
+        const address = String(payload.variables.search).match(/email:"(.*)"/)?.[1];
+        return Response.json({ data: { customers: { nodes: [{
+          id: "gid://shopify/Customer/456", defaultEmailAddress: { emailAddress: address },
+        }] } } });
+      }
+      if (payload.query?.includes("UnsubscribeCustomer")) {
+        shopifyUnsubscribeUpdates.push(payload.variables.input);
+        return Response.json({ data: { customerEmailMarketingConsentUpdate: {
+          customer: { id: payload.variables.input.customerId, defaultEmailAddress: {
+            emailAddress: "oneclick@example.com", marketingState: "UNSUBSCRIBED",
+          } }, userErrors: [],
+        } } });
+      }
       return Response.json({ data: { customer } });
+    }
     if (url === "https://api.resend.com/emails") {
       sent.push(JSON.parse(String(init?.body)));
       return Response.json({ id: crypto.randomUUID() });
@@ -1333,6 +1352,11 @@ test("one-click unsubscribe suppresses email, cancels pending sends, and is repe
   });
   assert.equal(resultConsent.status, "UNSUBSCRIBED");
   assert.equal(resultConsent.suppressed, true);
+  assert.ok(shopifyUnsubscribeUpdates.length >= 1);
+  assert.equal((shopifyUnsubscribeUpdates.at(-1)?.emailMarketingConsent as { marketingState?: string })?.marketingState, "UNSUBSCRIBED");
+  assert.equal(await prisma.marketingResource.count({ where: {
+    kind: "SHOPIFY_EMAIL_UNSUBSCRIBE", key: p.id,
+  } }), 0);
   assert.equal(
     (
       await prisma.marketingMessage.findUniqueOrThrow({
@@ -2808,6 +2832,40 @@ test("cart reports count unique engagement and keep revenue currencies separate"
   assert.equal(after.orders - before.orders, 2);
   assert.equal(after.revenue.USD - (before.revenue.USD || 0), 12.5);
   assert.equal(after.revenue.CAD - (before.revenue.CAD || 0), 12.5);
+});
+
+test("Shopify failure never reverses a local unsubscribe and the worker retries it", async () => {
+  const p = await store.atomic(async (tx) => {
+    const p = await store.identify(tx, { email: "retry-unsubscribe@example.com" });
+    await store.consent(tx, p.id, "EMAIL", "SUBSCRIBED", "test", new Date());
+    return p;
+  });
+  const message = await prisma.marketingMessage.create({ data: {
+    shop, key: "retry-unsubscribe-source", profileId: p.id, channel: "EMAIL",
+    subject: "Test", content: defaultContent, dueAt: new Date(),
+  } });
+  const api = await import("../app/api/marketing/unsubscribe/route");
+  shopifyUnsubscribeUnavailable = true;
+  const response = await api.POST(new Request(
+    "https://app.example/api/marketing/unsubscribe?token=" + message.token,
+    { method: "POST" },
+  ));
+  assert.equal(response.status, 200);
+  assert.equal((await prisma.marketingConsent.findUniqueOrThrow({ where: {
+    profileId_channel: { profileId: p.id, channel: "EMAIL" },
+  } })).status, "UNSUBSCRIBED");
+  const queued = await prisma.marketingResource.findFirstOrThrow({ where: {
+    kind: "SHOPIFY_EMAIL_UNSUBSCRIBE", key: p.id,
+  } });
+  await prisma.marketingResource.update({ where: { id: queued.id }, data: {
+    data: { ...queued.data as object, nextAt: new Date(0).toISOString() },
+  } });
+  shopifyUnsubscribeUnavailable = false;
+  const { syncShopifyEmailUnsubscribes } = await import("../lib/marketing/unsubscribe");
+  assert.equal((await syncShopifyEmailUnsubscribes()).synced, 1);
+  assert.equal(await prisma.marketingResource.count({ where: {
+    kind: "SHOPIFY_EMAIL_UNSUBSCRIBE", key: p.id,
+  } }), 0);
 });
 
 test("marketing analytics separates campaign revenue and recipient rates", async () => {
