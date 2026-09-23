@@ -1,5 +1,6 @@
 import { FilterXSS } from "xss";
 import { decode } from "he";
+import { firstWelcomeBody, firstWelcomeBodyHtml } from "./welcome-copy";
 export const channels = [
   "EMAIL",
   "SMS_MARKETING",
@@ -219,6 +220,7 @@ export type Content = {
   couponExpiryFallbackText?: string;
   welcomeHeroGreeting?: string;
   welcomeHeroText?: string;
+  showWelcomeIllustration?: boolean;
   socialFollowText?: string;
   instagramHeading?: string;
   instagramHandle?: string;
@@ -961,6 +963,7 @@ export function content(value: unknown): Content {
       c.welcomeHeroText === undefined
         ? undefined
         : String(c.welcomeHeroText).slice(0, 500),
+    showWelcomeIllustration: c.showWelcomeIllustration !== false,
     socialFollowText:
       c.socialFollowText === undefined
         ? undefined
@@ -1206,7 +1209,8 @@ export const defaultGeneratedEmailCopy = {
     "10% off your order. One use. Cannot combine with other discounts.",
   genericCouponLabel: "Your 10% discount code:",
   welcomeHeroGreeting: '{{ first_name|default:"Aloha" }},',
-  welcomeHeroAbove: "Thank you for subscribing\nto our newsletter!",
+  welcomeFirstHeroGreeting: 'Aloha {{ first_name|default:"Friend" }},',
+  welcomeHeroAbove: "Thank you\nfor subscribing\nto our newsletter!",
   welcomeHeroBelow: "Save 10% off\nyour entire order!",
   socialFollow: "FOLLOW US ON",
   instagramHeading: "INSTAGRAM",
@@ -1518,11 +1522,30 @@ export function render(
       bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", displayExpiry),
     };
     const social = layout === "welcome-social";
+    const illustratedWelcome =
+      layout === "welcome" &&
+      c.offerAboveBody === true &&
+      !c.hero &&
+      c.showWelcomeIllustration !== false;
+    const heroGreeting = personalize(
+      c.welcomeHeroGreeting ??
+        (c.offerAboveBody
+          ? defaultGeneratedEmailCopy.welcomeFirstHeroGreeting
+          : defaultGeneratedEmailCopy.welcomeHeroGreeting),
+      profileName,
+    );
+    const heroText =
+      c.welcomeHeroText ??
+      (c.offerAboveBody
+        ? defaultGeneratedEmailCopy.welcomeHeroAbove
+        : defaultGeneratedEmailCopy.welcomeHeroBelow);
     const instagram = c.instagramUrl || defaultGeneratedEmailCopy.instagramUrl;
     const facebook = c.facebookUrl || defaultGeneratedEmailCopy.facebookUrl;
     const body =
       c.bodyHtml !== undefined
         ? personalize(c.bodyHtml, profileName, true)
+        : c.offerAboveBody && c.body === firstWelcomeBody
+          ? personalize(firstWelcomeBodyHtml, profileName, true)
         : e(personalize(c.body, profileName)).replace(/\n/g, "<br>");
     const expiry = c.couponExpiresAt
       ? '<p style="font-size:12px;color:#555">' +
@@ -1538,17 +1561,17 @@ export function render(
       : "";
     const offer =
       c.couponCode && !social
-        ? '<div style="text-align:center;padding:16px 0 28px"><h2 style="font-size:23px;margin:0 0 18px">' +
+        ? '<div style="text-align:center;padding:' + (illustratedWelcome ? '8px 0 25px' : '16px 0 28px') + '"><h2 style="font-size:23px;margin:0 0 ' + (illustratedWelcome ? '12px' : '18px') + '">' +
           e(
             c.couponLabel ??
               (c.offerAboveBody
                 ? defaultGeneratedEmailCopy.welcomeCouponLabelAbove
                 : defaultGeneratedEmailCopy.welcomeCouponLabel),
           ) +
-          '</h2><span style="display:inline-block;border:2px solid #e6e6e6;border-radius:20px;padding:8px 16px;font-size:23px;font-weight:bold;overflow-wrap:anywhere">' +
+          '</h2><span style="display:inline-block;border:' + (illustratedWelcome ? '1px' : '2px') + ' solid #e6e6e6;border-radius:20px;padding:' + (illustratedWelcome ? '5px 10px' : '8px 16px') + ';font-size:' + (illustratedWelcome ? '22px' : '23px') + ';font-weight:bold;overflow-wrap:anywhere">' +
           e(c.couponCode) +
           "</span>" +
-          expiry +
+          (illustratedWelcome && c.couponTerms === undefined && c.couponExpiryText === undefined ? '' : expiry) +
           "</div>"
         : "";
     const hero = c.hero
@@ -1557,22 +1580,18 @@ export function render(
         '" alt="' +
         e(personalize(c.heading, profileName)) +
         '" width="500" style="display:block;width:100%;max-width:500px;height:auto;margin:auto">'
+      : illustratedWelcome
+        ? '<table role="presentation" width="100%" style="width:100%;max-width:500px;table-layout:fixed;margin:0 auto"><tr><td class="reef-welcome-illustrated" height="500" background="https://reef-ops-dashboard-production.up.railway.app/welcome-hero-blank.jpg" style="height:500px;box-sizing:border-box;vertical-align:top;padding:107px 14px 0 182px;text-align:left;background-color:#85d9e2;background-image:url(https://reef-ops-dashboard-production.up.railway.app/welcome-hero-blank.jpg);background-size:100% 100%;background-position:center">' +
+          '<p class="reef-welcome-greeting" style="font-family:Bahnschrift Condensed,Impact,Arial Narrow,Arial,sans-serif;font-size:29px;line-height:1.1;font-weight:700;color:#101010;margin:0 0 5px;white-space:nowrap">' +
+          e(heroGreeting) +
+          '</p><table role="presentation" width="100%" style="border-collapse:collapse"><tr><td class="reef-welcome-heart-cell" width="52" valign="top" style="padding:34px 5px 0 0"><span class="reef-welcome-heart" style="display:inline-block;width:38px;height:38px;border-radius:50%;background:#d86670;color:white;text-align:center;font-family:Arial,sans-serif;font-size:29px;line-height:38px">♥</span></td><td valign="top"><p class="reef-welcome-message" style="font-family:Bahnschrift Condensed,Impact,Arial Narrow,Arial,sans-serif;font-size:28px;line-height:1.2;font-weight:700;color:#101010;margin:0">' +
+          e(heroText).replace(/\n/g, "<br>") +
+          "</p></td></tr></table></td></tr></table>"
       : !social
         ? '<div style="background:#8bd8e2;padding:44px 22px;text-align:center;border:1px solid #459ca4"><p style="font-size:25px;margin:0;color:#172e32;font-weight:bold">' +
-          e(
-            personalize(
-              c.welcomeHeroGreeting ??
-                defaultGeneratedEmailCopy.welcomeHeroGreeting,
-              profileName,
-            ),
-          ) +
+          e(heroGreeting) +
           '</p><p style="font-size:29px;line-height:1.25;font-weight:bold;margin:18px 0">' +
-          e(
-            c.welcomeHeroText ??
-              (c.offerAboveBody
-                ? defaultGeneratedEmailCopy.welcomeHeroAbove
-                : defaultGeneratedEmailCopy.welcomeHeroBelow),
-          ).replace(/\n/g, "<br>") +
+          e(heroText).replace(/\n/g, "<br>") +
           "</p></div>"
         : "";
     const socialCard = (
@@ -1597,11 +1616,15 @@ export function render(
       "</p></a></td>";
     return (
       "<!doctype html><html>" +
-      emailHead +
-      '<body style="margin:0;background:#f7f7f7;font-family:Arial,sans-serif;color:#080808"><table role="presentation" width="100%"><tr><td class="reef-outer" align="center" style="padding:16px"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:white"><tr><td style="display:none;font-size:1px;max-height:0;overflow:hidden">' +
+      (illustratedWelcome
+        ? emailHead.replace('</style></head>', '@media only screen and (max-width:480px){.reef-welcome-hero-wrap{padding:0 8px!important}.reef-welcome-illustrated{height:360px!important;padding:75px 8px 0 33%!important;background-size:100% 100%!important}.reef-welcome-greeting{font-size:23px!important;line-height:1.1!important;white-space:normal!important}.reef-welcome-message{font-size:21px!important;line-height:1.18!important}.reef-welcome-heart-cell{width:34px!important;padding:24px 4px 0 0!important}.reef-welcome-heart{width:28px!important;height:28px!important;line-height:28px!important;font-size:21px!important}}@media only screen and (max-width:360px){.reef-welcome-illustrated{height:310px!important;padding-top:65px!important}.reef-welcome-greeting{font-size:20px!important}.reef-welcome-message{font-size:18px!important}}</style></head>')
+        : emailHead) +
+      '<body style="margin:0;background:#f7f7f7;font-family:Arial,sans-serif;color:#080808"><table role="presentation" width="100%"><tr><td class="reef-outer" align="center" style="padding:' +
+      (illustratedWelcome ? "0" : "16px") +
+      '"><table role="presentation" width="100%" style="max-width:600px;table-layout:fixed;background:white"><tr><td style="display:none;font-size:1px;max-height:0;overflow:hidden">' +
       e(personalize(c.preview || "", profileName)) +
       "</td></tr>" +
-      (c.logo
+      (c.logo && !illustratedWelcome
         ? '<tr><td class="reef-logo" align="center" style="padding:20px"><img src="' +
           e(c.logo) +
           '" alt="' +
@@ -1610,9 +1633,11 @@ export function render(
           Math.round(260 * (c.logoScale || 1)) +
           '" style="max-width:100%;height:auto"></td></tr>'
         : "") +
-      '<tr><td style="padding:8px 30px 0">' +
+      '<tr><td class="reef-welcome-hero-wrap" style="padding:' +
+      (illustratedWelcome ? "0 50px" : "8px 30px 0") +
+      '">' +
       hero +
-      '</td></tr><tr><td class="reef-copy" style="padding:16px 30px 24px;font-size:16px;line-height:1.4"><h1 style="text-align:center;font-size:28px;line-height:1.2;margin:0 0 22px">' +
+      '</td></tr><tr><td class="reef-copy" style="padding:16px 30px 24px;font-size:16px;line-height:1.4"><h1 style="text-align:center;font-size:28px;line-height:1.2;margin:0 0 ' + (illustratedWelcome ? '8px' : '22px') + '">' +
       e(personalize(c.heading, profileName)) +
       "</h1>" +
       (c.offerAboveBody ? offer : "") +

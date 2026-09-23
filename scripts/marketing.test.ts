@@ -376,8 +376,11 @@ test("welcome templates render the assigned offer, shared branding, date, and so
     "Corals Anonymous",
     { logo: "https://example.com/logo.png" },
   );
-  assert.match(html, /example.com\/logo.png/);
+  assert.match(html, /welcome-hero-blank.jpg/);
+  assert.doesNotMatch(html, /example.com\/logo.png/);
   assert.match(html, /Aloha Jane/);
+  assert.match(html, /<strong>Corals Anonymous!<\/strong>/);
+  assert.match(html, /<strong>reefing\.<\/strong>/);
   assert.match(html, /WELCOME10-EXAMPLE/);
   assert.ok(
     html.indexOf("WELCOME10-EXAMPLE") < html.indexOf("Our story started"),
@@ -398,6 +401,22 @@ test("welcome templates render the assigned offer, shared branding, date, and so
   assert.match(social, /INSTAGRAM/);
   assert.match(social, /FACEBOOK/);
   assert.doesNotMatch(social, /Discount Code:/);
+});
+test("first welcome illustration is optional and the shared blue footer stays intact", () => {
+  const branding = {
+    footerConfigured: true,
+    footerBackgroundColor: "#244b7b",
+    footerTitle: "Thank you for your business ❤️",
+  };
+  const first = render(welcomeSteps[0].content, "#unsubscribe", "", undefined, "Corals Anonymous", branding);
+  assert.match(first, /welcome-hero-blank.jpg/);
+  assert.match(first, /background:#244b7b/);
+  assert.match(first, /Thank you for your business/);
+  const plain = render({ ...welcomeSteps[0].content, showWelcomeIllustration: false }, "#unsubscribe", "");
+  assert.doesNotMatch(plain, /welcome-hero-blank.jpg/);
+  const custom = render({ ...welcomeSteps[0].content, hero: "https://example.com/custom-hero.jpg" }, "#unsubscribe", "");
+  assert.match(custom, /custom-hero.jpg/);
+  assert.doesNotMatch(custom, /welcome-hero-blank.jpg/);
 });
 test("suppression always overrides subscribed status", () => {
   assert.equal(eligible({ status: "SUBSCRIBED", suppressed: true }), false);

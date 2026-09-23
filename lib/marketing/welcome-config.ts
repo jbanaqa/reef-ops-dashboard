@@ -1,4 +1,5 @@
 import { defaultContent, type Content, email } from "./rules";
+import { firstWelcomeBody, firstWelcomeBodyHtml } from "./welcome-copy";
 import type { FlowConfig } from "./flow-config";
 
 export type WelcomeConfig = {
@@ -38,7 +39,8 @@ export const welcomeSteps = [
       offerAboveBody: true,
       heading: "Thanks for signing up!",
       preview: "Exclusive Offer: Enjoy 10% OFF your first order today!",
-      body: 'Aloha {{ first_name|default:"Friend" }},\n\nWelcome to Corals Anonymous! We’re thrilled to have you join our reefing family. 🐠 💙\n\nOur story started at the peak of COVID. With nowhere to go and too much free time, we turned to the one thing that always made us happy—reefing. Out of that passion (and a little boredom), Corals Anonymous was born.\n\nToday, we’re proud to be a treasure cove for saltwater hobbyists, dealing the most addictive stuff—corals and anemones! We dedicate ourselves to providing:\n\n✨ High-quality, healthy corals and anemones\n✨ Rare and unique selections from around the world\n✨ The best deals for our fellow reefers who can’t get enough of that “reefer-high”\n\nGot questions or just want to talk reefing? Reach us anytime at happyreefing@coralsanonymous.com — we love hearing from our fellow reefers.',
+      body: firstWelcomeBody,
+      bodyHtml: firstWelcomeBodyHtml,
       button: "Shop Now!",
     },
   },
@@ -115,7 +117,21 @@ export function validateWelcome(value: unknown): WelcomeConfig {
 }
 /** Only replace untouched scaffold copy; saved copy and artwork survive an upgrade. */
 export function welcomeDraft(f: FlowConfig): FlowConfig {
-  if (f.welcome) return f;
+  if (f.welcome) {
+    const first = f.steps[0];
+    if (
+      !first ||
+      first.content.body !== firstWelcomeBody ||
+      first.content.bodyHtml !== undefined
+    ) return f;
+    return {
+      ...f,
+      steps: [
+        { ...first, content: { ...first.content, bodyHtml: firstWelcomeBodyHtml } },
+        ...f.steps.slice(1),
+      ],
+    };
+  }
   return {
     ...f,
     reviewed: false,

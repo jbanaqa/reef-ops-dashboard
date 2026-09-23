@@ -498,7 +498,9 @@ export default function EmailDesigner({
                               <input
                                 value={
                                   content.welcomeHeroGreeting ??
-                                  defaultGeneratedEmailCopy.welcomeHeroGreeting
+                                  (content.offerAboveBody
+                                    ? defaultGeneratedEmailCopy.welcomeFirstHeroGreeting
+                                    : defaultGeneratedEmailCopy.welcomeHeroGreeting)
                                 }
                                 onChange={(event) =>
                                   changeContent(
@@ -737,6 +739,24 @@ export default function EmailDesigner({
                   )}
                   </div>
                 </details>
+                {visualLayout === "welcome" && content.offerAboveBody && (
+                  <details className="mk-editor-section mk-editor-disclosure">
+                    <summary><span>Welcome illustration</span><small>Clownfish and coral background</small></summary>
+                    <div className="mk-editor-disclosure-body">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={content.showWelcomeIllustration !== false}
+                          onChange={(event) =>
+                            changeContent("showWelcomeIllustration", event.target.checked)
+                          }
+                        />
+                        Show illustrated welcome banner
+                      </label>
+                      <p>The greeting and banner message remain editable in Content → Automatic text. A Hero image in Artwork replaces this illustration.</p>
+                    </div>
+                  </details>
+                )}
                 {visualLayout === "cart-recovery" && (
                   <details className="mk-editor-section mk-editor-disclosure" open>
                     <summary>
