@@ -198,6 +198,15 @@ const { chromium } = require("playwright");
       else await route.fulfill({ json: data });
     });
     await page.goto("http://127.0.0.1:" + server.address().port);
+    await page.getByRole("button", { name: "Send test", exact: true }).click();
+    await page.getByLabel("Test recipient").fill("preview@example.com");
+    await page.getByRole("button", { name: "Send test email", exact: true }).click();
+    await page.getByText("Campaign status is unchanged.", { exact: false }).waitFor();
+    assert.equal(writes.at(-1).action, "test-email");
+    assert.equal(writes.at(-1).to, "preview@example.com");
+    assert.equal(writes.at(-1).subject, "Test subject");
+    assert.equal(data.campaigns[0].status, "DRAFT");
+    await page.getByRole("button", { name: "Send test", exact: true }).click();
     await page.getByRole("button", { name: "View email", exact: true }).click();
     await page.getByRole("dialog").waitFor();
     assert.equal(await page.getByText("Read-only email", { exact: true }).count(), 1);
@@ -259,11 +268,18 @@ const { chromium } = require("playwright");
       document.body.textContent.includes("Email saved"),
     );
     assert.equal(writes.at(-1).action, "save-campaign");
-    assert.equal(writes.at(-1).content.showPostalAddress, true);
+    assert.equal(writes.at(-1).brandingSource.showPostalAddress, true);
     assert.equal(writes.at(-1).content.campaignLayout.sections.length, 3);
     assert.equal(writes.at(-1).content.campaignLayout.sections[0].products[0].title, "Red and White Coco Worm");
     await page.getByLabel("Back to campaign").click();
     await page.getByRole("button", { name: "3. Review & schedule" }).click();
+    await page.getByLabel("Test campaign email").getByLabel("Test recipient").fill("review@example.com");
+    await page.getByLabel("Test campaign email").getByRole("button", { name: "Send test email" }).click();
+    await page.getByText("The campaign is still a draft.", { exact: false }).waitFor();
+    assert.equal(writes.at(-1).action, "test-email");
+    assert.equal(writes.at(-1).to, "review@example.com");
+    assert.equal(writes.at(-1).content.campaignLayout.sections[0].products[0].title, "Red and White Coco Worm");
+    assert.equal(data.campaigns[0].status, "DRAFT");
     assert.equal(await page.getByLabel("16-hour Smart Sending").isChecked(), true);
     assert.equal(await page.getByRole("button", { name: "Send now" }).count(), 1);
     assert.equal(
@@ -281,7 +297,7 @@ const { chromium } = require("playwright");
       document.body.textContent.includes("Email saved"),
     );
     assert.equal(writes.at(-1).action, "save-resource");
-    assert.equal(writes.at(-1).data.showPostalAddress, true);
+    assert.equal(writes.at(-1).brandingSource.showPostalAddress, true);
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       assert.ok(

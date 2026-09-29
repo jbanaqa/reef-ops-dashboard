@@ -23,6 +23,7 @@ import {
   withBranding,
 } from "@/lib/marketing/rules";
 import "./marketing.css";
+import "./campaign-tests.css";
 
 type Resource = {
   id: string;
@@ -213,6 +214,47 @@ const campaignForm = (item: Campaign, resources: Resource[]): CampaignForm => {
       item.recipientMode === "SCHEDULE_TIME" ? "SCHEDULE_TIME" : "SEND_TIME",
   };
 };
+function CampaignTestEmail({
+  name,
+  busy,
+  onSend,
+}: {
+  name: string;
+  busy: boolean;
+  onSend: (recipient: string) => Promise<unknown>;
+}) {
+  const [recipient, setRecipient] = useState("");
+  return (
+    <form
+      className="mk-campaign-test-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSend(recipient.trim());
+      }}
+    >
+      <label>
+        Test recipient
+        <input
+          type="email"
+          required
+          autoComplete="email"
+          placeholder="you@company.com"
+          value={recipient}
+          onChange={(event) => setRecipient(event.target.value)}
+        />
+      </label>
+      <button type="submit" disabled={busy || !recipient.trim()}>
+        {busy ? "Sending…" : "Send test email"}
+      </button>
+      <small>
+        Sends a [TEST] copy of {name || "this campaign"} only to this address.
+        Use an approved internal test address. This does not schedule the
+        campaign or contact its audience; consent and Smart Sending are checked
+        only during a real campaign send.
+      </small>
+    </form>
+  );
+}
 export default function MarketingDashboard({ tab }: { tab: string }) {
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
@@ -227,6 +269,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   const [campaignStep, setCampaignStep] = useState(0);
   const [campaignSearch, setCampaignSearch] = useState("");
   const [campaignReport, setCampaignReport] = useState<CampaignReport | null>(null);
+  const [testCampaignId, setTestCampaignId] = useState<string | null>(null);
   const [dismissalDraft, setDismissalDraft] = useState<boolean | null>(null);
   const [popupDelayDraft, setPopupDelayDraft] = useState<string | null>(null);
   const [resource, setResource] = useState<Resource | null>(null);
@@ -813,6 +856,28 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       <p>{audienceCount === null ? "Audience count has not been checked." : `${audienceCount.toLocaleString()} currently eligible recipients.`}</p>
                       <button onClick={() => setEditingEmail(true)}>Review email</button>
                     </div>
+                    <section className="mk-campaign-test" aria-label="Test campaign email">
+                      <h3>Test this email</h3>
+                      <p>Check the finished email in your own inbox before scheduling it.</p>
+                      <CampaignTestEmail
+                        name={campaign.name}
+                        busy={busy}
+                        onSend={(to) =>
+                          run(
+                            () => action({
+                              action: "test-email",
+                              to,
+                              subject: campaign.subject,
+                              content: withBranding(
+                                campaign.content,
+                                brandingDraft || data.settings.branding,
+                              ),
+                            }),
+                            `Test email sent to ${to}. The campaign is still a draft.`,
+                          )
+                        }
+                      />
+                    </section>
                     <div className="mk-campaign-section-heading">
                       <span>3</span>
                       <div>
@@ -1013,6 +1078,17 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                 View email
                               </button>
                               <button
+                                aria-expanded={testCampaignId === item.id}
+                                aria-controls={`campaign-test-${item.id}`}
+                                onClick={() =>
+                                  setTestCampaignId(
+                                    testCampaignId === item.id ? null : item.id,
+                                  )
+                                }
+                              >
+                                Send test
+                              </button>
+                              <button
                                 onClick={() => {
                                   setCampaignOpen(true);
                                   setCampaignStep(0);
@@ -1059,6 +1135,26 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                 </button>
                               )}
                             </div>
+                            {testCampaignId === item.id && (
+                              <div id={`campaign-test-${item.id}`} className="mk-campaign-test mk-campaign-test-card">
+                                <h4>Test this email</h4>
+                                <CampaignTestEmail
+                                  name={item.name}
+                                  busy={busy}
+                                  onSend={(to) =>
+                                    run(
+                                      () => action({
+                                        action: "test-email",
+                                        to,
+                                        subject: item.subject,
+                                        content: withBranding(item.content, data.settings.branding),
+                                      }),
+                                      `Test email sent to ${to}. Campaign status is unchanged.`,
+                                    )
+                                  }
+                                />
+                              </div>
+                            )}
                           </article>
                         );
                       })}

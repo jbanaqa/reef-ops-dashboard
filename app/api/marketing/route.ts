@@ -721,7 +721,7 @@ export async function POST(request: Request) {
         .map((v) => v.trim().toLowerCase());
       if (!allowed.includes(to))
         throw new Error(
-          "Test recipient must be listed in MARKETING_TEST_EMAILS.",
+          "This address is not approved for test emails. Ask an administrator to add it to the test recipient list.",
         );
       const s = await loadMarketingSettings();
       if (!setup(s.operations, s.postalAddress).emailReady)
