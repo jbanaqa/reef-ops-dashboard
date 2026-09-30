@@ -55,6 +55,7 @@ export async function GET() {
             enabledCount: true,
             completedCount: true,
             failedCount: true,
+            results: true,
             startedAt: true,
             completedAt: true,
           },

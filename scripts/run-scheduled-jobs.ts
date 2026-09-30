@@ -34,56 +34,51 @@ function run(command: string, args: string[]) {
 
 async function main() {
   const runner = "node_modules/tsx/dist/cli.mjs";
-  const failures: Error[] = [];
+  const failures: Array<{ job: string; error: Error }> = [];
+
+  function recordFailure(job: string, error: unknown) {
+    const failure =
+      error instanceof Error ? error : new Error(String(error));
+    failures.push({ job, error: failure });
+    console.error(`[scheduled] ${job} failed:`, failure.message);
+  }
 
   console.log("[scheduled] Running marketing worker.");
   try {
     await run(process.execPath, [runner, "scripts/run-marketing.ts"]);
   } catch (error) {
-    const failure =
-      error instanceof Error ? error : new Error(String(error));
-    failures.push(failure);
-    console.error("[scheduled] Marketing worker failed:", failure.message);
+    recordFailure("Marketing worker", error);
   }
 
   console.log("[scheduled] Running Klaviyo open-history backfill batch.");
   try {
     await run(process.execPath, [runner, "scripts/run-engagement-backfill.ts"]);
   } catch (error) {
-    const failure = error instanceof Error ? error : new Error(String(error));
-    failures.push(failure);
-    console.error(
-      "[scheduled] Klaviyo open-history backfill failed:",
-      failure.message
-    );
+    recordFailure("Klaviyo open-history backfill", error);
   }
 
   console.log("[scheduled] Running collection rotation scheduler.");
   try {
     await run(process.execPath, [runner, "scripts/run-collection-rotations.ts"]);
   } catch (error) {
-    const failure =
-      error instanceof Error ? error : new Error(String(error));
-    failures.push(failure);
-    console.error(
-      "[scheduled] Collection rotation scheduler failed:",
-      failure.message
-    );
+    recordFailure("Collection rotation scheduler", error);
   }
 
   console.log("[scheduled] Running sale rotation scheduler.");
   try {
     await run(process.execPath, [runner, "scripts/run-sale-rotation.ts"]);
   } catch (error) {
-    const failure =
-      error instanceof Error ? error : new Error(String(error));
-    failures.push(failure);
-    console.error("[scheduled] Sale rotation scheduler failed:", failure.message);
+    recordFailure("Sale rotation scheduler", error);
   }
 
   if (failures.length) {
+    const summary = failures
+      .map(({ job, error }) => `${job}: ${error.message}`)
+      .join("; ");
     throw new Error(
-      `${failures.length} scheduled job${failures.length === 1 ? "" : "s"} failed.`
+      `${failures.length} scheduled job${
+        failures.length === 1 ? "" : "s"
+      } failed. ${summary}`
     );
   }
 

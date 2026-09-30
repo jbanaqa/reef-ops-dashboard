@@ -37,10 +37,28 @@ type AutomationStatus = {
     enabledCount: number;
     completedCount: number;
     failedCount: number;
+    results: Array<{
+      collectionId?: string;
+      collectionTitle?: string;
+      status?: string;
+      error?: string;
+    }> | null;
     startedAt: string;
     completedAt: string | null;
   } | null;
 };
+
+function failedRunResults(status: AutomationStatus | null) {
+  const results = status?.lastRun?.results;
+
+  if (!Array.isArray(results)) {
+    return [];
+  }
+
+  return results.filter(
+    (result) => result.status === "Failed"
+  );
+}
 
 async function readResponse<T>(response: Response): Promise<T> {
   const data: unknown = await response.json();
@@ -159,6 +177,8 @@ export default function CollectionAutomationPanel({
   }, []);
 
   useEffect(() => {
+    // The state changes happen after the asynchronous requests resolve.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadAutomationData();
   }, [loadAutomationData]);
 
@@ -213,6 +233,8 @@ export default function CollectionAutomationPanel({
         );
       });
   }, [collections, searchTerm]);
+
+  const lastRunFailures = failedRunResults(status);
 
   async function toggleAutomation(collection: CollectionSummary) {
     if (activeCollectionId) {
@@ -353,12 +375,36 @@ export default function CollectionAutomationPanel({
           </div>
 
           {status.lastRun ? (
-            <p className="rotation-last-run-copy">
-              Last scheduled start:{" "}
-              {formatDateTime(status.lastRun.scheduledFor)}.{" "}
-              {status.lastRun.completedCount} completed and{" "}
-              {status.lastRun.failedCount} failed.
-            </p>
+            <>
+              <p className="rotation-last-run-copy">
+                Last scheduled start:{" "}
+                {formatDateTime(status.lastRun.scheduledFor)}.{" "}
+                {status.lastRun.completedCount} completed and{" "}
+                {status.lastRun.failedCount} failed.
+              </p>
+
+              {lastRunFailures.length > 0 ? (
+                <details className="rotation-run-failures">
+                  <summary>
+                    View {lastRunFailures.length} recorded failure
+                    {lastRunFailures.length === 1 ? "" : "s"}
+                  </summary>
+
+                  <ul>
+                    {lastRunFailures.map((failure, index) => (
+                      <li
+                        key={`${failure.collectionId || "cycle"}-${index}`}
+                      >
+                        <strong>
+                          {failure.collectionTitle || "Scheduled cycle"}
+                        </strong>
+                        <span>{failure.error || "Unknown error"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </>
           ) : null}
         </>
       ) : null}

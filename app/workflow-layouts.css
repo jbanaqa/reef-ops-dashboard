@@ -1941,6 +1941,41 @@ body {
   line-height: 1.5;
 }
 
+.rotation-run-failures {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger-border, var(--border));
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.rotation-run-failures summary {
+  cursor: pointer;
+  color: var(--danger, var(--text-main));
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rotation-run-failures ul {
+  display: grid;
+  gap: 9px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rotation-run-failures li {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.rotation-run-failures li span {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 .rotation-automation-actions {
   display: flex;
   align-items: center;

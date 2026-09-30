@@ -8,6 +8,8 @@ type ScheduledResult = {
   error?: string;
 };
 
+const ABANDONED_SCHEDULE_AFTER_MS = 3 * 60 * 60 * 1_000;
+
 function sleep(milliseconds: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, milliseconds);
@@ -29,6 +31,7 @@ async function runScheduledRotations() {
     {
       getCollectionRotationIntervalMinutes,
       getCurrentScheduleBoundary,
+      isCollectionRotationScheduleEnabled,
     },
   ] = await Promise.all([
     import("../lib/prisma"),
@@ -36,6 +39,18 @@ async function runScheduledRotations() {
     import("../lib/collection-rotation-analytics"),
     import("../lib/collection-rotation-schedule"),
   ]);
+
+  if (!isCollectionRotationScheduleEnabled()) {
+    console.log(
+      "[collection-rotation] Scheduler is disabled. Set COLLECTION_ROTATION_CRON_ENABLED=true to enable it."
+    );
+
+    return {
+      prisma,
+      completedCount: 0,
+      failedCount: 0,
+    };
+  }
 
   const scheduledFor =
     getCurrentScheduleBoundary();
@@ -51,12 +66,35 @@ async function runScheduledRotations() {
     `[collection-rotation] Configured interval: ${intervalMinutes} minutes`
   );
 
-  const existingScheduleRun =
+  let existingScheduleRun =
     await prisma.collectionRotationScheduleRun.findUnique({
       where: {
         scheduledFor,
       },
     });
+
+  if (
+    existingScheduleRun?.status === "Running" &&
+    existingScheduleRun.startedAt.getTime() <
+      Date.now() - ABANDONED_SCHEDULE_AFTER_MS
+  ) {
+    existingScheduleRun =
+      await prisma.collectionRotationScheduleRun.update({
+        where: { id: existingScheduleRun.id },
+        data: {
+          status: "Failed",
+          failedCount: Math.max(existingScheduleRun.failedCount, 1),
+          results: [
+            {
+              status: "Failed",
+              error:
+                "The scheduled process stopped before it could finish.",
+            },
+          ],
+          completedAt: new Date(),
+        },
+      });
+  }
 
   if (existingScheduleRun) {
     console.log(
@@ -74,16 +112,60 @@ async function runScheduledRotations() {
     };
   }
 
-  const scheduleRun =
-    await prisma.collectionRotationScheduleRun.create({
-      data: {
-        scheduledFor,
-        status: "Running",
-      },
-    });
+  let scheduleRun;
 
-  const analyticsRefresh =
-    await syncAnalyticsForEnabledRotations();
+  try {
+    scheduleRun =
+      await prisma.collectionRotationScheduleRun.create({
+        data: {
+          scheduledFor,
+          status: "Running",
+        },
+      });
+  } catch (error) {
+    const concurrentRun =
+      await prisma.collectionRotationScheduleRun.findUnique({
+        where: { scheduledFor },
+      });
+
+    if (concurrentRun) {
+      console.log(
+        `[collection-rotation] Another process claimed ${scheduledFor.toISOString()} with status ${concurrentRun.status}. Skipping duplicate execution.`
+      );
+
+      return {
+        prisma,
+        completedCount: concurrentRun.completedCount,
+        failedCount: 0,
+      };
+    }
+
+    throw error;
+  }
+
+  const results: ScheduledResult[] = [];
+
+  try {
+
+  let analyticsRefresh: Record<string, unknown>;
+
+  try {
+    analyticsRefresh =
+      await syncAnalyticsForEnabledRotations();
+  } catch (error) {
+    analyticsRefresh = {
+      skipped: true,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Analytics refresh failed.",
+    };
+
+    console.error(
+      "[collection-rotation] Analytics refresh failed; continuing with cached and local data:",
+      analyticsRefresh.error
+    );
+  }
 
   console.log(
     `[collection-rotation] Analytics refresh: ${JSON.stringify(analyticsRefresh)}`
@@ -124,8 +206,6 @@ async function runScheduledRotations() {
   console.log(
     `[collection-rotation] ${enabledRotations.length} enabled collection(s) found.`
   );
-
-  const results: ScheduledResult[] = [];
 
   for (
     let index = 0;
@@ -229,6 +309,48 @@ async function runScheduledRotations() {
     completedCount,
     failedCount,
   };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "The scheduled runner stopped unexpectedly.";
+
+    try {
+      await prisma.collectionRotationScheduleRun.updateMany({
+        where: {
+          id: scheduleRun.id,
+          status: "Running",
+        },
+        data: {
+          status: "Failed",
+          completedCount: results.filter(
+            (result) => result.status === "Completed"
+          ).length,
+          failedCount: Math.max(
+            1,
+            results.filter((result) => result.status === "Failed").length
+          ),
+          results: [
+            ...results,
+            {
+              collectionId: "",
+              collectionTitle: "Scheduled cycle",
+              status: "Failed",
+              error: message,
+            },
+          ],
+          completedAt: new Date(),
+        },
+      });
+    } catch (finalizationError) {
+      console.error(
+        "[collection-rotation] Could not finalize the failed schedule record:",
+        finalizationError
+      );
+    }
+
+    throw error;
+  }
 }
 
 async function main() {
@@ -247,7 +369,9 @@ async function main() {
     prisma = result.prisma;
 
     if (result.failedCount > 0) {
-      process.exitCode = 1;
+      console.warn(
+        `[collection-rotation] ${result.failedCount} collection(s) failed. The cycle completed and the failures were recorded in Reef Ops.`
+      );
     }
   } catch (error) {
     console.error(
