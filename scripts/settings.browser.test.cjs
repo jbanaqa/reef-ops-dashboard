@@ -108,7 +108,7 @@ const { chromium } = require("playwright");
         }
         if (body.action === "process-inbox") {
           syncRuns++;
-          return route.fulfill({ json: { processed: 1, unresolved: 0 } });
+          return route.fulfill({ json: { processed: syncRuns === 1 ? 1 : 0, unresolved: 0 } });
         }
         if (body.action === "start-klaviyo-opens") {
           engagementRunning = true;
@@ -190,6 +190,7 @@ const { chromium } = require("playwright");
           health: {
             unresolved: 0,
             inbox: [],
+            lastProcessed: { processedAt: "2026-09-09T12:00:00Z", topic: "customers/update" },
             oldestPending: { dueAt: "2026-09-09T12:00:00Z", error: null },
           },
           resources: [
@@ -213,11 +214,16 @@ const { chromium } = require("playwright");
       .getByRole("button", { name: "Process Shopify events now", exact: true })
       .click();
     await page
-      .getByText("Processed 1 events. 0 unresolved events remain.", {
+      .getByText("Processed 1 event. 0 unresolved remain.", {
         exact: true,
       })
       .waitFor();
     assert.equal(syncRuns, 1);
+    await page
+      .getByRole("button", { name: "Process Shopify events now", exact: true })
+      .click();
+    await page.getByText(/No events waiting\. Shopify changes may already have processed automatically/).waitFor();
+    assert.equal(syncRuns, 2);
     assert.equal(saves.length, 0);
     await page.getByRole("button", { name: /Sending & signup/ }).click();
     await page

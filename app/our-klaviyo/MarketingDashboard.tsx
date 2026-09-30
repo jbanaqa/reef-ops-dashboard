@@ -93,6 +93,7 @@ type CampaignReport = {
 type Data = {
   health?: {
     unresolved: number;
+    lastProcessed: { processedAt: string; topic: string } | null;
     inbox: {
       id: string;
       topic: string;

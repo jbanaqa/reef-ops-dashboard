@@ -763,6 +763,11 @@ export async function GET(request: Request) {
       unresolved: await prisma.marketingWebhookInbox.count({
         where: { shop: shop(), status: { not: "DONE" } },
       }),
+      lastProcessed: await prisma.marketingWebhookInbox.findFirst({
+        where: { shop: shop(), status: "DONE", processedAt: { not: null } },
+        orderBy: { processedAt: "desc" },
+        select: { processedAt: true, topic: true },
+      }),
       oldestPending: await prisma.marketingMessage.findFirst({
         where: { shop: shop(), status: "PENDING" },
         orderBy: { dueAt: "asc" },

@@ -52,6 +52,7 @@ export type SettingsData = {
   health?: {
     unresolved: number;
     inbox: InboxRow[];
+    lastProcessed: { processedAt: string; topic: string } | null;
     oldestPending: { dueAt: string; error: string | null } | null;
   };
   resources: { kind: string; key: string; data: Record<string, unknown> }[];
@@ -455,8 +456,8 @@ export default function SettingsWorkspace({
                 <div>
                   <strong>Process Shopify events now</strong>
                   <p>
-                    Run immediately instead of waiting for the scheduled check.
-                    This action does not send messages.
+                    Process received events waiting in Reef Ops. This does not
+                    fetch past Shopify changes or send messages.
                   </p>
                 </div>
                 <button
@@ -469,12 +470,11 @@ export default function SettingsWorkspace({
                         action<{ processed: number; unresolved: number }>({
                           action: "process-inbox",
                         }),
-                      (r) =>
-                        "Processed " +
-                        r.processed +
-                        " events. " +
-                        r.unresolved +
-                        " unresolved events remain.",
+                      (r) => r.processed
+                        ? `Processed ${r.processed} ${r.processed === 1 ? "event" : "events"}. ${r.unresolved} unresolved remain.`
+                        : r.unresolved
+                          ? `${r.unresolved} events remain, but none were ready. Check Delivery health below for retries or errors.`
+                          : "No events waiting. Shopify changes may already have processed automatically; this does not import past changes.",
                     )
                   }
                 >
@@ -485,8 +485,8 @@ export default function SettingsWorkspace({
               </div>
               <div className="sw-stat-line">
                 <div>
-                  <span>Last scheduled run</span>
-                  <strong>{date(worker?.at)}</strong>
+                  <span>Last event processed</span>
+                  <strong>{data.health?.lastProcessed ? date(data.health.lastProcessed.processedAt) : "None recorded"}</strong>
                 </div>
                 <div>
                   <span>Unresolved events</span>
@@ -496,9 +496,8 @@ export default function SettingsWorkspace({
                 </div>
               </div>
               <p className="sw-hint">
-                Scheduled checks run about every five minutes. Processing events
-                updates profiles and may schedule workflow messages; customer
-                sending is controlled separately.
+                New Shopify changes arrive through webhooks and are checked about
+                every five minutes. Customer sending is controlled separately.
               </p>
               <Toggle
                 label="Process incoming Shopify events"
