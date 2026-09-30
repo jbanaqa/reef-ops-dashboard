@@ -630,9 +630,12 @@ const { chromium } = require("playwright");
       .check();
     await page.getByRole("button", { name: "Save flow", exact: true }).click();
     await page.getByText("Test this flow", { exact: true }).click();
-    await page.getByLabel("Address for a real-flow test").fill("test@example.com");
-    await page.getByRole("button", { name: "Prepare one-contact test" }).click();
-    await page.getByText(/Current real-flow test address:/).waitFor();
+    await page.getByText(/Click an email block below/).waitFor();
+    await page.getByRole("button", { name: /Test timing/ }).click();
+    await page.getByLabel("Test email", { exact: true }).fill("test@example.com");
+    await page.screenshot({ path: path.join(output, "flow-test-desktop.png") });
+    await page.getByRole("button", { name: "Start test mode" }).click();
+    await page.getByText(/Testing:.*test@example.com/).waitFor();
     await page
       .locator(".mk-cart-map")
       .getByRole("button", { name: /Product recommendations/ })
@@ -648,7 +651,7 @@ const { chromium } = require("playwright");
         ),
       );
     }
-    await page.getByRole("button", { name: "Stop test and pause flow" }).click();
+    await page.getByRole("button", { name: "Stop test" }).click();
     assert.equal(
       await page.getByLabel("Enable this flow", { exact: true }).isChecked(),
       false,

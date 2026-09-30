@@ -137,6 +137,8 @@ export default function FlowsWorkspace({
   const [testRecipient, setTestRecipient] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [simulatedDueAt, setSimulatedDueAt] = useState("");
+  const [testView, setTestView] = useState<"preview" | "timing">("preview");
+  const [deliveryTestSource, setDeliveryTestSource] = useState<"date" | "shopify">("date");
   const heading = useRef<HTMLHeadingElement>(null);
   const returnTo = useRef<{ id: string; scroll: number } | null>(null);
   const selectedId = selected?.id;
@@ -210,46 +212,67 @@ export default function FlowsWorkspace({
           {selected.key !== "low-stock" && (
             <details className="fw-test-panel" aria-label="Test this flow">
               <summary>Test this flow</summary>
-              <p>Open an email step and use <strong>Send test email</strong> to check its appearance at any address you enter. That preview does not enroll anyone.</p>
-              <p><strong>Test the real timing:</strong> enter one test address below, then perform the Shopify action shown for this flow. Reef Ops will limit new enrollments to that address while test mode is active. Normal consent, delays, purchase checks, and sending controls still apply.</p>
-              {selectedTestTarget && <p>Current real-flow test address: <strong>{selectedTestTarget}</strong>. {selected.enabled ? "Test mode is active." : "The flow is paused."} Preparing a different address cancels this flow’s pending test messages.</p>}
-              <label>
-                Address for a real-flow test
-                <input type="email" value={testRecipient} placeholder="you@example.com" onChange={(event) => setTestRecipient(event.target.value)} />
-              </label>
-              <div className="fw-test-actions">
-                <button disabled={busy || !testRecipient.trim()} onClick={async () => {
-                  const updated = await prepareTest(selected.key, testRecipient.trim());
-                  if (updated) setSelected(updated);
-                }}>Prepare one-contact test</button>
-                {selectedTestTarget && <button disabled={busy} onClick={async () => {
-                  const updated = await stopTest(selected.key);
-                  if (updated) setSelected(updated);
-                }}>Stop test and pause flow</button>}
+              {selectedTestTarget && (
+                <div className="fw-test-status">
+                  <span>{selected.enabled ? "Testing" : "Paused"}: <strong>{selectedTestTarget}</strong></span>
+                  <button disabled={busy} onClick={async () => {
+                    const updated = await stopTest(selected.key);
+                    if (updated) setSelected(updated);
+                  }}>Stop test</button>
+                </div>
+              )}
+              <div className="fw-test-choice" aria-label="Test type">
+                <button type="button" aria-pressed={testView === "preview"} onClick={() => setTestView("preview")}>
+                  <strong>Preview email</strong><span>Send now · check appearance</span>
+                </button>
+                <button type="button" aria-pressed={testView === "timing"} onClick={() => setTestView("timing")}>
+                  <strong>Test timing</strong><span>Follow the saved schedule</span>
+                </button>
               </div>
-              <p>{selected.key === "b2b-welcome"
-                ? "In Shopify, add the b2b tag to a subscribed test customer with this address. Use a customer who has not already received this welcome."
-                : selected.key === "abandoned-cart"
-                  ? "Start a new checkout using this address, then leave it incomplete. Reef Ops follows the saved SMS eligibility, delays, purchase checks, and email branches; test mode sends email only."
-                  : selected.key === "welcome"
-                    ? "For a real Welcome run, sign up a new address. An existing subscriber will not re-enter; use the email step’s direct preview to inspect the copy."
-                    : "For a real tagged-order run, place or update a test Shopify order with a delivery-date tag. A separate simulated-date test is available below."}</p>
-              <p>After the trigger, check the contact’s pending and sent messages in <Link href="/our-klaviyo/audiences">Audiences →</Link></p>
-              {selected.key === "delivery-upsell" && (
-                <div className="fw-delivery-simulation">
-                  <h4>Simulate a delivery date</h4>
-                  <p>Choose a future delivery date. Reef Ops calculates the notice time using this flow’s saved day offset, hour, and timezone, then schedules one email for the subscribed address above. This checks timing and delivery without creating a Shopify order.</p>
-                  <label>Delivery date
-                    <input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} />
+              {testView === "preview" ? (
+                <p className="fw-test-hint">Click an email block below, then choose <strong>Send test email</strong>.</p>
+              ) : (
+                <div className="fw-test-timing">
+                  {selected.key === "delivery-upsell" && (
+                    <div className="fw-test-choice fw-test-source" aria-label="Delivery test source">
+                      <button type="button" aria-pressed={deliveryTestSource === "date"} onClick={() => setDeliveryTestSource("date")}>Enter delivery date</button>
+                      <button type="button" aria-pressed={deliveryTestSource === "shopify"} onClick={() => setDeliveryTestSource("shopify")}>Use Shopify order</button>
+                    </div>
+                  )}
+                  <label>
+                    Test email
+                    <input type="email" value={testRecipient} placeholder="you@example.com" onChange={(event) => setTestRecipient(event.target.value)} />
                   </label>
-                  <button disabled={busy || !testRecipient.trim() || !deliveryDate} onClick={async () => {
-                    const result = await simulateDelivery(testRecipient.trim(), deliveryDate);
-                    if (result) setSimulatedDueAt(result.dueAt);
-                  }}>Schedule simulated notice</button>
-                  {simulatedDueAt && <p>Scheduled for {new Date(simulatedDueAt).toLocaleString()} on your device.</p>}
-                  {campaignTests.filter((test) => test.testOfCampaignId === "flow:delivery-upsell").slice(0, 5).map((test) => (
-                    <p key={test.id}>{test.messages?.[0]?.profile.email || "Test contact"} · {test.messages?.[0]?.status || test.status} · {test.scheduledAt ? new Date(test.scheduledAt).toLocaleString() : ""} {test.status === "SCHEDULED" && test.messages?.[0]?.status === "PENDING" && <button disabled={busy} onClick={() => void cancelScheduledTest(test.id)}>Cancel</button>}</p>
-                  ))}
+                  {selected.key === "delivery-upsell" && deliveryTestSource === "date" ? (
+                    <>
+                      <label>Delivery date
+                        <input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} />
+                      </label>
+                      <button disabled={busy || !testRecipient.trim() || !deliveryDate} onClick={async () => {
+                        const result = await simulateDelivery(testRecipient.trim(), deliveryDate);
+                        if (result) setSimulatedDueAt(result.dueAt);
+                      }}>Schedule test email</button>
+                      {simulatedDueAt && <p className="fw-test-hint">Scheduled for {new Date(simulatedDueAt).toLocaleString()}.</p>}
+                      {campaignTests.filter((test) => test.testOfCampaignId === "flow:delivery-upsell").slice(0, 5).map((test) => (
+                        <p className="fw-test-hint" key={test.id}>{test.messages?.[0]?.profile.email || "Test contact"} · {test.messages?.[0]?.status || test.status} · {test.scheduledAt ? new Date(test.scheduledAt).toLocaleString() : ""} {test.status === "SCHEDULED" && test.messages?.[0]?.status === "PENDING" && <button disabled={busy} onClick={() => void cancelScheduledTest(test.id)}>Cancel</button>}</p>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <button disabled={busy || !testRecipient.trim()} onClick={async () => {
+                        const updated = await prepareTest(selected.key, testRecipient.trim());
+                        if (updated) setSelected(updated);
+                      }}>Start test mode</button>
+                      <p className="fw-test-hint">{selected.key === "b2b-welcome"
+                        ? "Then add the B2B tag to this subscribed Shopify customer."
+                        : selected.key === "abandoned-cart"
+                          ? "Then start checkout with this email and leave it unfinished."
+                          : selected.key === "welcome"
+                            ? "Then sign up a new address. Existing subscribers cannot re-enter."
+                            : "Then add a delivery-date tag to a test Shopify order."}</p>
+                      <p className="fw-test-footnote">Only this address can enter. Normal consent and delays apply. <Link href="/our-klaviyo/audiences">View messages →</Link></p>
+                    </>
+                  )}
                 </div>
               )}
             </details>
@@ -447,6 +470,8 @@ export default function FlowsWorkspace({
                         setTestRecipient("");
                         setDeliveryDate("");
                         setSimulatedDueAt("");
+                        setTestView("preview");
+                        setDeliveryTestSource("date");
                         setSelected(r);
                       }}
                     >

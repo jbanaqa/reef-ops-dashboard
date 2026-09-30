@@ -675,15 +675,56 @@
 }
 .fw-test-panel {
   margin: 18px 0;
-  padding: 22px;
+  padding: 18px 20px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
 }
 
 .fw-test-panel summary { cursor: pointer; font-weight: 650; font-size: 16px; }
-.fw-test-panel[open] summary { margin-bottom: 14px; }
-.fw-test-panel p { max-width: 760px; }
-.fw-test-panel label { max-width: 440px; }
-.fw-test-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.fw-test-actions button:disabled { cursor: not-allowed; }
+.fw-test-panel[open] summary { margin-bottom: 16px; }
+.fw-test-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: var(--text);
+}
+.fw-test-status button { margin-left: auto; }
+.fw-test-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.fw-test-choice button {
+  min-width: 170px;
+  text-align: left;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 11px 14px;
+}
+.fw-test-choice button[aria-pressed="true"] {
+  border-color: var(--brand);
+  background: var(--surface-muted);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+.fw-test-choice button span,
+.fw-test-hint,
+.fw-test-footnote { color: var(--text-muted); }
+.fw-test-choice button span { font-size: 12px; }
+.fw-test-hint,
+.fw-test-footnote { margin: 8px 0 0; line-height: 1.45; }
+.fw-test-footnote { font-size: 12px; }
+.fw-test-timing { display: grid; justify-items: start; gap: 10px; }
+.fw-test-timing label { width: min(100%, 440px); margin: 0; }
+.fw-test-source { margin: 0; }
+.fw-test-source button { min-width: 0; }
+@media (max-width: 480px) {
+  .fw-test-choice button { flex: 1 1 100%; }
+}
