@@ -44,7 +44,7 @@ before(async () => {
   console.log("integration: applying migrations");
   const migrations = (await readdir("prisma/migrations"))
     .filter((x) =>
-      /baseline|add_product_inventory_state|add_our_klaviyo|marketing_flow_branch|marketing_webhook_inbox|campaign_delivery_options/.test(
+      /baseline|add_product_inventory_state|add_our_klaviyo|marketing_flow_branch|marketing_webhook_inbox|campaign_delivery_options|campaign_test_runs/.test(
         x,
       ),
     )
@@ -3865,5 +3865,84 @@ test("campaign segments, snapshot recipients, Smart Sending, and results stay co
   );
   assert.equal(report.status, 200);
   assert.equal((await report.json()).totals.skipped, 1);
+});
+
+test("one-contact campaign test uses the real worker without expanding or attributing the audience", async () => {
+  const previousAllowlist = process.env.MARKETING_TEST_EMAILS;
+  process.env.MARKETING_TEST_EMAILS = "campaign-run-test@example.com,campaign-run-outside@example.com";
+  try {
+    process.env.DASHBOARD_USERNAME = "staff";
+    process.env.DASHBOARD_PASSWORD = "test-password";
+    const api = await import("../app/api/marketing/route");
+    const request = (body: object) =>
+      new Request("https://app.example/api/marketing", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Basic " + Buffer.from("staff:test-password").toString("base64"),
+        },
+        body: JSON.stringify(body),
+      });
+    await prisma.marketingMessage.updateMany({ where: { shop, status: "PENDING" }, data: { status: "CANCELLED" } });
+    await prisma.marketingCampaign.updateMany({ where: { shop, status: { in: ["SCHEDULED", "SENDING"] } }, data: { status: "CANCELLED" } });
+    await prisma.marketingWebhookInbox.updateMany({ where: { shop, status: { not: "DONE" } }, data: { status: "DONE" } });
+    await prisma.marketingResource.update({
+      where: { shop_kind_key: { shop, kind: "SETTINGS", key: "global" } },
+      data: { data: store.json({ organizationName: "Corals Anonymous", postalAddress: "123 Test Street", operations: { sendingEnabled: true, migrationConfirmed: true, ingestEnabled: true, formEnabled: false } }) },
+    });
+    const segmentKey = "campaign-run-test-group";
+    await prisma.marketingResource.create({
+      data: { shop, kind: "SEGMENT", key: segmentKey, name: "Campaign test group", data: { tag: segmentKey } },
+    });
+    const createProfile = (address: string, tags: string[]) =>
+      prisma.marketingProfile.create({
+        data: { shop, email: address, tags, consents: { create: { channel: "EMAIL", status: "SUBSCRIBED", suppressed: false, source: "test", occurredAt: new Date() } } },
+      });
+    const target = await createProfile("campaign-run-test@example.com", [segmentKey]);
+    const other = await createProfile("campaign-run-other@example.com", [segmentKey]);
+    const outside = await createProfile("campaign-run-outside@example.com", []);
+    const source = await prisma.marketingCampaign.create({
+      data: { shop, name: "One-contact source", subject: "Test campaign", content: store.json(defaultContent), audience: { version: 2, includeKeys: [segmentKey], excludeKeys: [] }, smartSendingHours: 16, recipientMode: "SCHEDULE_TIME" },
+    });
+    const countBefore = await prisma.marketingCampaign.count({ where: { shop, testOfCampaignId: source.id } });
+    assert.equal((await api.POST(request({ action: "run-campaign-test", id: source.id, to: other.email }))).status, 400, "only approved test addresses can be used");
+    assert.equal((await api.POST(request({ action: "run-campaign-test", id: source.id, to: outside.email }))).status, 400, "an approved address must also belong to the selected audience");
+    assert.equal(await prisma.marketingCampaign.count({ where: { shop, testOfCampaignId: source.id } }), countBefore);
+    const queued = await api.POST(request({ action: "run-campaign-test", id: source.id, to: target.email }));
+    assert.equal(queued.status, 200, await queued.clone().text());
+    const { id: testId } = await queued.json();
+    const duplicate = await api.POST(request({ action: "run-campaign-test", id: source.id, to: target.email }));
+    assert.equal((await duplicate.json()).id, testId);
+    const testRun = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: testId }, include: { messages: true } });
+    assert.equal(testRun.testOfCampaignId, source.id);
+    assert.equal(testRun.status, "SCHEDULED");
+    assert.equal(testRun.recipientMode, "SEND_TIME");
+    assert.equal(testRun.messages.length, 1);
+    assert.equal(testRun.messages[0].profileId, target.id);
+    assert.equal((await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: source.id } })).status, "DRAFT");
+    await prisma.marketingCampaign.update({ where: { id: testId }, data: { expandedAt: null } });
+    const sentBefore = sent.length;
+    await worker.runMarketing();
+    assert.equal(sent.length, sentBefore + 1);
+    assert.equal(await prisma.marketingMessage.count({ where: { campaignId: testId, profileId: other.id } }), 0);
+    const delivered = await prisma.marketingMessage.findFirstOrThrow({ where: { campaignId: testId } });
+    assert.equal(delivered.status, "SENT");
+    assert.equal((await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: testId } })).status, "COMPLETED");
+    await prisma.marketingEvent.create({ data: { shop, key: `campaign-test-click:${testId}`, type: "CLICKED", profileId: target.id, messageId: delivered.id, occurredAt: new Date(), payload: {} } });
+    const { findEmailAttribution } = await import("../lib/marketing/attribution");
+    assert.equal(await findEmailAttribution(prisma, target.id, new Date()), null);
+    const { marketingAnalytics } = await import("../lib/marketing/analytics");
+    assert.equal((await marketingAnalytics(30)).rows.some((row) => row.key === testId), false);
+    const another = await api.POST(request({ action: "run-campaign-test", id: source.id, to: target.email }));
+    const secondId = (await another.json()).id;
+    assert.notEqual(secondId, testId);
+    await worker.runMarketing();
+    const skipped = await prisma.marketingMessage.findFirstOrThrow({ where: { campaignId: secondId } });
+    assert.equal(skipped.status, "CANCELLED");
+    assert.match(skipped.error || "", /Smart Sending/);
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.MARKETING_TEST_EMAILS;
+    else process.env.MARKETING_TEST_EMAILS = previousAllowlist;
+  }
 });
 registerWelcomeTests(() => ({ prisma, store, worker }));

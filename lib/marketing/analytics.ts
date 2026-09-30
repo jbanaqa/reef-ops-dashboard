@@ -72,7 +72,10 @@ export async function marketingAnalytics(requestedDays = 30) {
       where: {
         shop: shop(),
         sentAt: { gte: since },
-        OR: [{ flowKey: { not: null } }, { campaignId: { not: null } }],
+        OR: [
+          { flowKey: { not: null } },
+          { campaign: { is: { testOfCampaignId: null } } },
+        ],
         ...(cursor ? { id: { gt: cursor } } : {}),
       },
       orderBy: { id: "asc" },

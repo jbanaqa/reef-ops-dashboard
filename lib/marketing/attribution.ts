@@ -45,7 +45,10 @@ export async function findEmailAttribution(
         gte: new Date(+convertedAt - (maxDays + 7) * DAY),
         lte: convertedAt,
       },
-      OR: [{ flowKey: { not: null } }, { campaignId: { not: null } }],
+      OR: [
+        { flowKey: { not: null } },
+        { campaign: { is: { testOfCampaignId: null } } },
+      ],
     },
     select: { id: true, sentAt: true },
   });

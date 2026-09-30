@@ -36,6 +36,7 @@ import {
   defaultContent,
   defaultMarketingSettings,
   email,
+  eligible,
   extractEmailBranding,
   marketingSettings,
   MarketingSettings,
@@ -155,6 +156,18 @@ const campaignOptions = (body: Record<string, unknown>) => ({
     body.recipientMode === "SCHEDULE_TIME" ? "SCHEDULE_TIME" : "SEND_TIME",
 });
 
+function approvedTestRecipient(value: unknown) {
+  const to = email(value);
+  const allowed = (process.env.MARKETING_TEST_EMAILS || "")
+    .split(",")
+    .map((address) => address.trim().toLowerCase());
+  if (!allowed.includes(to))
+    throw new Error(
+      "This address is not approved for test emails. Ask an administrator to add it to the test recipient list.",
+    );
+  return to;
+}
+
 async function checkedCampaignAudience(value: unknown) {
   const parsed = campaignAudience(value);
   const resolved = await atomic((tx) => resolveCampaignAudience(tx, parsed));
@@ -211,6 +224,79 @@ async function scheduleCampaign(id: string, scheduledAt: Date) {
   });
   if (!result.count) throw new Error("Only drafts can be scheduled.");
   return null;
+}
+
+async function scheduleCampaignTest(id: string, to: string) {
+  const original = await prisma.marketingCampaign.findFirst({
+    where: { id, shop: shop(), testOfCampaignId: null },
+  });
+  if (!original) throw new Error("Campaign not found.");
+  if (original.channel !== "EMAIL")
+    throw new Error("One-contact campaign tests currently support email only.");
+  const settings = await loadMarketingSettings();
+  const readiness = setup(settings.operations, settings.postalAddress);
+  if (!readiness.sendingEnabled || !readiness.emailReady || !readiness.migrationConfirmed)
+    throw new Error("Complete email setup, migration review, and enable customer sending before running a campaign test.");
+  if (await inboxUnresolved())
+    throw new Error("Resolve pending Shopify events before running a campaign test.");
+  const { resolved } = await checkedCampaignAudience(original.audience);
+  return atomic(async (tx) => {
+    const profile = await tx.marketingProfile.findFirst({
+      where: { shop: shop(), email: to },
+      include: { consents: true },
+    });
+    if (!profile)
+      throw new Error("This test address is not in Profiles yet. Import or sync the contact before testing.");
+    if (!eligible(profile.consents.find((consent) => consent.channel === "EMAIL")))
+      throw new Error("This contact cannot receive marketing email. Check email consent and suppression in Audiences.");
+    if (!(await tx.marketingProfile.count({
+      where: { id: profile.id, AND: [resolvedAudienceWhere(resolved, original.channel)] },
+    })))
+      throw new Error("This contact is not in the campaign's selected audience. Choose another test contact or review the audience.");
+    const pending = await tx.marketingCampaign.findFirst({
+      where: {
+        shop: shop(),
+        testOfCampaignId: original.id,
+        status: { in: ["SCHEDULED", "SENDING"] },
+        messages: { some: { profileId: profile.id, status: { in: ["PENDING", "SENDING", "UNKNOWN"] } } },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (pending) return { id: pending.id, existing: true };
+    const now = new Date();
+    const test = await tx.marketingCampaign.create({
+      data: {
+        shop: shop(),
+        name: `Test run: ${original.name}`.slice(0, 200),
+        subject: original.subject,
+        channel: original.channel,
+        content: json(original.content),
+        audience: json(original.audience),
+        smartSendingHours: original.smartSendingHours,
+        recipientMode: "SEND_TIME",
+        testOfCampaignId: original.id,
+        status: "SCHEDULED",
+        scheduledAt: now,
+        // The worker prepares dynamic products, then uses this one message.
+        // A populated expandedAt prevents audience-wide expansion.
+        expandedAt: now,
+      },
+    });
+    await tx.marketingMessage.create({
+      data: {
+        shop: shop(),
+        key: `campaign:${test.id}:${profile.id}`,
+        campaignId: test.id,
+        profileId: profile.id,
+        channel: original.channel,
+        subject: original.subject,
+        content: json(original.content),
+        dueAt: now,
+      },
+    });
+    return { id: test.id, existing: false };
+  });
 }
 
 const SHOPIFY_MARKETING_WEBHOOK_TOPICS = [
@@ -446,6 +532,7 @@ export async function GET(request: Request) {
     const [
       profiles,
       campaigns,
+      campaignTests,
       resources,
       counts,
       messageCounts,
@@ -482,10 +569,19 @@ export async function GET(request: Request) {
         include: { consents: true },
       }),
       prisma.marketingCampaign.findMany({
-        where: { shop: shop() },
+        where: { shop: shop(), testOfCampaignId: null },
         orderBy: { createdAt: "desc" },
         take: 100,
         include: { _count: { select: { messages: true } } },
+      }),
+      prisma.marketingCampaign.findMany({
+        where: { shop: shop(), testOfCampaignId: { not: null } },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+        include: {
+          _count: { select: { messages: true } },
+          messages: { take: 1, select: { status: true, error: true, profile: { select: { email: true } } } },
+        },
       }),
       prisma.marketingResource.findMany({
         where: {
@@ -555,6 +651,7 @@ export async function GET(request: Request) {
         profiles,
         nextCursor: profiles.length === 100 ? profiles[99].id : null,
         campaigns,
+        campaignTests,
         resources,
         settings,
         counts: {
@@ -715,14 +812,7 @@ export async function POST(request: Request) {
         content: await resolveWelcomeSocialProducts(content(b.content), `welcome-social-preview:${crypto.randomUUID()}`),
       });
     if (b.action === "test-email") {
-      const to = email(b.to);
-      const allowed = (process.env.MARKETING_TEST_EMAILS || "")
-        .split(",")
-        .map((v) => v.trim().toLowerCase());
-      if (!allowed.includes(to))
-        throw new Error(
-          "This address is not approved for test emails. Ask an administrator to add it to the test recipient list.",
-        );
+      const to = approvedTestRecipient(b.to);
       const s = await loadMarketingSettings();
       if (!setup(s.operations, s.postalAddress).emailReady)
         throw new Error("Complete email provider setup first.");
@@ -758,6 +848,8 @@ export async function POST(request: Request) {
       );
       return Response.json({ ok: true });
     }
+    if (b.action === "run-campaign-test")
+      return Response.json(await scheduleCampaignTest(String(b.id || ""), approvedTestRecipient(b.to)));
     if (b.action === "import")
       return Response.json({
         results: await importProfiles(b.rows, b.dryRun !== false),

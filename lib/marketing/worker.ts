@@ -218,7 +218,23 @@ export async function runMarketing(onlyMessageId?: string) {
         where: { id: current.id },
         data: { content: json(preparedContent) },
       });
-      if (current.expandedAt) {
+      if (current.testOfCampaignId) {
+        const count = await tx.marketingMessage.count({
+          where: { campaignId: current.id },
+        });
+        if (count !== 1) {
+          await tx.marketingMessage.updateMany({
+            where: { campaignId: current.id, status: "PENDING" },
+            data: { status: "CANCELLED", error: "Campaign test must have exactly one recipient" },
+          });
+          await tx.marketingCampaign.update({
+            where: { id: current.id },
+            data: { status: "CANCELLED" },
+          });
+          return;
+        }
+      }
+      if (current.expandedAt || current.testOfCampaignId) {
         await tx.marketingMessage.updateMany({
           where: { campaignId: current.id, status: "PENDING" },
           data: { content: json(preparedContent) },

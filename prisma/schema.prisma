@@ -88,6 +88,7 @@ model MarketingCampaign {
   audience Json
   smartSendingHours Int @default(16)
   recipientMode String @default("SEND_TIME")
+  testOfCampaignId String?
   status String @default("DRAFT")
   scheduledAt DateTime?
   expandedAt DateTime?
@@ -95,6 +96,7 @@ model MarketingCampaign {
   updatedAt DateTime @updatedAt
   messages MarketingMessage[]
   @@index([shop, status, scheduledAt])
+  @@index([shop, testOfCampaignId, createdAt])
 }
 
 model MarketingMessage {

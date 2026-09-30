@@ -46,6 +46,8 @@ type Profile = {
 };
 type Campaign = {
   id: string;
+  testOfCampaignId?: string | null;
+  messages?: { status: string; error: string | null; profile: { email: string | null } }[];
   name: string;
   subject: string;
   status: string;
@@ -104,6 +106,7 @@ type Data = {
   profiles: Profile[];
   nextCursor: string | null;
   campaigns: Campaign[];
+  campaignTests?: Campaign[];
   resources: Resource[];
   settings: MarketingSettings;
   counts: { profiles: number; mailable: number; suppressions: number };
@@ -161,6 +164,14 @@ const newCampaign = () => ({
   recipientMode: "SEND_TIME" as const,
 });
 const sameRules = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const testRunStatus = (status: string) => ({
+  PENDING: "Queued",
+  SENDING: "Sending",
+  SENT: "Sent",
+  CANCELLED: "Skipped",
+  FAILED: "Failed",
+  UNKNOWN: "Needs review",
+}[status] || status.toLowerCase());
 const currentCampaignContent = (item: Campaign) => {
   const saved = structuredClone(item.content);
   const sections = saved.campaignLayout?.sections;
@@ -217,11 +228,15 @@ const campaignForm = (item: Campaign, resources: Resource[]): CampaignForm => {
 function CampaignTestEmail({
   name,
   busy,
+  canRun,
   onSend,
+  onRun,
 }: {
   name: string;
   busy: boolean;
+  canRun: boolean;
   onSend: (recipient: string) => Promise<unknown>;
+  onRun: (recipient: string) => Promise<unknown>;
 }) {
   const [recipient, setRecipient] = useState("");
   return (
@@ -229,7 +244,8 @@ function CampaignTestEmail({
       className="mk-campaign-test-form"
       onSubmit={(event) => {
         event.preventDefault();
-        void onSend(recipient.trim());
+        const mode = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value;
+        void (mode === "run" ? onRun(recipient.trim()) : onSend(recipient.trim()));
       }}
     >
       <label>
@@ -243,15 +259,23 @@ function CampaignTestEmail({
           onChange={(event) => setRecipient(event.target.value)}
         />
       </label>
-      <button type="submit" disabled={busy || !recipient.trim()}>
-        {busy ? "Sending…" : "Send test email"}
-      </button>
+      <div className="mk-campaign-test-actions">
+        <button type="submit" value="preview" disabled={busy || !recipient.trim()}>
+          {busy ? "Working…" : "Send test email"}
+        </button>
+        <button type="submit" value="run" disabled={busy || !recipient.trim() || !canRun}>
+          {busy ? "Working…" : "Run campaign test"}
+        </button>
+      </div>
       <small>
-        Sends a [TEST] copy of {name || "this campaign"} only to this address.
-        Use an approved internal test address. This does not schedule the
-        campaign or contact its audience; consent and Smart Sending are checked
-        only during a real campaign send.
+        <strong>Send test email</strong> previews {name || "this campaign"} in an approved
+        internal inbox. <strong>Run campaign test</strong> queues one real campaign
+        message for that same address through the scheduled worker. The contact
+        must be subscribed and in the selected audience. Smart Sending and
+        suppression apply; a successful test can affect that contact’s next
+        16-hour send window. No other audience members are contacted.
       </small>
+      {!canRun && <small>Complete email setup, migration review, and customer sending in Settings before running a campaign test.</small>}
     </form>
   );
 }
@@ -275,6 +299,11 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   const [resource, setResource] = useState<Resource | null>(null);
   const [previewingCampaign, setPreviewingCampaign] = useState<Campaign | null>(null);
   const [brandingDraft, setBrandingDraft] = useState<EmailBranding | null>(null);
+  const canRunCampaignTest = !!(
+    data?.setup.sendingEnabled &&
+    data?.setup.emailReady &&
+    data?.setup.migrationConfirmed
+  );
   const templates: Resource[] = data
     ? [
         ...flowEmailTemplates(data.resources),
@@ -318,6 +347,16 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     if (!r.ok) throw new Error(d.error);
     setData(d);
   }, []);
+  const hasActiveCampaignTest = !!data?.campaignTests?.some((test) =>
+    ["PENDING", "SENDING"].includes(test.messages?.[0]?.status || ""),
+  );
+  useEffect(() => {
+    if (tab !== "campaigns" || !hasActiveCampaignTest) return;
+    const timer = window.setInterval(() => {
+      void load().catch(() => {});
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [tab, hasActiveCampaignTest, load]);
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/marketing", { cache: "no-store", signal: controller.signal })
@@ -560,6 +599,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                               <small>
                                 {m.flowKey ||
                                   data.campaigns.find(
+                                    (c) => c.id === m.campaignId,
+                                  )?.name ||
+                                  data.campaignTests?.find(
                                     (c) => c.id === m.campaignId,
                                   )?.name ||
                                   "Form"}
@@ -862,6 +904,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       <CampaignTestEmail
                         name={campaign.name}
                         busy={busy}
+                        canRun={canRunCampaignTest}
                         onSend={(to) =>
                           run(
                             () => action({
@@ -875,6 +918,12 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                             }),
                             `Test email sent to ${to}. The campaign is still a draft.`,
                           )
+                        }
+                        onRun={(to) =>
+                          run(async () => {
+                            const id = await save();
+                            return action({ action: "run-campaign-test", id, to });
+                          }, `One-contact campaign test queued for ${to}. Return to the campaign list to follow its result.`)
                         }
                       />
                     </section>
@@ -1141,6 +1190,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                 <CampaignTestEmail
                                   name={item.name}
                                   busy={busy}
+                                  canRun={canRunCampaignTest}
                                   onSend={(to) =>
                                     run(
                                       () => action({
@@ -1152,7 +1202,37 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                       `Test email sent to ${to}. Campaign status is unchanged.`,
                                     )
                                   }
+                                  onRun={(to) =>
+                                    run(
+                                      () => action({ action: "run-campaign-test", id: item.id, to }),
+                                      `One-contact campaign test queued for ${to}. Check its result below after the next worker run.`,
+                                    )
+                                  }
                                 />
+                              </div>
+                            )}
+                            {(data.campaignTests || []).filter((test) => test.testOfCampaignId === item.id).slice(0, 3).length > 0 && (
+                              <div className="mk-campaign-test-runs">
+                                <strong>Recent campaign tests</strong>
+                                {(data.campaignTests || []).filter((test) => test.testOfCampaignId === item.id).slice(0, 3).map((test) => (
+                                  <div key={test.id}>
+                                    <span>{test.messages?.[0]?.profile.email || "Test contact"} · {testRunStatus(test.messages?.[0]?.status || test.status)} · {test.scheduledAt ? new Date(test.scheduledAt).toLocaleString() : "Queued"}</span>
+                                    <span className="mk-campaign-test-run-actions">
+                                      <button disabled={busy} onClick={() => run(async () => {
+                                        const response = await fetch(`/api/marketing?view=campaign-report&id=${encodeURIComponent(test.id)}`, { cache: "no-store" });
+                                        const report = await response.json();
+                                        if (!response.ok) throw new Error(report.error);
+                                        setCampaignReport(report);
+                                      }, "Campaign test result loaded")}>View test result</button>
+                                      {["SCHEDULED", "SENDING"].includes(test.status) && test.messages?.[0]?.status === "PENDING" && (
+                                        <button disabled={busy} onClick={() => run(
+                                          () => action({ action: "cancel", id: test.id }),
+                                          "Pending campaign test cancelled. A message already in flight may finish.",
+                                        )}>Cancel test</button>
+                                      )}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </article>

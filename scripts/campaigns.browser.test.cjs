@@ -95,6 +95,7 @@ const { chromium } = require("playwright");
           _count: { messages: 0 },
         },
       ],
+      campaignTests: [],
       resources: [
         { id: "flow", kind: "FLOW", key: "welcome", data: {} },
         {
@@ -124,7 +125,7 @@ const { chromium } = require("playwright");
         attribution: { emailClickDays: 5, emailOpenDays: 5 },
         operations: {},
       },
-      setup: { sendingEnabled: false },
+      setup: { sendingEnabled: true, emailReady: true, migrationConfirmed: true },
       counts: { profiles: 0, mailable: 0, suppressions: 0 },
       revenue: {},
       eventCounts: [],
@@ -143,13 +144,31 @@ const { chromium } = require("playwright");
           data.resources[1] = { ...data.resources[1], ...body };
         if (body.action === "save-settings")
           data.settings = { ...data.settings, ...body.settings };
+        if (body.action === "run-campaign-test")
+          data.campaignTests.unshift({
+            ...data.campaigns[0],
+            id: `test-run-${data.campaignTests.length + 1}`,
+            testOfCampaignId: body.id,
+            name: `Test run: ${data.campaigns[0].name}`,
+            status: "SCHEDULED",
+            scheduledAt: new Date().toISOString(),
+            messages: [{ status: "PENDING", error: null, profile: { email: body.to } }],
+            _count: { messages: 1 },
+          });
         await route.fulfill({
           json: {
-            id: body.id || "draft",
+            id: body.action === "run-campaign-test" ? data.campaignTests[0].id : body.id || "draft",
             ok: true,
             settings: data.settings,
           },
         });
+      } else if (url.searchParams.get("view") === "campaign-report") {
+        const testRun = data.campaignTests.find((item) => item.id === url.searchParams.get("id"));
+        await route.fulfill({ json: {
+          campaign: testRun || data.campaigns[0],
+          totals: { messages: 1, queued: 1, sent: 0, delivered: 0, opened: 0, clicked: 0, ordered: 0, skipped: 0, failed: 0, needsAttention: 0, revenue: {} },
+          reasons: [],
+        } });
       } else if (url.searchParams.get("view") === "analytics")
         await route.fulfill({
           json: {
@@ -206,6 +225,14 @@ const { chromium } = require("playwright");
     assert.equal(writes.at(-1).to, "preview@example.com");
     assert.equal(writes.at(-1).subject, "Test subject");
     assert.equal(data.campaigns[0].status, "DRAFT");
+    await page.getByRole("button", { name: "Run campaign test", exact: true }).click();
+    await page.getByText("One-contact campaign test queued", { exact: false }).waitFor();
+    assert.equal(writes.at(-1).action, "run-campaign-test");
+    assert.equal(writes.at(-1).id, "draft");
+    assert.equal(writes.at(-1).to, "preview@example.com");
+    assert.equal(data.campaigns[0].status, "DRAFT");
+    await page.getByRole("button", { name: "View test result" }).click();
+    await page.getByText("Test run: Test campaign", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Send test", exact: true }).click();
     await page.getByRole("button", { name: "View email", exact: true }).click();
     await page.getByRole("dialog").waitFor();
@@ -280,6 +307,7 @@ const { chromium } = require("playwright");
     assert.equal(writes.at(-1).to, "review@example.com");
     assert.equal(writes.at(-1).content.campaignLayout.sections[0].products[0].title, "Red and White Coco Worm");
     assert.equal(data.campaigns[0].status, "DRAFT");
+    assert.equal(await page.getByLabel("Test campaign email").getByRole("button", { name: "Run campaign test" }).count(), 1);
     assert.equal(await page.getByLabel("16-hour Smart Sending").isChecked(), true);
     assert.equal(await page.getByRole("button", { name: "Send now" }).count(), 1);
     assert.equal(
