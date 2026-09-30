@@ -673,3 +673,17 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+.fw-test-panel {
+  margin: 18px 0;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.fw-test-panel summary { cursor: pointer; font-weight: 650; font-size: 16px; }
+.fw-test-panel[open] summary { margin-bottom: 14px; }
+.fw-test-panel p { max-width: 760px; }
+.fw-test-panel label { max-width: 440px; }
+.fw-test-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.fw-test-actions button:disabled { cursor: not-allowed; }

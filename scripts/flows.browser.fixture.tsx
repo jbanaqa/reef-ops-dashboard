@@ -64,6 +64,29 @@ function App() {
         busy={false}
         refresh={async () => {}}
         testEmail={async () => ({ ok: true })}
+        prepareTest={async (key, to) => {
+          const resource = resources.find((item) => item.key === key)!;
+          const setting = key === "abandoned-cart" ? "cart" : key === "welcome" ? "welcome" : key === "delivery-upsell" ? "delivery" : null;
+          const data = setting
+            ? { ...resource.data, [setting]: { ...(resource.data[setting] as object || {}), testEmail: to } }
+            : { ...resource.data, testEmail: to };
+          const saved = { ...resource, enabled: true, data };
+          setResources((list) => list.map((item) => item.key === key ? saved : item));
+          return saved;
+        }}
+        stopTest={async (key) => {
+          const resource = resources.find((item) => item.key === key)!;
+          const setting = key === "abandoned-cart" ? "cart" : key === "welcome" ? "welcome" : key === "delivery-upsell" ? "delivery" : null;
+          const data = setting
+            ? { ...resource.data, [setting]: { ...(resource.data[setting] as object || {}), testEmail: undefined } }
+            : { ...resource.data, testEmail: undefined };
+          const saved = { ...resource, enabled: false, data };
+          setResources((list) => list.map((item) => item.key === key ? saved : item));
+          return saved;
+        }}
+        simulateDelivery={async () => ({ dueAt: new Date(Date.now() + 86400000).toISOString() })}
+        cancelScheduledTest={async () => ({ ok: true })}
+        campaignTests={[]}
         save={async (resource, data, enabled) => {
           if (localStorage.getItem("failSave")) return undefined;
           const saved = { ...resource, data, enabled };

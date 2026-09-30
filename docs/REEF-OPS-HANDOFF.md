@@ -280,7 +280,7 @@ Exact feed ranking is not claimed to match Klaviyo's proprietary algorithm.
 
 | Control | What it does | What it does not prove |
 | --- | --- | --- |
-| Email editor → Send test | Sends current preview to an allowlisted internal address | Enrollment, real branch selection, actual coupon redemption, natural schedule |
+| Email editor → Send test | Sends current preview to the address entered in the editor | Enrollment, real branch selection, actual coupon redemption, natural schedule |
 | Profile → Messages → Send this step now | Advances only one eligible restricted cart message's wait and runs its real send checks | It does not bypass Smart Sending, consent, purchases, or uncertain-delivery controls |
 | Scheduled worker / Run delivery now | Processes eligible due messages through normal checks | A manual invocation alone does not prove the automatic scheduler will run later |
 

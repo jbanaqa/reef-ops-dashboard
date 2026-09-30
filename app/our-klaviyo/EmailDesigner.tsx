@@ -1405,11 +1405,11 @@ export default function EmailDesigner({
                       setNotice(
                         result
                           ? "Test email sent. Check your inbox."
-                          : "Test could not be sent. Check your allowlist and sender settings.",
+                          : "Test could not be sent. Check the address and sender settings.",
                       );
                     } catch {
                       setNotice(
-                        "Test could not be sent. Check your allowlist and sender settings.",
+                        "Test could not be sent. Check the address and sender settings.",
                       );
                     } finally {
                       setWork(null);
@@ -1417,7 +1417,7 @@ export default function EmailDesigner({
                   }}
                 >
                   <label>
-                    Internal test recipient
+                    Test recipient
                     <input
                       type="email"
                       required
@@ -1437,7 +1437,7 @@ export default function EmailDesigner({
                   </button>
                 </form>
                 <small>
-                  Use an address in your test recipient allowlist. Sending a
+                  The test email goes to the address entered above. Sending a
                   test does not enable the flow. Preview sends do not test the
                   Shopify trigger or unsubscribe; those need a workflow email.
                 </small>

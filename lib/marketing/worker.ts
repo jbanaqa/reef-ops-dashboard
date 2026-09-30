@@ -529,8 +529,12 @@ export async function runMarketing(onlyMessageId?: string) {
             deferred = "Review stock alert settings";
           }
         }
-        if (m.flowKey === "b2b-welcome" && !m.profile.tags.includes("b2b"))
-          reason = "B2B tag removed";
+        if (m.flowKey === "b2b-welcome") {
+          if (!m.profile.tags.includes("b2b")) reason = "B2B tag removed";
+          const testEmail = (f?.data as { testEmail?: string } | undefined)?.testEmail;
+          if (testEmail && testEmail !== m.profile.email)
+            reason = "B2B test recipient changed";
+        }
         if (m.flowKey === "delivery-upsell") {
           const live = f ? validateFlow("delivery-upsell", f.data) : null;
           liveDeliveryConfig = live?.delivery;

@@ -7,7 +7,7 @@ import {
   deliveryUpsellDraft,
   type DeliveryUpsellConfig,
 } from "./delivery-upsell-config";
-import { channels, content, Content, flowDefaults } from "./rules";
+import { channels, content, Content, email, flowDefaults } from "./rules";
 
 export type FlowStep = {
   minutes: number;
@@ -18,6 +18,7 @@ export type FlowStep = {
 export type Branch = { subject: string; content: Content };
 export type FlowConfig = {
   reviewed: boolean;
+  testEmail?: string;
   description?: string;
   trigger?: string;
   steps: FlowStep[];
@@ -159,6 +160,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
   )
     throw new Error("Invalid inventory threshold.");
   return {
+    ...(key === "b2b-welcome" && f.testEmail ? { testEmail: email(f.testEmail) } : {}),
     ...(delivery ? { delivery } : {}),
     ...(welcome ? { welcome } : {}),
     ...(stock ? { stock } : {}),

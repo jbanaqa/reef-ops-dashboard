@@ -3,11 +3,9 @@ import type { FlowConfig } from "@/lib/marketing/flow-config";
 export default function WelcomeSettings({
   flow,
   onChange,
-  onAudienceChange,
 }: {
   flow: FlowConfig;
   onChange: (flow: FlowConfig) => void;
-  onAudienceChange: () => void;
 }) {
   const w = flow.welcome!;
   const patch = (values: Partial<typeof w>) =>
@@ -98,77 +96,10 @@ export default function WelcomeSettings({
         The popup records the browser timezone; the fallback is used when it is
         unavailable.
       </p>
-      <h3>Test audience</h3>
-      <label className="mk-check">
-        <input
-          type="checkbox"
-          checked={w.testEmail !== undefined}
-          onChange={(e) => {
-            onAudienceChange();
-            onChange({
-              ...flow,
-              reviewed: false,
-              welcome: {
-                ...w,
-                testEmail: e.target.checked ? "" : undefined,
-                bypassRecentEmailSuppression: e.target.checked
-                  ? w.bypassRecentEmailSuppression
-                  : undefined,
-              },
-            });
-          }}
-        />
-        Restrict new enrollments and deliveries to one test email
-      </label>
-      {w.testEmail !== undefined && (
-        <label>
-          Test email
-          <input
-            type="email"
-            placeholder="you@example.com"
-            value={w.testEmail}
-            onChange={(e) => {
-              onAudienceChange();
-              onChange({
-                ...flow,
-                reviewed: false,
-                welcome: {
-                  ...w,
-                  testEmail: e.target.value,
-                  ...(!e.target.value.trim()
-                    ? { bypassRecentEmailSuppression: undefined }
-                    : {}),
-                },
-              });
-            }}
-          />
-        </label>
-      )}
-      {w.testEmail !== undefined && (
-        <label className="mk-check">
-          <input
-            type="checkbox"
-            checked={w.bypassRecentEmailSuppression === true}
-            disabled={!w.testEmail.trim()}
-            onChange={(e) => {
-              onAudienceChange();
-              onChange({
-                ...flow,
-                reviewed: false,
-                welcome: {
-                  ...w,
-                  bypassRecentEmailSuppression: e.target.checked,
-                },
-              });
-            }}
-          />
-          Allow rapid test emails without 16-hour spacing
-        </label>
-      )}
       <p>
-        One entry per subscriber, including tests. Changing the test audience
-        pauses the draft until reviewed and saved. Existing test runs cannot
-        become customer runs.
+        One entry per subscriber, including tests. Use the Test this flow panel
+        to prepare a real signup test for a new address; an existing subscriber
+        can inspect the email with Send test email.
       </p>
       <p>
         One unique 10% code per subscriber, reused in every offer email. One

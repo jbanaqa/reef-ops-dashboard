@@ -287,8 +287,8 @@ function CampaignTestEmail({
         </button>
       </div>
       <small>
-        <strong>Send test email</strong> previews {name || "this campaign"} in an approved
-        internal inbox. <strong>Schedule campaign test</strong> queues one real campaign
+        <strong>Send test email</strong> previews {name || "this campaign"} at the
+        address you entered. <strong>Schedule campaign test</strong> queues one real campaign
         message for that same address at the selected local time. The worker sends it
         at or shortly after that time. The contact
         must be subscribed and in the selected audience. Smart Sending and
@@ -1284,6 +1284,23 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                   "Flow test email sent",
                 )
               }
+              prepareTest={(key, to) => run(
+                () => action({ action: "prepare-flow-test", key, to }),
+                `One-contact flow test prepared for ${to}. Follow the Shopify trigger instructions shown above.`,
+              )}
+              stopTest={(key) => run(
+                () => action({ action: "stop-flow-test", key }),
+                "Flow test stopped and paused. Pending messages were cancelled.",
+              )}
+              simulateDelivery={(to, deliveryDate) => run(
+                () => action({ action: "simulate-delivery-test", to, deliveryDate }),
+                "One delivery notice test scheduled. The calculated send time is shown in the flow test panel.",
+              )}
+              cancelScheduledTest={(id) => run(
+                () => action({ action: "cancel", id }),
+                "Pending delivery notice test cancelled.",
+              )}
+              campaignTests={data.campaignTests || []}
               save={(resource, flow, enabled, brandingSource) =>
                 run(
                   async () =>

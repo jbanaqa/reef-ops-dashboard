@@ -79,6 +79,12 @@ export function flowStatus(resource: FlowResource) {
       ? "enabled"
       : "paused";
 }
+function flowTestTarget(resource: FlowResource) {
+  if (resource.key === "abandoned-cart") return (resource.data.cart as { testEmail?: string } | undefined)?.testEmail;
+  if (resource.key === "welcome") return (resource.data.welcome as { testEmail?: string } | undefined)?.testEmail;
+  if (resource.key === "delivery-upsell") return (resource.data.delivery as { testEmail?: string } | undefined)?.testEmail;
+  return resource.data.testEmail as string | undefined;
+}
 const statusLabels: Record<string, string> = {
   enabled: "Enabled",
   paused: "Paused",
@@ -94,6 +100,11 @@ export default function FlowsWorkspace({
   refresh,
   save,
   testEmail,
+  prepareTest,
+  stopTest,
+  simulateDelivery,
+  cancelScheduledTest,
+  campaignTests,
 }: {
   resources: FlowResource[];
   messageCounts: MessageCount[];
@@ -113,11 +124,19 @@ export default function FlowsWorkspace({
     subject: string,
     content: Content,
   ) => Promise<unknown>;
+  prepareTest: (key: string, to: string) => Promise<FlowResource | undefined>;
+  stopTest: (key: string) => Promise<FlowResource | undefined>;
+  simulateDelivery: (to: string, deliveryDate: string) => Promise<{ dueAt: string } | undefined>;
+  cancelScheduledTest: (id: string) => Promise<unknown>;
+  campaignTests: { id: string; testOfCampaignId?: string | null; scheduledAt?: string | null; status: string; messages?: { status: string; profile: { email: string | null } }[] }[];
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("enabled");
   const [selected, setSelected] = useState<FlowResource | null>(null);
+  const [testRecipient, setTestRecipient] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [simulatedDueAt, setSimulatedDueAt] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
   const returnTo = useRef<{ id: string; scroll: number } | null>(null);
   const selectedId = selected?.id;
@@ -164,6 +183,7 @@ export default function FlowsWorkspace({
         : a.resource.name.localeCompare(b.resource.name),
     );
   const status = selected ? flowStatus(selected) : null;
+  const selectedTestTarget = selected ? flowTestTarget(selected) : undefined;
   const waitingForSetup = !setup.emailReady || !setup.migrationConfirmed;
   return (
     <div className="fw-workspace">
@@ -184,9 +204,56 @@ export default function FlowsWorkspace({
               </p>
             </div>
             <span className={"fw-badge " + status}>
-              {statusLabels[status!]}
+              {selectedTestTarget && selected.enabled ? "Test only" : statusLabels[status!]}
             </span>
           </div>
+          {selected.key !== "low-stock" && (
+            <details className="fw-test-panel" aria-label="Test this flow">
+              <summary>Test this flow</summary>
+              <p>Open an email step and use <strong>Send test email</strong> to check its appearance at any address you enter. That preview does not enroll anyone.</p>
+              <p><strong>Test the real timing:</strong> enter one test address below, then perform the Shopify action shown for this flow. Reef Ops will limit new enrollments to that address while test mode is active. Normal consent, delays, purchase checks, and sending controls still apply.</p>
+              {selectedTestTarget && <p>Current real-flow test address: <strong>{selectedTestTarget}</strong>. {selected.enabled ? "Test mode is active." : "The flow is paused."} Preparing a different address cancels this flow’s pending test messages.</p>}
+              <label>
+                Address for a real-flow test
+                <input type="email" value={testRecipient} placeholder="you@example.com" onChange={(event) => setTestRecipient(event.target.value)} />
+              </label>
+              <div className="fw-test-actions">
+                <button disabled={busy || !testRecipient.trim()} onClick={async () => {
+                  const updated = await prepareTest(selected.key, testRecipient.trim());
+                  if (updated) setSelected(updated);
+                }}>Prepare one-contact test</button>
+                {selectedTestTarget && <button disabled={busy} onClick={async () => {
+                  const updated = await stopTest(selected.key);
+                  if (updated) setSelected(updated);
+                }}>Stop test and pause flow</button>}
+              </div>
+              <p>{selected.key === "b2b-welcome"
+                ? "In Shopify, add the b2b tag to a subscribed test customer with this address. Use a customer who has not already received this welcome."
+                : selected.key === "abandoned-cart"
+                  ? "Start a new checkout using this address, then leave it incomplete. Reef Ops follows the saved SMS eligibility, delays, purchase checks, and email branches; test mode sends email only."
+                  : selected.key === "welcome"
+                    ? "For a real Welcome run, sign up a new address. An existing subscriber will not re-enter; use the email step’s direct preview to inspect the copy."
+                    : "For a real tagged-order run, place or update a test Shopify order with a delivery-date tag. A separate simulated-date test is available below."}</p>
+              <p>After the trigger, check the contact’s pending and sent messages in <Link href="/our-klaviyo/audiences">Audiences →</Link></p>
+              {selected.key === "delivery-upsell" && (
+                <div className="fw-delivery-simulation">
+                  <h4>Simulate a delivery date</h4>
+                  <p>Choose a future delivery date. Reef Ops calculates the notice time using this flow’s saved day offset, hour, and timezone, then schedules one email for the subscribed address above. This checks timing and delivery without creating a Shopify order.</p>
+                  <label>Delivery date
+                    <input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} />
+                  </label>
+                  <button disabled={busy || !testRecipient.trim() || !deliveryDate} onClick={async () => {
+                    const result = await simulateDelivery(testRecipient.trim(), deliveryDate);
+                    if (result) setSimulatedDueAt(result.dueAt);
+                  }}>Schedule simulated notice</button>
+                  {simulatedDueAt && <p>Scheduled for {new Date(simulatedDueAt).toLocaleString()} on your device.</p>}
+                  {campaignTests.filter((test) => test.testOfCampaignId === "flow:delivery-upsell").slice(0, 5).map((test) => (
+                    <p key={test.id}>{test.messages?.[0]?.profile.email || "Test contact"} · {test.messages?.[0]?.status || test.status} · {test.scheduledAt ? new Date(test.scheduledAt).toLocaleString() : ""} {test.status === "SCHEDULED" && test.messages?.[0]?.status === "PENDING" && <button disabled={busy} onClick={() => void cancelScheduledTest(test.id)}>Cancel</button>}</p>
+                  ))}
+                </div>
+              )}
+            </details>
+          )}
           {selected.key === "low-stock" ? (
             <LowStockEditor
               key={selected.id}
@@ -194,6 +261,7 @@ export default function FlowsWorkspace({
               busy={busy}
               setup={setup}
               settings={settings}
+              testEmail={testEmail}
               save={async (data, enabled, brandingSource) => {
                 const result = await save(selected, data, enabled, brandingSource);
                 if (result) setSelected(result);
@@ -202,7 +270,7 @@ export default function FlowsWorkspace({
             />
           ) : (
             <FlowEditor
-              key={selected.id}
+              key={`${selected.id}:${selectedTestTarget || ""}:${selected.enabled}`}
               resource={selected}
               busy={busy}
               settings={settings}
@@ -334,7 +402,7 @@ export default function FlowsWorkspace({
                       <div className="fw-name-line">
                         <h3>{r.name}</h3>
                         <span className={"fw-badge " + status}>
-                          {statusLabels[status]}
+                          {flowTestTarget(r) && r.enabled ? "Test only" : statusLabels[status]}
                         </span>
                       </div>
                       <p>{meta.description}</p>
@@ -350,6 +418,7 @@ export default function FlowsWorkspace({
                                 : " message steps")}
                         </span>
                         {r.key === "low-stock" && <span>Internal team</span>}
+                        {flowTestTarget(r) && <span>Test address: {flowTestTarget(r)}</span>}
                       </div>
                       {attention > 0 && (
                         <p className="fw-attention">
@@ -375,6 +444,9 @@ export default function FlowsWorkspace({
                       aria-label={"Open " + r.name}
                       onClick={() => {
                         returnTo.current = { id: r.id, scroll: window.scrollY };
+                        setTestRecipient("");
+                        setDeliveryDate("");
+                        setSimulatedDueAt("");
                         setSelected(r);
                       }}
                     >

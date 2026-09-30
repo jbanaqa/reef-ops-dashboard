@@ -132,11 +132,13 @@ export default function LowStockEditor({
   setup,
   settings,
   save,
+  testEmail,
 }: {
   resource: FlowResource;
   busy: boolean;
   setup: Record<string, unknown>;
   settings: MarketingSettings;
+  testEmail: (to: string, subject: string, content: Content) => Promise<unknown>;
   save: (
     data: Record<string, unknown>,
     enabled: boolean,
@@ -751,6 +753,7 @@ export default function LowStockEditor({
           }}
           onSave={saveFlow}
           onClose={() => setPanel(null)}
+          onTest={(to, subject, content) => testEmail(to, stockCopy(subject, sample), content)}
           contentFields={
             <>
               <section className="mk-editor-section">

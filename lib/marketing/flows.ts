@@ -24,6 +24,13 @@ export async function enroll(
   if (!resource?.enabled) return;
   const config = validateFlow(key, resource.data);
   if (!config.reviewed) return;
+  if (key === "b2b-welcome" && config.testEmail) {
+    const recipient = await tx.marketingProfile.findUnique({
+      where: { id: profileId },
+      select: { email: true },
+    });
+    if (recipient?.email !== config.testEmail) return;
+  }
   if (key === "welcome" && config.welcome) {
     await enrollWelcome(tx, profileId, at, config);
     return;

@@ -56,6 +56,7 @@ import {
   sendTestMessageNow,
 } from "@/lib/marketing/message-test";
 import { validateFlow } from "@/lib/marketing/flow-config";
+import { deliveryUpsellDueAt } from "@/lib/marketing/delivery-upsell-config";
 import { enrollExistingWelcomeTest, removeProfileFromList } from "@/lib/marketing/profile-testing";
 import { shopifyGraphql } from "@/lib/shopify";
 import { resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
@@ -155,18 +156,6 @@ const campaignOptions = (body: Record<string, unknown>) => ({
   recipientMode:
     body.recipientMode === "SCHEDULE_TIME" ? "SCHEDULE_TIME" : "SEND_TIME",
 });
-
-function approvedTestRecipient(value: unknown) {
-  const to = email(value);
-  const allowed = (process.env.MARKETING_TEST_EMAILS || "")
-    .split(",")
-    .map((address) => address.trim().toLowerCase());
-  if (!allowed.includes(to))
-    throw new Error(
-      "This address is not approved for test emails. Ask an administrator to add it to the test recipient list.",
-    );
-  return to;
-}
 
 async function checkedCampaignAudience(value: unknown) {
   const parsed = campaignAudience(value);
@@ -299,6 +288,138 @@ async function scheduleCampaignTest(id: string, to: string, scheduledAt: Date) {
       },
     });
     return { id: test.id, existing: false };
+  });
+}
+
+function flowTestEmail(key: string, flow: ReturnType<typeof validateFlow>) {
+  if (key === "abandoned-cart") return flow.cart?.testEmail;
+  if (key === "welcome") return flow.welcome?.testEmail;
+  if (key === "delivery-upsell") return flow.delivery?.testEmail;
+  return flow.testEmail;
+}
+
+async function setTriggerFlowTest(key: string, to: string | null) {
+  if (!["b2b-welcome", "abandoned-cart", "welcome", "delivery-upsell"].includes(key))
+    throw new Error("This flow has no customer-triggered test mode.");
+  const settings = await loadMarketingSettings();
+  const ready = setup(settings.operations, settings.postalAddress);
+  if (to && (!ready.sendingEnabled || !ready.emailReady || !ready.migrationConfirmed || !ready.ingestEnabled))
+    throw new Error("Complete email setup and enable sending and Shopify ingestion before testing a real trigger.");
+  if (to && await inboxUnresolved())
+    throw new Error("Resolve pending Shopify events before testing a real trigger.");
+  return atomic(async (tx) => {
+    const resource = await tx.marketingResource.findUnique({
+      where: { shop_kind_key: { shop: shop(), kind: "FLOW", key } },
+    });
+    if (!resource) throw new Error("Flow not found.");
+    const flow = validateFlow(key, resource.data);
+    const prior = flowTestEmail(key, flow);
+    if (to && !flow.reviewed)
+      throw new Error("Review and save this flow's messages and timing before testing its real trigger.");
+    if (to && resource.enabled && !prior)
+      throw new Error("Pause this live flow before preparing a one-contact test.");
+    if (to && !prior && await tx.marketingMessage.count({
+      where: { shop: shop(), flowKey: key, status: "PENDING" },
+    }))
+      throw new Error("This flow still has pending customer messages. Review and clear them before starting one-contact test mode.");
+    if (!to && !prior)
+      throw new Error("This flow is not in one-contact test mode.");
+    const inFlight = await tx.marketingMessage.count({
+      where: { shop: shop(), flowKey: key, status: { in: ["SENDING", "UNKNOWN"] } },
+    });
+    if (inFlight)
+      throw new Error("A message is sending or needs delivery review. Resolve it before changing the test contact.");
+    if (to) {
+      const profile = await tx.marketingProfile.findFirst({
+        where: { shop: shop(), email: to },
+        include: { consents: true },
+      });
+      if (profile && !eligible(profile.consents.find((c) => c.channel === "EMAIL")))
+        throw new Error("This contact cannot receive marketing email. Check consent and suppression in Audiences.");
+      if (key === "welcome" && profile && (
+        await tx.marketingMessage.count({ where: { shop: shop(), profileId: profile.id, flowKey: "welcome" } }) ||
+        await tx.marketingResource.count({ where: { shop: shop(), kind: "WELCOME_RUN", key: profile.id } })
+      ))
+        throw new Error("This contact already entered Welcome. Use Send test email for a visual preview, or use a new subscriber to test the real signup flow.");
+    }
+    await tx.marketingMessage.updateMany({
+      where: { shop: shop(), flowKey: key, status: "PENDING" },
+      data: { status: "CANCELLED", error: "Flow test target changed by staff" },
+    });
+    const next = { ...flow };
+    if (key === "abandoned-cart") next.cart = { ...flow.cart!, testEmail: to || undefined, bypassRecentEmailSuppression: false };
+    else if (key === "welcome") next.welcome = { ...flow.welcome!, testEmail: to || undefined, bypassRecentEmailSuppression: false };
+    else if (key === "delivery-upsell") next.delivery = { ...flow.delivery!, testEmail: to || undefined };
+    else next.testEmail = to || undefined;
+    const updated = await tx.marketingResource.update({
+      where: { id: resource.id },
+      data: { data: json(validateFlow(key, next)), enabled: !!to },
+    });
+    await record(tx, {
+      key: `staff:${crypto.randomUUID()}`,
+      type: "CONFIG_CHANGED",
+      payload: { kind: "FLOW_TEST", key, enabled: !!to, target: to },
+    });
+    return updated;
+  });
+}
+
+async function simulateDeliveryFlowTest(to: string, deliveryDate: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate))
+    throw new Error("Choose a valid delivery date.");
+  const [year, month, day] = deliveryDate.split("-").map(Number);
+  const checked = new Date(Date.UTC(year, month - 1, day));
+  if (checked.getUTCFullYear() !== year || checked.getUTCMonth() + 1 !== month || checked.getUTCDate() !== day)
+    throw new Error("Choose a valid delivery date.");
+  const row = await prisma.marketingResource.findUnique({
+    where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "delivery-upsell" } },
+  });
+  if (!row) throw new Error("Delivery notice flow not found.");
+  const flow = validateFlow("delivery-upsell", row.data);
+  if (!flow.reviewed || !flow.delivery)
+    throw new Error("Review and save the delivery notice before testing its schedule.");
+  const dueAt = deliveryUpsellDueAt({ year, month, day }, flow.delivery);
+  if (dueAt <= new Date())
+    throw new Error("That delivery date places the reminder in the past. Choose a later date.");
+  const settings = await loadMarketingSettings();
+  const ready = setup(settings.operations, settings.postalAddress);
+  if (!ready.sendingEnabled || !ready.emailReady || !ready.migrationConfirmed)
+    throw new Error("Complete email setup, migration review, and sending controls before scheduling a simulated notice.");
+  if (await inboxUnresolved())
+    throw new Error("Resolve pending Shopify events before scheduling a simulated notice.");
+  return atomic(async (tx) => {
+    const profile = await tx.marketingProfile.findFirst({
+      where: { shop: shop(), email: to }, include: { consents: true },
+    });
+    if (!profile || !eligible(profile.consents.find((c) => c.channel === "EMAIL")))
+      throw new Error("This address needs an existing subscribed, unsuppressed profile for a timed delivery test.");
+    const step = flow.steps.find((item) => item.channel === "EMAIL");
+    if (!step) throw new Error("Delivery notice has no email step.");
+    const now = new Date();
+    const test = await tx.marketingCampaign.create({
+      data: {
+        shop: shop(),
+        name: `Test run: ${row.name}`.slice(0, 200),
+        subject: step.subject,
+        channel: "EMAIL",
+        content: json(step.content),
+        audience: json({ version: 2, includeKeys: [], excludeKeys: [] }),
+        smartSendingHours: 0,
+        recipientMode: "SEND_TIME",
+        testOfCampaignId: "flow:delivery-upsell",
+        status: "SCHEDULED",
+        scheduledAt: dueAt,
+        expandedAt: now,
+      },
+    });
+    await tx.marketingMessage.create({
+      data: {
+        shop: shop(), key: `campaign:${test.id}:${profile.id}`,
+        campaignId: test.id, profileId: profile.id, channel: "EMAIL",
+        subject: step.subject, content: json(step.content), dueAt,
+      },
+    });
+    return { id: test.id, dueAt: dueAt.toISOString() };
   });
 }
 
@@ -815,7 +936,7 @@ export async function POST(request: Request) {
         content: await resolveWelcomeSocialProducts(content(b.content), `welcome-social-preview:${crypto.randomUUID()}`),
       });
     if (b.action === "test-email") {
-      const to = approvedTestRecipient(b.to);
+      const to = email(b.to);
       const s = await loadMarketingSettings();
       if (!setup(s.operations, s.postalAddress).emailReady)
         throw new Error("Complete email provider setup first.");
@@ -852,7 +973,13 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
     if (b.action === "run-campaign-test")
-      return Response.json(await scheduleCampaignTest(String(b.id || ""), approvedTestRecipient(b.to), new Date(String(b.at || ""))));
+      return Response.json(await scheduleCampaignTest(String(b.id || ""), email(b.to), new Date(String(b.at || ""))));
+    if (b.action === "prepare-flow-test")
+      return Response.json(await setTriggerFlowTest(String(b.key || ""), email(b.to)));
+    if (b.action === "stop-flow-test")
+      return Response.json(await setTriggerFlowTest(String(b.key || ""), null));
+    if (b.action === "simulate-delivery-test")
+      return Response.json(await simulateDeliveryFlowTest(email(b.to), String(b.deliveryDate || "")));
     if (b.action === "import")
       return Response.json({
         results: await importProfiles(b.rows, b.dryRun !== false),
@@ -1018,6 +1145,11 @@ export async function POST(request: Request) {
       let data;
       if (b.kind === "FLOW") {
         const f = validateFlow(String(b.key || ""), b.data);
+        const current = await prisma.marketingResource.findUnique({
+          where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: String(b.key || "") } },
+        });
+        if (current && flowTestEmail(String(b.key || ""), current.data as unknown as ReturnType<typeof validateFlow>) !== flowTestEmail(String(b.key || ""), f))
+          throw new Error("Change the real-flow test address in the Test this flow panel.");
         if (b.enabled && !f.reviewed)
           throw new Error("Review the flow configuration before enabling.");
         if (b.enabled && b.key === "low-stock") validateStock(f.stock, true);

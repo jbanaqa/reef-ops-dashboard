@@ -1382,7 +1382,6 @@ test("one-click unsubscribe suppresses email, cancels pending sends, and is repe
 });
 
 test("internal preview sends do not advertise a real unsubscribe subscription", async () => {
-  process.env.MARKETING_TEST_EMAILS = "preview@example.com";
   const api = await import("../app/api/marketing/route");
   const result = await api.POST(
     new Request("https://app.example/api/marketing", {
@@ -1401,6 +1400,19 @@ test("internal preview sends do not advertise a real unsubscribe subscription", 
     }),
   );
   assert.equal(result.status, 200);
+  assert.deepEqual(sent.at(-1)?.to, ["preview@example.com"]);
+  const second = await api.POST(
+    new Request("https://app.example/api/marketing", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Basic " + Buffer.from("staff:test-password").toString("base64"),
+      },
+      body: JSON.stringify({ action: "test-email", to: "second-preview@example.com", subject: "Preview", content: defaultContent }),
+    }),
+  );
+  assert.equal(second.status, 200, "any entered test address can receive a preview");
+  assert.deepEqual(sent.at(-1)?.to, ["second-preview@example.com"]);
   assert.equal(sent.at(-1)?.headers, undefined);
   assert.match(String(sent.at(-1)?.html), /unsubscribe\?preview=1/);
   const unsubscribe = await import("../app/api/marketing/unsubscribe/route");
@@ -3868,9 +3880,6 @@ test("campaign segments, snapshot recipients, Smart Sending, and results stay co
 });
 
 test("one-contact campaign test uses the real worker without expanding or attributing the audience", async () => {
-  const previousAllowlist = process.env.MARKETING_TEST_EMAILS;
-  process.env.MARKETING_TEST_EMAILS = "campaign-run-test@example.com,campaign-run-outside@example.com";
-  try {
     process.env.DASHBOARD_USERNAME = "staff";
     process.env.DASHBOARD_PASSWORD = "test-password";
     const api = await import("../app/api/marketing/route");
@@ -3907,14 +3916,19 @@ test("one-contact campaign test uses the real worker without expanding or attrib
     const scheduledAt = new Date(Date.now() + 2 * 60 * 1000);
     const testRequest = (to: string | null, at = scheduledAt.toISOString()) => request({ action: "run-campaign-test", id: source.id, to, at });
     const countBefore = await prisma.marketingCampaign.count({ where: { shop, testOfCampaignId: source.id } });
-    assert.equal((await api.POST(testRequest(other.email))).status, 400, "only approved test addresses can be used");
-    assert.equal((await api.POST(testRequest(outside.email))).status, 400, "an approved address must also belong to the selected audience");
+    assert.equal((await api.POST(testRequest("unknown-test@example.com"))).status, 400, "a campaign test still requires a matching profile");
+    assert.equal((await api.POST(testRequest(outside.email))).status, 400, "a campaign test address must belong to the selected audience");
     assert.equal((await api.POST(testRequest(target.email, "invalid"))).status, 400, "an invalid date cannot schedule a campaign test");
     assert.equal((await api.POST(testRequest(target.email, new Date(Date.now() - 60_000).toISOString()))).status, 400, "a past date cannot schedule a campaign test");
     assert.equal(await prisma.marketingCampaign.count({ where: { shop, testOfCampaignId: source.id } }), countBefore);
     const queued = await api.POST(testRequest(target.email));
     assert.equal(queued.status, 200, await queued.clone().text());
     const { id: testId } = await queued.json();
+    const otherQueued = await api.POST(testRequest(other.email));
+    assert.equal(otherQueued.status, 200, "a second eligible address can also be used for testing");
+    const { id: otherTestId } = await otherQueued.json();
+    assert.notEqual(otherTestId, testId);
+    await api.POST(request({ action: "cancel", id: otherTestId }));
     assert.equal((await api.POST(testRequest(target.email))).status, 400, "a pending test must be cancelled before rescheduling");
     const testRun = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: testId }, include: { messages: true } });
     assert.equal(testRun.testOfCampaignId, source.id);
@@ -3953,9 +3967,66 @@ test("one-contact campaign test uses the real worker without expanding or attrib
     const skipped = await prisma.marketingMessage.findFirstOrThrow({ where: { campaignId: secondId } });
     assert.equal(skipped.status, "CANCELLED");
     assert.match(skipped.error || "", /Smart Sending/);
-  } finally {
-    if (previousAllowlist === undefined) delete process.env.MARKETING_TEST_EMAILS;
-    else process.env.MARKETING_TEST_EMAILS = previousAllowlist;
+});
+
+test("staff prepares one-contact Shopify flow tests and simulates a delivery date without widening the audience", async () => {
+  const api = await import("../app/api/marketing/route");
+  const request = (body: object) => new Request("https://app.example/api/marketing", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Basic " + Buffer.from("staff:test-password").toString("base64") },
+    body: JSON.stringify(body),
+  });
+  await prisma.marketingMessage.updateMany({ where: { shop, flowKey: "b2b-welcome", status: "PENDING" }, data: { status: "CANCELLED" } });
+  const b2bResource = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop, kind: "FLOW", key: "b2b-welcome" } } });
+  await prisma.marketingResource.update({ where: { id: b2bResource.id }, data: { enabled: false, data: store.json({ ...(b2bResource.data as object), reviewed: true }) } });
+  const chosen = await prisma.marketingProfile.create({ data: {
+    shop, email: "flow-choice@example.com", tags: ["b2b"],
+    consents: { create: { channel: "EMAIL", status: "SUBSCRIBED", suppressed: false, source: "test", occurredAt: new Date() } },
+  } });
+  const bystander = await prisma.marketingProfile.create({ data: {
+    shop, email: "flow-bystander@example.com", tags: ["b2b"],
+    consents: { create: { channel: "EMAIL", status: "SUBSCRIBED", suppressed: false, source: "test", occurredAt: new Date() } },
+  } });
+  const prepared = await api.POST(request({ action: "prepare-flow-test", key: "b2b-welcome", to: chosen.email }));
+  assert.equal(prepared.status, 200, await prepared.clone().text());
+  assert.equal((await prepared.json()).enabled, true);
+  const { enroll } = await import("../lib/marketing/flows");
+  await store.atomic(async (tx) => {
+    await enroll(tx, "b2b-welcome", bystander.id, "shopify:bystander-test", new Date());
+    await enroll(tx, "b2b-welcome", chosen.id, "shopify:chosen-test", new Date());
+  });
+  assert.equal(await prisma.marketingMessage.count({ where: { shop, profileId: bystander.id, flowKey: "b2b-welcome" } }), 0);
+  assert.equal(await prisma.marketingMessage.count({ where: { shop, profileId: chosen.id, flowKey: "b2b-welcome", status: "PENDING" } }), 1);
+  const stopping = await api.POST(request({ action: "stop-flow-test", key: "b2b-welcome" }));
+  assert.equal(stopping.status, 200, await stopping.clone().text());
+  assert.equal((await stopping.json()).enabled, false);
+  assert.equal(await prisma.marketingMessage.count({ where: { shop, profileId: chosen.id, flowKey: "b2b-welcome", status: "CANCELLED" } }), 1);
+  for (const key of ["abandoned-cart", "welcome"] as const) {
+    await prisma.marketingMessage.updateMany({ where: { shop, flowKey: key, status: "PENDING" }, data: { status: "CANCELLED" } });
+    const resource = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop, kind: "FLOW", key } } });
+    const current = resource.data as unknown as import("../lib/marketing/flow-config").FlowConfig;
+    const upgraded = key === "abandoned-cart"
+      ? (await import("../lib/marketing/cart-config")).cartDraft(current)
+      : (await import("../lib/marketing/welcome-config")).welcomeDraft(current);
+    await prisma.marketingResource.update({ where: { id: resource.id }, data: { enabled: false, data: store.json({ ...upgraded, reviewed: true }) } });
+    const start = await api.POST(request({ action: "prepare-flow-test", key, to: chosen.email }));
+    assert.equal(start.status, 200, `${key}: ${await start.clone().text()}`);
+    const saved = await start.json();
+    assert.equal(saved.data[key === "welcome" ? "welcome" : "cart"].testEmail, chosen.email);
+    const stop = await api.POST(request({ action: "stop-flow-test", key }));
+    assert.equal(stop.status, 200, `${key}: ${await stop.clone().text()}`);
   }
+  const deliveryResource = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop, kind: "FLOW", key: "delivery-upsell" } } });
+  await prisma.marketingResource.update({ where: { id: deliveryResource.id }, data: { enabled: false, data: store.json({ ...(deliveryResource.data as object), reviewed: true }) } });
+  const deliveryDay = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+  const simulation = await api.POST(request({ action: "simulate-delivery-test", to: chosen.email, deliveryDate: deliveryDay }));
+  assert.equal(simulation.status, 200, await simulation.clone().text());
+  const result = await simulation.json();
+  const test = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: result.id }, include: { messages: true } });
+  assert.equal(test.testOfCampaignId, "flow:delivery-upsell");
+  assert.equal(test.messages.length, 1);
+  assert.equal(test.messages[0].profileId, chosen.id);
+  assert.equal(test.scheduledAt?.toISOString(), result.dueAt);
+  assert.equal((await prisma.marketingResource.findUniqueOrThrow({ where: { id: deliveryResource.id } })).enabled, false);
 });
 registerWelcomeTests(() => ({ prisma, store, worker }));

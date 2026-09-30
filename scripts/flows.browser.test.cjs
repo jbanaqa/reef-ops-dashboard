@@ -516,10 +516,7 @@ const { chromium } = require("playwright");
         "",
       );
       const frame = page.frameLocator('iframe[title="Email preview"]');
-      await frame
-        .getByText("Example coral from your cart", { exact: true })
-        .first()
-        .waitFor();
+      await frame.getByText("SHOPPING CART", { exact: true }).waitFor();
       if (name.includes("Discount"))
         await frame.getByText("AC300-PREVIEW", { exact: true }).waitFor();
       await page.getByRole("button", { name: "Mobile", exact: true }).click();
@@ -626,24 +623,16 @@ const { chromium } = require("playwright");
 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page
-      .getByLabel("Restrict this flow to one test email", { exact: true })
-      .check();
-    await page
-      .getByLabel("Test account email", { exact: true })
-      .fill("test@example.com");
-    assert.equal(
-      await page.getByLabel("Enable this flow", { exact: true }).isChecked(),
-      false,
-    );
-    await page
       .getByLabel(
         "I reviewed this flow's timing, consent rules, and purchase checks.",
         { exact: true },
       )
       .check();
-    await page.getByLabel("Enable this flow", { exact: true }).check();
     await page.getByRole("button", { name: "Save flow", exact: true }).click();
-    await page.getByText(/Saved audience: Test email only/).waitFor();
+    await page.getByText("Test this flow", { exact: true }).click();
+    await page.getByLabel("Address for a real-flow test").fill("test@example.com");
+    await page.getByRole("button", { name: "Prepare one-contact test" }).click();
+    await page.getByText(/Current real-flow test address:/).waitFor();
     await page
       .locator(".mk-cart-map")
       .getByRole("button", { name: /Product recommendations/ })
@@ -651,12 +640,6 @@ const { chromium } = require("playwright");
     await page.getByLabel("Products per email").fill("2");
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Save flow", exact: true }).click();
-    assert.equal(
-      await page.evaluate(
-        () => JSON.parse(localStorage.getItem("savedFlow")).data.cart.testEmail,
-      ),
-      "test@example.com",
-    );
     for (const width of [390, 320]) {
       await page.setViewportSize({ width, height: 900 });
       assert.ok(
@@ -665,20 +648,9 @@ const { chromium } = require("playwright");
         ),
       );
     }
-    await page
-      .getByLabel("Restrict this flow to one test email", { exact: true })
-      .uncheck();
+    await page.getByRole("button", { name: "Stop test and pause flow" }).click();
     assert.equal(
       await page.getByLabel("Enable this flow", { exact: true }).isChecked(),
-      false,
-    );
-    assert.equal(
-      await page
-        .getByLabel(
-          "I reviewed this flow's timing, consent rules, and purchase checks.",
-          { exact: true },
-        )
-        .isChecked(),
       false,
     );
 

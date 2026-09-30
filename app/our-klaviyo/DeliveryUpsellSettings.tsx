@@ -5,17 +5,13 @@ import type { FlowConfig } from "@/lib/marketing/flow-config";
 export default function DeliveryUpsellSettings({
   flow,
   onChange,
-  onAudienceChange,
 }: {
   flow: FlowConfig;
   onChange: (flow: FlowConfig) => void;
-  onAudienceChange: () => void;
 }) {
   const delivery = flow.delivery!;
-  const update = (patch: Partial<typeof delivery>, audience = false) => {
-    if (audience) onAudienceChange();
-    onChange({ ...flow, reviewed: audience ? false : flow.reviewed, delivery: { ...delivery, ...patch } });
-  };
+  const update = (patch: Partial<typeof delivery>) =>
+    onChange({ ...flow, delivery: { ...delivery, ...patch } });
   return (
     <div className="mk-cart-feed-note">
       <strong>Delivery notice schedule</strong>
@@ -59,39 +55,6 @@ export default function DeliveryUpsellSettings({
         delivery, giving the customer until the following morning to add items.
         Triom handles merging and refunds after checkout.
       </p>
-      <label className="mk-check">
-        <input
-          type="checkbox"
-          checked={delivery.testEmail !== undefined}
-          onChange={(e) =>
-            update(
-              {
-                testEmail: e.target.checked ? "" : undefined,
-              },
-              true,
-            )
-          }
-        />
-        Restrict this flow to one test email
-      </label>
-      {delivery.testEmail !== undefined && (
-        <>
-          <label>
-            Test account email
-            <input
-              type="email"
-              value={delivery.testEmail}
-              placeholder="you@example.com"
-              onChange={(e) =>
-                update(
-                  { testEmail: e.target.value },
-                  true,
-                )
-              }
-            />
-          </label>
-        </>
-      )}
       <p>
         Delivery notices are deadline-sensitive, so recent marketing email does
         not postpone or cancel them. Consent, suppression, purchase-event, and

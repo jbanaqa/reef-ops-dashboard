@@ -520,92 +520,6 @@ function FlowEditorState({
         </div>
       )}
       {flow.cart && <CartTools flow={flow as FlowConfig} />}
-      {flow.cart && (
-        <div className="mk-cart-feed-note">
-          <strong>Test before going live</strong>
-          <p>
-            Saved audience:{" "}
-            {(resource.data.cart as CartConfig | undefined)?.testEmail
-              ? "Test email only · " +
-                (resource.data.cart as CartConfig).testEmail
-              : "All eligible customers"}
-            {resource.enabled ? " · Flow enabled" : " · Flow paused"}.
-          </p>
-          <label className="mk-check">
-            <input
-              type="checkbox"
-              checked={flow.cart.testEmail !== undefined}
-              onChange={(e) => {
-                setEnabled(false);
-                setFlow((f) => ({
-                  ...f,
-                  reviewed: false,
-                  cart: {
-                    ...f.cart!,
-                    testEmail: e.target.checked ? "" : undefined,
-                  },
-                }));
-              }}
-            />
-            Restrict this flow to one test email
-          </label>
-          {flow.cart.testEmail !== undefined && (
-            <>
-              <label>
-                Test account email
-                <input
-                  type="email"
-                  value={flow.cart.testEmail}
-                  placeholder="you@example.com"
-                  onChange={(e) => {
-                    setEnabled(false);
-                    setFlow((f) => ({
-                      ...f,
-                      reviewed: false,
-                      cart: {
-                        ...f.cart!,
-                        testEmail: e.target.value,
-                        bypassRecentEmailSuppression: false,
-                      },
-                    }));
-                  }}
-                />
-              </label>
-              <label className="mk-check">
-                <input
-                  type="checkbox"
-                  checked={flow.cart.bypassRecentEmailSuppression === true}
-                  disabled={!flow.cart.testEmail.trim()}
-                  onChange={(e) => {
-                    setEnabled(false);
-                    setFlow((f) => ({
-                      ...f,
-                      reviewed: false,
-                      cart: {
-                        ...f.cart!,
-                        bypassRecentEmailSuppression: e.target.checked,
-                      },
-                    }));
-                  }}
-                />
-                Allow rapid test emails without 16-hour spacing
-              </label>
-            </>
-          )}
-          <p>
-            {flow.cart.testEmail !== undefined
-              ? "Only this account can enter or receive this flow. Tests send email only; SMS is skipped. Consent, purchase checks and delays still apply. The optional bypass affects only this specific test account and only the 16-hour email spacing. Start a fresh checkout after saving and enabling the restricted flow."
-              : "When enabled without this restriction, this flow can send to all eligible customers."}
-          </p>
-          <p>
-            Save flow to apply these settings. Changing the test audience clears
-            Enable and review in this draft. Ending test mode cancels remaining
-            test messages when delivery is checked. This restriction applies
-            only to Abandoned Cart.
-          </p>
-        </div>
-      )}
-
       {resource.key === "low-stock" && (
         <div className="mk-two">
           <label>
@@ -765,14 +679,12 @@ function FlowEditorState({
               <WelcomeSettings
                 flow={flow as FlowConfig}
                 onChange={setFlow}
-                onAudienceChange={() => setEnabled(false)}
               />
             )}
             {selected.target.section === "delivery-settings" && flow.delivery && (
               <DeliveryUpsellSettings
                 flow={flow as FlowConfig}
                 onChange={(next) => setFlow(next as Data)}
-                onAudienceChange={() => setEnabled(false)}
               />
             )}
             {selected.target.section === "products" && flow.cart && (
