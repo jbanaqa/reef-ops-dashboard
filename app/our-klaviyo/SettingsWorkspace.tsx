@@ -16,6 +16,17 @@ type InboxRow = {
   dueAt: string;
   order: { label: string; deliveryDateTag: boolean | null } | null;
 };
+type IdentityReview = {
+  order: { label: string; orderEmail: string | null; eventCustomerEmail: string | null; customerId: string; deliveryDateTag: boolean | null };
+  shopify: { email: string | null; emailMarketingState: string | null } | null;
+  shopifyError: string | null;
+  profiles: {
+    id: string; name: string; email: string | null; shopifyId: string | null;
+    matchesOrderEmail: boolean; matchesShopifyId: boolean;
+    consents: { channel: string; status: string; suppressed: boolean; source: string; occurredAt: string }[];
+    _count: { events: number; messages: number };
+  }[];
+};
 type ImportResult = { row: number; status: string; error?: string };
 type ConnectionResult = {
   results: { topic: string; status: string; message?: string }[];
@@ -159,6 +170,7 @@ export default function SettingsWorkspace({
     data.settings.operations.migrationConfirmed,
   );
   const [busy, setBusy] = useState("");
+  const [identityReviews, setIdentityReviews] = useState<Record<string, IdentityReview>>({});
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [review, setReview] = useState(false);
@@ -256,7 +268,7 @@ export default function SettingsWorkspace({
       const result = await task();
       setNotice(message(result));
       try {
-        if (key !== "refresh") await refresh();
+        if (key !== "refresh" && !key.startsWith("inspect:")) await refresh();
       } catch {
         setError(
           "Your action completed, but status could not refresh. Refresh status to check the latest results.",
@@ -270,7 +282,7 @@ export default function SettingsWorkspace({
       );
     } finally {
       setBusy("");
-      feedback.current?.focus();
+      if (!key.startsWith("inspect:")) feedback.current?.focus();
     }
   }
   function save(key: string, patch: Patch, done: () => void) {
@@ -543,7 +555,7 @@ export default function SettingsWorkspace({
                       processing. Customer sending waits until they are
                       resolved.
                     </p>
-                    {data.health.inbox.some((row) => row.topic === "orders/updated" && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")) && (
+                    {data.health.inbox.some((row) => row.topic === "orders/updated" && row.order?.deliveryDateTag === false && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")) && (
                       <div className="sw-sync-action">
                         <div>
                           <strong>Recheck conflicted order updates</strong>
@@ -557,6 +569,9 @@ export default function SettingsWorkspace({
                           {busy === "retry-order-updates" ? "Rechecking…" : "Recheck order updates"}
                         </button>
                       </div>
+                    )}
+                    {data.health.inbox.some((row) => row.topic === "orders/updated" && row.order?.deliveryDateTag === true && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")) && (
+                      <p className="sw-hint">Delivery-date orders need an identity review before retrying. Open Compare profiles on an event below.</p>
                     )}
                     {data.health.inbox.map((row) => (
                       <div className="sw-issue" key={row.id}>
@@ -586,6 +601,36 @@ export default function SettingsWorkspace({
                                 : "No delivery-date tag"}
                           </small>}
                           {row.error && <p>{row.error}</p>}
+                          {row.topic === "orders/updated" && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "") && (
+                            <>
+                              <button disabled={!!busy} onClick={() => run(
+                                "inspect:" + row.id,
+                                async () => {
+                                  const result = await action<IdentityReview>({ action: "inspect-order-identity", id: row.id });
+                                  setIdentityReviews((current) => ({ ...current, [row.id]: result }));
+                                  return result;
+                                },
+                                () => "Profile comparison loaded. No customer data was changed.",
+                              )}>
+                                {busy === "inspect:" + row.id ? "Comparing…" : "Compare profiles"}
+                              </button>
+                              {identityReviews[row.id] && <div className="sw-identity-review" aria-label="Order identity comparison">
+                                <strong>Order and Shopify</strong>
+                                <p>Order: {identityReviews[row.id].order.label} · Order email: {identityReviews[row.id].order.orderEmail || "Not provided"}</p>
+                                <p>Event customer email: {identityReviews[row.id].order.eventCustomerEmail || "Not provided"} · Shopify customer ID: {identityReviews[row.id].order.customerId}</p>
+                                <p>Current Shopify email: {identityReviews[row.id].shopify?.email || "Unavailable"} · Email marketing: {identityReviews[row.id].shopify?.emailMarketingState || "Unknown"}</p>
+                                {identityReviews[row.id].shopifyError && <p>Shopify lookup unavailable: {identityReviews[row.id].shopifyError}</p>}
+                                <strong>Reef Ops profiles</strong>
+                                {identityReviews[row.id].profiles.map((profile) => <div key={profile.id} className="sw-identity-profile">
+                                  <p><strong>{profile.email || profile.name || "No email"}</strong> · {profile.matchesOrderEmail ? "Matches event email" : "Different event email"} · {profile.matchesShopifyId ? "Matches Shopify ID" : "Different Shopify ID"}</p>
+                                  <p>Shopify ID: {profile.shopifyId || "None"} · {profile._count.events} events · {profile._count.messages} messages</p>
+                                  {profile.consents.map((consent) => <p key={consent.channel}>{consent.channel}: {consent.status}{consent.suppressed ? " · Suppressed" : ""} · Source: {consent.source} · Updated: {date(consent.occurredAt)}</p>)}
+                                  {!profile.consents.length && <p>No channel consent recorded.</p>}
+                                </div>)}
+                                <p>These profiles have not been joined. Confirm which email belongs to the customer and review consent before retrying.</p>
+                              </div>}
+                            </>
+                          )}
                           <details>
                             <summary>Technical details</summary>
                             <code>{row.topic}</code>
@@ -593,6 +638,7 @@ export default function SettingsWorkspace({
                         </div>
                         <button
                           disabled={!!busy || row.status === "PROCESSING"}
+                          title={row.order?.deliveryDateTag && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "") ? "Retry only after resolving the profile conflict." : undefined}
                           onClick={() =>
                             run(
                               "retry:" + row.id,
@@ -603,7 +649,9 @@ export default function SettingsWorkspace({
                             )
                           }
                         >
-                          Queue retry
+                          {row.order?.deliveryDateTag && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")
+                            ? "Retry after review"
+                            : "Queue retry"}
                         </button>
                       </div>
                     ))}

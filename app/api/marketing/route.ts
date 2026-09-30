@@ -60,6 +60,7 @@ import { deliveryDateFromTags, deliveryUpsellDueAt } from "@/lib/marketing/deliv
 import { enrollExistingWelcomeTest, removeProfileFromList } from "@/lib/marketing/profile-testing";
 import { shopifyGraphql } from "@/lib/shopify";
 import { resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
+import { inspectOrderIdentity } from "@/lib/marketing/identity-review";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -910,6 +911,11 @@ export async function POST(request: Request) {
         );
       return Response.json({ ...result, unresolved: await inboxUnresolved() });
     }
+    if (b.action === "inspect-order-identity") {
+      if (typeof b.id !== "string" || !b.id)
+        throw new Error("Choose an order update to review.");
+      return Response.json(await inspectOrderIdentity(b.id));
+    }
     if (b.action === "retry-conflicted-order-updates") {
       if (!(await ingestionEnabled()))
         return Response.json({ error: "Shopify ingestion is disabled." }, { status: 409 });
@@ -922,12 +928,15 @@ export async function POST(request: Request) {
             { error: { startsWith: "Identity change requires review;" } },
           ],
         },
-        select: { id: true },
+        select: { id: true, payload: true },
         take: 100,
       });
-      if (!rows.length)
+      const ids = rows.filter((row) => {
+        const order = row.payload as { tags?: unknown };
+        return order.tags != null && !deliveryDateFromTags(order.tags);
+      }).map((row) => row.id);
+      if (!ids.length)
         return Response.json({ retried: 0, processed: 0, unresolved: await inboxUnresolved() });
-      const ids = rows.map((row) => row.id);
       const reset = await prisma.marketingWebhookInbox.updateMany({
         where: { id: { in: ids }, shop: shop(), status: { in: ["PENDING", "FAILED"] } },
         data: { status: "PENDING", dueAt: new Date(), claimedAt: null },

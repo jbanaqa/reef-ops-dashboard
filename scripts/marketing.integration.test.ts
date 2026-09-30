@@ -725,6 +725,33 @@ test("identity-conflicted order updates without delivery tags cancel notices wit
   assert.equal(await prisma.marketingEvent.count({ where: { shop, key: "identity-conflict-tagged" } }), 0);
 });
 
+test("tagged order conflict comparison shows both profiles without changing either", async () => {
+  const review = await import("../lib/marketing/identity-review");
+  const row = await prisma.marketingWebhookInbox.create({ data: {
+    shop, key: "identity-conflict-review", topic: "orders/updated", status: "FAILED",
+    error: "Identity conflict: email and Shopify customer belong to different profiles. No consent was transferred.",
+    payload: { id: "identity-conflict-order", name: "#901", tags: ["September 30 2026"],
+      email: "new-order@example.com",
+      customer: { id: "identity-conflict-customer", email: "new-order@example.com" } },
+  } });
+  const before = await prisma.marketingProfile.findMany({
+    where: { shop, OR: [{ email: "new-order@example.com" }, { shopifyId: "identity-conflict-customer" }] },
+    include: { consents: true },
+  });
+  const result = await review.inspectOrderIdentity(row.id);
+  assert.equal(result.order.label, "#901");
+  assert.equal(result.profiles.length, 2);
+  assert.ok(result.profiles.some((profile) => profile.matchesOrderEmail && !profile.matchesShopifyId));
+  assert.ok(result.profiles.some((profile) => profile.matchesShopifyId && !profile.matchesOrderEmail));
+  assert.equal(result.profiles.find((profile) => profile.matchesOrderEmail)?.consents[0]?.suppressed, true);
+  assert.deepEqual(await prisma.marketingProfile.findMany({
+    where: { shop, OR: [{ email: "new-order@example.com" }, { shopifyId: "identity-conflict-customer" }] },
+    include: { consents: true },
+  }), before);
+  assert.equal((await prisma.marketingWebhookInbox.findUniqueOrThrow({ where: { id: row.id } })).status, "FAILED");
+  await prisma.marketingWebhookInbox.delete({ where: { id: row.id } });
+});
+
 test("tag removal cancels an unsent B2B welcome", async () => {
   customer = {
     ...customer,

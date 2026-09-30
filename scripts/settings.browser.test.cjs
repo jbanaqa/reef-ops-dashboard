@@ -82,6 +82,7 @@ const { chromium } = require("playwright");
     let failSave = false;
     let syncRuns = 0;
     let conflictPending = false;
+    let taggedConflict = false;
     let conflictRetries = 0;
     let deliveryRuns = 0;
     let imports = 0;
@@ -116,6 +117,18 @@ const { chromium } = require("playwright");
           conflictRetries++;
           conflictPending = false;
           return route.fulfill({ json: { retried: 1, processed: 1, unresolved: 0 } });
+        }
+        if (body.action === "inspect-order-identity") {
+          return route.fulfill({ json: {
+            order: { label: "#1234", orderEmail: "new@example.com", eventCustomerEmail: "new@example.com", customerId: "42", deliveryDateTag: true },
+            shopify: { email: "new@example.com", emailMarketingState: "SUBSCRIBED" }, shopifyError: null,
+            profiles: [
+              { id: "old", name: "Old", email: "old@example.com", shopifyId: "42", matchesOrderEmail: false, matchesShopifyId: true,
+                consents: [{ channel: "EMAIL", status: "SUBSCRIBED", suppressed: false, source: "shopify", occurredAt: "2026-09-24T14:01:00Z" }], _count: { events: 3, messages: 1 } },
+              { id: "new", name: "New", email: "new@example.com", shopifyId: null, matchesOrderEmail: true, matchesShopifyId: false,
+                consents: [{ channel: "EMAIL", status: "UNSUBSCRIBED", suppressed: true, source: "shopify", occurredAt: "2026-09-24T14:01:00Z" }], _count: { events: 1, messages: 0 } },
+            ],
+          } });
         }
         if (body.action === "start-klaviyo-opens") {
           engagementRunning = true;
@@ -201,7 +214,7 @@ const { chromium } = require("playwright");
               id: "conflict-1", topic: "orders/updated", status: "PENDING", attempts: 7,
               error: "Identity conflict: email and Shopify customer belong to different profiles. No consent was transferred.",
               createdAt: "2026-09-24T14:01:00Z", dueAt: "2026-09-29T20:15:00Z",
-              order: { label: "#1234", deliveryDateTag: false },
+              order: { label: "#1234", deliveryDateTag: taggedConflict },
             }] : [],
             lastProcessed: { processedAt: "2026-09-09T12:00:00Z", topic: "customers/update" },
             oldestPending: { dueAt: "2026-09-09T12:00:00Z", error: null },
@@ -245,6 +258,16 @@ const { chromium } = require("playwright");
     await page.getByRole("button", { name: "Recheck order updates", exact: true }).click();
     await page.getByText("Rechecked 1 order update; 1 processed. 0 unresolved remain.").waitFor();
     assert.equal(conflictRetries, 1);
+    conflictPending = true;
+    taggedConflict = true;
+    await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+    await page.getByText("#1234 · Delivery-date tag found").waitFor();
+    assert.equal(await page.getByRole("button", { name: "Recheck order updates", exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Compare profiles", exact: true }).click();
+    await page.getByText("Current Shopify email: new@example.com · Email marketing: SUBSCRIBED").waitFor();
+    await page.getByText(/new@example.com.*Matches event email.*Different Shopify ID/).waitFor();
+    await page.getByLabel("Order identity comparison").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, "tagged-order-identity-review.png") });
     assert.equal(saves.length, 0);
     await page.getByRole("button", { name: /Sending & signup/ }).click();
     await page

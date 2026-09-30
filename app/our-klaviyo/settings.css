@@ -377,6 +377,25 @@
   font-size: 14px;
   color: var(--sw-muted);
 }
+.sw-identity-review {
+  max-width: 720px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--sw-line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+.sw-identity-review p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+.sw-identity-profile {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--sw-line);
+  border-radius: 8px;
+  background: var(--surface);
+}
 .sw-card code {
   display: block;
   padding: 12px;
