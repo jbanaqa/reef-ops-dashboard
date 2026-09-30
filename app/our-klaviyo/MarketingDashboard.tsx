@@ -236,16 +236,27 @@ function CampaignTestEmail({
   busy: boolean;
   canRun: boolean;
   onSend: (recipient: string) => Promise<unknown>;
-  onRun: (recipient: string) => Promise<unknown>;
+  onRun: (recipient: string, scheduledAt: string) => Promise<unknown>;
 }) {
   const [recipient, setRecipient] = useState("");
+  const [sendAt, setSendAt] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const selectedDate = sendAt ? new Date(sendAt) : null;
+  const validSendAt = !!selectedDate && !Number.isNaN(selectedDate.valueOf()) && selectedDate.valueOf() > now;
   return (
     <form
       className="mk-campaign-test-form"
       onSubmit={(event) => {
         event.preventDefault();
         const mode = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value;
-        void (mode === "run" ? onRun(recipient.trim()) : onSend(recipient.trim()));
+        if (mode === "run") {
+          if (!selectedDate || selectedDate.valueOf() <= Date.now()) return;
+          void onRun(recipient.trim(), selectedDate.toISOString());
+        } else void onSend(recipient.trim());
       }}
     >
       <label>
@@ -259,22 +270,33 @@ function CampaignTestEmail({
           onChange={(event) => setRecipient(event.target.value)}
         />
       </label>
+      <label>
+        Campaign test send time (your device’s local timezone)
+        <input
+          type="datetime-local"
+          value={sendAt}
+          onChange={(event) => setSendAt(event.target.value)}
+        />
+      </label>
       <div className="mk-campaign-test-actions">
         <button type="submit" value="preview" disabled={busy || !recipient.trim()}>
           {busy ? "Working…" : "Send test email"}
         </button>
-        <button type="submit" value="run" disabled={busy || !recipient.trim() || !canRun}>
-          {busy ? "Working…" : "Run campaign test"}
+        <button type="submit" value="run" disabled={busy || !recipient.trim() || !canRun || !validSendAt}>
+          {busy ? "Working…" : "Schedule campaign test"}
         </button>
       </div>
       <small>
         <strong>Send test email</strong> previews {name || "this campaign"} in an approved
-        internal inbox. <strong>Run campaign test</strong> queues one real campaign
-        message for that same address through the scheduled worker. The contact
+        internal inbox. <strong>Schedule campaign test</strong> queues one real campaign
+        message for that same address at the selected local time. The worker sends it
+        at or shortly after that time. The contact
         must be subscribed and in the selected audience. Smart Sending and
         suppression apply; a successful test can affect that contact’s next
         16-hour send window. No other audience members are contacted.
       </small>
+      {!sendAt && <small>Choose a future date and time to enable the campaign test. The direct email preview does not need a send time.</small>}
+      {!!sendAt && !validSendAt && <small>Choose a future date and time for the campaign test.</small>}
       {!canRun && <small>Complete email setup, migration review, and customer sending in Settings before running a campaign test.</small>}
     </form>
   );
@@ -919,11 +941,11 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                             `Test email sent to ${to}. The campaign is still a draft.`,
                           )
                         }
-                        onRun={(to) =>
+                        onRun={(to, scheduledAt) =>
                           run(async () => {
                             const id = await save();
-                            return action({ action: "run-campaign-test", id, to });
-                          }, `One-contact campaign test queued for ${to}. Return to the campaign list to follow its result.`)
+                            return action({ action: "run-campaign-test", id, to, at: scheduledAt });
+                          }, `One-contact campaign test scheduled for ${new Date(scheduledAt).toLocaleString()} for ${to}. Return to the campaign list to follow its result.`)
                         }
                       />
                     </section>
@@ -1202,10 +1224,10 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                       `Test email sent to ${to}. Campaign status is unchanged.`,
                                     )
                                   }
-                                  onRun={(to) =>
+                                  onRun={(to, scheduledAt) =>
                                     run(
-                                      () => action({ action: "run-campaign-test", id: item.id, to }),
-                                      `One-contact campaign test queued for ${to}. Check its result below after the next worker run.`,
+                                      () => action({ action: "run-campaign-test", id: item.id, to, at: scheduledAt }),
+                                      `One-contact campaign test scheduled for ${new Date(scheduledAt).toLocaleString()} for ${to}. Check its result below after the scheduled time.`,
                                     )
                                   }
                                 />

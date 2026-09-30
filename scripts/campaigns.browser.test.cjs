@@ -151,7 +151,7 @@ const { chromium } = require("playwright");
             testOfCampaignId: body.id,
             name: `Test run: ${data.campaigns[0].name}`,
             status: "SCHEDULED",
-            scheduledAt: new Date().toISOString(),
+            scheduledAt: body.at,
             messages: [{ status: "PENDING", error: null, profile: { email: body.to } }],
             _count: { messages: 1 },
           });
@@ -225,11 +225,19 @@ const { chromium } = require("playwright");
     assert.equal(writes.at(-1).to, "preview@example.com");
     assert.equal(writes.at(-1).subject, "Test subject");
     assert.equal(data.campaigns[0].status, "DRAFT");
-    await page.getByRole("button", { name: "Run campaign test", exact: true }).click();
-    await page.getByText("One-contact campaign test queued", { exact: false }).waitFor();
+    const runButton = page.getByRole("button", { name: "Schedule campaign test", exact: true });
+    assert.equal(await runButton.isDisabled(), true);
+    assert.equal(await runButton.evaluate((button) => getComputedStyle(button).cursor), "not-allowed");
+    const future = new Date(Date.now() + 60 * 60 * 1000);
+    const localFuture = new Date(future.getTime() - future.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    await page.getByLabel("Campaign test send time", { exact: false }).fill(localFuture);
+    assert.equal(await runButton.isEnabled(), true);
+    await runButton.click();
+    await page.getByText("One-contact campaign test scheduled", { exact: false }).waitFor();
     assert.equal(writes.at(-1).action, "run-campaign-test");
     assert.equal(writes.at(-1).id, "draft");
     assert.equal(writes.at(-1).to, "preview@example.com");
+    assert.equal(new Date(writes.at(-1).at).toISOString(), new Date(localFuture).toISOString());
     assert.equal(data.campaigns[0].status, "DRAFT");
     await page.getByRole("button", { name: "View test result" }).click();
     await page.getByText("Test run: Test campaign", { exact: true }).waitFor();
@@ -307,7 +315,7 @@ const { chromium } = require("playwright");
     assert.equal(writes.at(-1).to, "review@example.com");
     assert.equal(writes.at(-1).content.campaignLayout.sections[0].products[0].title, "Red and White Coco Worm");
     assert.equal(data.campaigns[0].status, "DRAFT");
-    assert.equal(await page.getByLabel("Test campaign email").getByRole("button", { name: "Run campaign test" }).count(), 1);
+    assert.equal(await page.getByLabel("Test campaign email").getByRole("button", { name: "Schedule campaign test" }).count(), 1);
     assert.equal(await page.getByLabel("16-hour Smart Sending").isChecked(), true);
     assert.equal(await page.getByRole("button", { name: "Send now" }).count(), 1);
     assert.equal(

@@ -44,6 +44,10 @@
   color: var(--surface);
 }
 
+.marketing .mk-campaign-test-form button:disabled {
+  cursor: not-allowed;
+}
+
 .mk-campaign-test-form small {
   grid-column: 1 / -1;
 }

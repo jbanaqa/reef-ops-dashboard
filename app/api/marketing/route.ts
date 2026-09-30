@@ -226,7 +226,9 @@ async function scheduleCampaign(id: string, scheduledAt: Date) {
   return null;
 }
 
-async function scheduleCampaignTest(id: string, to: string) {
+async function scheduleCampaignTest(id: string, to: string, scheduledAt: Date) {
+  if (Number.isNaN(scheduledAt.valueOf()) || scheduledAt.valueOf() <= Date.now())
+    throw new Error("Choose a future date and time for the campaign test.");
   const original = await prisma.marketingCampaign.findFirst({
     where: { id, shop: shop(), testOfCampaignId: null },
   });
@@ -263,7 +265,8 @@ async function scheduleCampaignTest(id: string, to: string) {
       orderBy: { createdAt: "desc" },
       select: { id: true },
     });
-    if (pending) return { id: pending.id, existing: true };
+    if (pending)
+      throw new Error("A campaign test for this contact is already scheduled or sending. Cancel it before choosing another time.");
     const now = new Date();
     const test = await tx.marketingCampaign.create({
       data: {
@@ -277,7 +280,7 @@ async function scheduleCampaignTest(id: string, to: string) {
         recipientMode: "SEND_TIME",
         testOfCampaignId: original.id,
         status: "SCHEDULED",
-        scheduledAt: now,
+        scheduledAt,
         // The worker prepares dynamic products, then uses this one message.
         // A populated expandedAt prevents audience-wide expansion.
         expandedAt: now,
@@ -292,7 +295,7 @@ async function scheduleCampaignTest(id: string, to: string) {
         channel: original.channel,
         subject: original.subject,
         content: json(original.content),
-        dueAt: now,
+        dueAt: scheduledAt,
       },
     });
     return { id: test.id, existing: false };
@@ -849,7 +852,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
     if (b.action === "run-campaign-test")
-      return Response.json(await scheduleCampaignTest(String(b.id || ""), approvedTestRecipient(b.to)));
+      return Response.json(await scheduleCampaignTest(String(b.id || ""), approvedTestRecipient(b.to), new Date(String(b.at || ""))));
     if (b.action === "import")
       return Response.json({
         results: await importProfiles(b.rows, b.dryRun !== false),
