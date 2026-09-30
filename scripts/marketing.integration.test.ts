@@ -752,6 +752,67 @@ test("tagged order conflict comparison shows both profiles without changing eith
   await prisma.marketingWebhookInbox.delete({ where: { id: row.id } });
 });
 
+test("recheck audits repeated expired order conflicts without moving consent or cancelling a future notice", async () => {
+  const api = await import("../app/api/marketing/route");
+  const { orderUpdateSkipReason } = await import("../lib/marketing/order-update-review");
+  assert.equal(orderUpdateSkipReason(["2026-03-10"], null), null, "missing schedule cannot prove expiry");
+  assert.equal(orderUpdateSkipReason(["2026-03-10"], {
+    version: 1, daysBefore: 2, sendHour: 2, timezone: "America/Los_Angeles",
+  }, new Date("2026-09-29T12:00:00Z")), null, "unresolvable DST schedule stays held");
+  const profilesWhere = { shop, OR: [{ email: "new-order@example.com" }, { shopifyId: "identity-conflict-customer" }] };
+  const beforeProfiles = await prisma.marketingProfile.findMany({ where: profilesWhere, include: { consents: true } });
+  const profile = beforeProfiles.find((p) => p.shopifyId === "identity-conflict-customer")!;
+  const expiredDate = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
+  const futureDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const payload = { id: "expired-conflict-order", name: "#expired-test", tags: [expiredDate], customer: { id: "identity-conflict-customer", email: "new-order@example.com" } };
+  const createMessage = (suffix: string, dueAt: Date) => prisma.marketingMessage.create({ data: {
+    shop, profileId: profile.id, flowKey: "delivery-upsell", channel: "EMAIL", subject: "Notice", content: defaultContent,
+    key: `delivery-upsell:${profile.id}:expired-conflict-order:${suffix}`, dueAt, triggerAt: new Date(),
+  } });
+  const expired = await createMessage("expired", new Date(Date.now() - 86400000));
+  const future = await createMessage("future", new Date(Date.now() + 86400000));
+  await prisma.marketingWebhookInbox.createMany({ data: Array.from({ length: 12 }, (_, i) => ({
+    shop, key: `expired-conflict-${i}`, topic: "orders/updated", payload, status: "FAILED", attempts: 10,
+    error: "Identity conflict: email and Shopify customer belong to different profiles. No consent was transferred.",
+    dueAt: new Date(Date.now() + 3600000),
+  })) });
+  const held = await prisma.marketingWebhookInbox.create({ data: {
+    shop, key: "future-conflict-held", topic: "orders/updated", payload: { ...payload, tags: [futureDate] },
+    status: "FAILED", attempts: 10, error: "Identity conflict: reconcile profiles before retrying. No consent was transferred.",
+  } });
+  const oldUser = process.env.DASHBOARD_USERNAME, oldPassword = process.env.DASHBOARD_PASSWORD;
+  const sentBefore = sent.length;
+  process.env.DASHBOARD_USERNAME = "review-staff";
+  process.env.DASHBOARD_PASSWORD = "review-test";
+  const request = () => new Request("https://app.example/api/marketing", { method: "POST", headers: {
+    "content-type": "application/json", origin: "https://app.example",
+    authorization: "Basic " + Buffer.from("review-staff:review-test").toString("base64"),
+  }, body: JSON.stringify({ action: "retry-conflicted-order-updates" }) });
+  try {
+    const response = await api.POST(request());
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.retried, 12);
+    assert.equal(result.processed, 12);
+    assert.equal((await prisma.marketingWebhookInbox.findUniqueOrThrow({ where: { id: held.id } })).attempts, 10);
+    assert.equal(await prisma.marketingEvent.count({ where: { shop, type: "ORDER_UPDATE_IDENTITY_CONFLICT_SKIPPED", key: { startsWith: "expired-conflict-" } } }), 12);
+    const audit = await prisma.marketingEvent.findUniqueOrThrow({ where: { shop_key: { shop, key: "expired-conflict-0" } } });
+    assert.equal((audit.payload as { skipReason: string }).skipReason, "Delivery reminder window passed");
+    assert.equal(audit.profileId, null);
+    assert.equal((await prisma.marketingMessage.findUniqueOrThrow({ where: { id: expired.id } })).status, "CANCELLED");
+    assert.equal((await prisma.marketingMessage.findUniqueOrThrow({ where: { id: future.id } })).status, "PENDING");
+    assert.deepEqual(await prisma.marketingProfile.findMany({ where: profilesWhere, include: { consents: true } }), beforeProfiles);
+    assert.equal(sent.length, sentBefore);
+    assert.equal((await (await api.POST(request())).json()).retried, 0);
+    await assert.rejects(ingest.ingestShopify("orders/create", "expired-order-create-held", payload), /Identity conflict:/);
+  } finally {
+    if (oldUser === undefined) delete process.env.DASHBOARD_USERNAME; else process.env.DASHBOARD_USERNAME = oldUser;
+    if (oldPassword === undefined) delete process.env.DASHBOARD_PASSWORD; else process.env.DASHBOARD_PASSWORD = oldPassword;
+    await prisma.marketingWebhookInbox.delete({ where: { id: held.id } });
+    await prisma.marketingMessage.deleteMany({ where: { id: { in: [expired.id, future.id] } } });
+  }
+});
+
 test("tag removal cancels an unsent B2B welcome", async () => {
   customer = {
     ...customer,

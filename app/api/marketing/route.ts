@@ -61,6 +61,7 @@ import { enrollExistingWelcomeTest, removeProfileFromList } from "@/lib/marketin
 import { shopifyGraphql } from "@/lib/shopify";
 import { resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
 import { inspectOrderIdentity } from "@/lib/marketing/identity-review";
+import { deliveryReviewConfig, orderUpdateSkipReason } from "@/lib/marketing/order-update-review";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -762,7 +763,17 @@ export async function GET(request: Request) {
           payload: true,
         },
       });
+    const reviewConfig = await deliveryReviewConfig(prisma);
+    const skippedReviews = await prisma.marketingEvent.findMany({
+      where: { shop: shop(), type: "ORDER_UPDATE_IDENTITY_CONFLICT_SKIPPED" },
+      orderBy: { createdAt: "desc" }, take: 10,
+      select: { id: true, payload: true, createdAt: true },
+    });
     const health = {
+      skippedOrderReviews: skippedReviews.map((row) => {
+        const payload = row.payload as { orderId?: string; orderLabel?: string; skipReason?: string };
+        return { id: row.id, label: payload.orderLabel || payload.orderId || "Unknown order", reason: payload.skipReason || "Delivery date removed or invalid", createdAt: row.createdAt };
+      }),
       inbox: inboxRows.map(({ payload, ...row }) => {
         const order = row.topic === "orders/updated" && payload && typeof payload === "object" && !Array.isArray(payload)
           ? payload as { id?: string | number; name?: string; tags?: unknown }
@@ -772,6 +783,8 @@ export async function GET(request: Request) {
           order: order ? {
             label: String(order.name || order.id || "Unknown order"),
             deliveryDateTag: order.tags == null ? null : !!deliveryDateFromTags(order.tags),
+            skipReason: /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")
+              ? orderUpdateSkipReason(order.tags, reviewConfig) : null,
           } : null,
         };
       }),
@@ -782,7 +795,7 @@ export async function GET(request: Request) {
         where: {
           shop: shop(),
           type: "ORDER_UPDATE_IDENTITY_CONFLICT_SKIPPED",
-          occurredAt: { gte: new Date(Date.now() - 30 * 86400000) },
+          createdAt: { gte: new Date(Date.now() - 30 * 86400000) },
         },
       }),
       lastProcessed: await prisma.marketingWebhookInbox.findFirst({
@@ -931,9 +944,10 @@ export async function POST(request: Request) {
         select: { id: true, payload: true },
         take: 100,
       });
+      const reviewConfig = await deliveryReviewConfig(prisma);
       const ids = rows.filter((row) => {
         const order = row.payload as { tags?: unknown };
-        return order.tags != null && !deliveryDateFromTags(order.tags);
+        return !!orderUpdateSkipReason(order.tags, reviewConfig);
       }).map((row) => row.id);
       if (!ids.length)
         return Response.json({ retried: 0, processed: 0, unresolved: await inboxUnresolved() });

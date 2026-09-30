@@ -83,6 +83,8 @@ const { chromium } = require("playwright");
     let syncRuns = 0;
     let conflictPending = false;
     let taggedConflict = false;
+    let expiredConflict = false;
+    let skippedCount = 0;
     let conflictRetries = 0;
     let deliveryRuns = 0;
     let imports = 0;
@@ -115,6 +117,7 @@ const { chromium } = require("playwright");
         }
         if (body.action === "retry-conflicted-order-updates") {
           conflictRetries++;
+          if (expiredConflict) skippedCount++;
           conflictPending = false;
           return route.fulfill({ json: { retried: 1, processed: 1, unresolved: 0 } });
         }
@@ -209,12 +212,13 @@ const { chromium } = require("playwright");
           },
           health: {
             unresolved: conflictPending ? 1 : 0,
-            skippedOrderUpdates: 0,
+            skippedOrderUpdates: skippedCount,
+            skippedOrderReviews: skippedCount ? [{ id: "skipped-1", label: "#1234", reason: "Delivery reminder window passed", createdAt: "2026-09-29T20:15:00Z" }] : [],
             inbox: conflictPending ? [{
               id: "conflict-1", topic: "orders/updated", status: "PENDING", attempts: 7,
               error: "Identity conflict: email and Shopify customer belong to different profiles. No consent was transferred.",
               createdAt: "2026-09-24T14:01:00Z", dueAt: "2026-09-29T20:15:00Z",
-              order: { label: "#1234", deliveryDateTag: taggedConflict },
+              order: { label: "#1234", deliveryDateTag: taggedConflict, skipReason: expiredConflict ? "Delivery reminder window passed" : null },
             }] : [],
             lastProcessed: { processedAt: "2026-09-09T12:00:00Z", topic: "customers/update" },
             oldestPending: { dueAt: "2026-09-09T12:00:00Z", error: null },
@@ -268,6 +272,16 @@ const { chromium } = require("playwright");
     await page.getByText(/new@example.com.*Matches event email.*Different Shopify ID/).waitFor();
     await page.getByLabel("Order identity comparison").scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(output, "tagged-order-identity-review.png") });
+    expiredConflict = true;
+    await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+    await page.getByText("Delivery reminder expired. Use Recheck order updates to clear this event.").waitFor();
+    await page.getByRole("button", { name: "Recheck order updates", exact: true }).click();
+    await page.getByText("Rechecked 1 order update; 1 processed. 0 unresolved remain.").waitFor();
+    await page.getByText("Skipped order updates — profile conflicts retained", { exact: true }).click();
+    await page.getByText(/#1234 · Delivery reminder window passed/).waitFor();
+    await page.getByText(/#1234 · Delivery reminder window passed/).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, "expired-order-audit.png") });
+    assert.equal(conflictRetries, 2);
     assert.equal(saves.length, 0);
     await page.getByRole("button", { name: /Sending & signup/ }).click();
     await page

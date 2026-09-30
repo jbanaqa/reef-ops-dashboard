@@ -9,6 +9,7 @@ import {
 } from "./delivery-upsell-config";
 import { validateFlow } from "./flow-config";
 import { findEmailAttribution } from "./attribution";
+import { deliveryReviewConfig, orderUpdateSkipReason } from "./order-update-review";
 
 type Customer = {
   id?: string | number;
@@ -28,6 +29,7 @@ type Customer = {
   };
 };
 type Payload = Customer & {
+  name?: string;
   line_items?: import("./cart").CartLine[];
   customer?: Customer;
   customerId?: string | number;
@@ -311,30 +313,32 @@ export async function ingestShopify(
         name: [c.first_name, c.last_name].filter(Boolean).join(" "),
       });
     } catch (error) {
-      // An order update without a delivery-date tag cannot create a marketing
-      // message. Cancel an older notice by order ID, without guessing which
-      // conflicting profile owns the customer or moving channel consent.
       if (
         topic !== "orders/updated" ||
         !(error instanceof IdentityConflictError) ||
-        !p.id ||
-        p.tags == null ||
-        deliveryDateFromTags(p.tags)
+        !p.id
       ) throw error;
+      const skipReason = orderUpdateSkipReason(p.tags, await deliveryReviewConfig(tx));
+      if (!skipReason) throw error;
+      // An expired or removed delivery schedule cannot send a notice. Preserve
+      // identities and consent, and never cancel a future notice from a newer update.
       await tx.marketingMessage.updateMany({
         where: {
           shop: shop(),
           flowKey: "delivery-upsell",
           status: "PENDING",
           key: { contains: `:${p.id}:` },
+          ...(skipReason === "Delivery reminder window passed"
+            ? { dueAt: { lte: new Date() } }
+            : { OR: [{ triggerAt: null }, { triggerAt: { lte: at } }] }),
         },
-        data: { status: "CANCELLED", error: "Delivery date removed or invalid" },
+        data: { status: "CANCELLED", error: skipReason },
       });
       await record(tx, {
         key,
         type: "ORDER_UPDATE_IDENTITY_CONFLICT_SKIPPED",
         occurredAt: at,
-        payload: { orderId: String(p.id), reason: error.message },
+        payload: { orderId: String(p.id), orderLabel: String(p.name || p.id), reason: error.message, skipReason },
       });
       return { skipped: true };
     }

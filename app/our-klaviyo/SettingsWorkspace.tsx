@@ -14,7 +14,7 @@ type InboxRow = {
   error: string | null;
   createdAt: string;
   dueAt: string;
-  order: { label: string; deliveryDateTag: boolean | null } | null;
+  order: { label: string; deliveryDateTag: boolean | null; skipReason?: string | null } | null;
 };
 type IdentityReview = {
   order: { label: string; orderEmail: string | null; eventCustomerEmail: string | null; customerId: string; deliveryDateTag: boolean | null };
@@ -65,6 +65,7 @@ export type SettingsData = {
   health?: {
     unresolved: number;
     skippedOrderUpdates: number;
+    skippedOrderReviews?: { id: string; label: string; reason: string; createdAt: string }[];
     inbox: InboxRow[];
     lastProcessed: { processedAt: string; topic: string } | null;
     oldestPending: { dueAt: string; error: string | null } | null;
@@ -555,11 +556,11 @@ export default function SettingsWorkspace({
                       processing. Customer sending waits until they are
                       resolved.
                     </p>
-                    {data.health.inbox.some((row) => row.topic === "orders/updated" && row.order?.deliveryDateTag === false && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")) && (
+                    {data.health.inbox.some((row) => row.topic === "orders/updated" && (row.order?.skipReason || row.order?.deliveryDateTag === false) && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")) && (
                       <div className="sw-sync-action">
                         <div>
                           <strong>Recheck conflicted order updates</strong>
-                          <p>Order updates without a delivery-date tag can be handled without joining customer profiles. Tagged orders will stay on hold for review.</p>
+                          <p>Clear expired delivery reminders and updates without a delivery date. Profile conflicts are kept in the audit history; future reminders stay on hold for review.</p>
                         </div>
                         <button disabled={!!busy || !setup.ingestEnabled} onClick={() => run(
                           "retry-order-updates",
@@ -570,7 +571,7 @@ export default function SettingsWorkspace({
                         </button>
                       </div>
                     )}
-                    {data.health.inbox.some((row) => row.topic === "orders/updated" && row.order?.deliveryDateTag === true && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")) && (
+                    {data.health.inbox.some((row) => row.topic === "orders/updated" && row.order?.deliveryDateTag === true && !row.order.skipReason && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")) && (
                       <p className="sw-hint">Delivery-date orders need an identity review before retrying. Open Compare profiles on an event below.</p>
                     )}
                     {data.health.inbox.map((row) => (
@@ -600,6 +601,7 @@ export default function SettingsWorkspace({
                                 ? "Delivery-date tag found"
                                 : "No delivery-date tag"}
                           </small>}
+                          {row.order?.skipReason === "Delivery reminder window passed" && <p>Delivery reminder expired. Use Recheck order updates to clear this event.</p>}
                           {row.error && <p>{row.error}</p>}
                           {row.topic === "orders/updated" && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "") && (
                             <>
@@ -638,7 +640,7 @@ export default function SettingsWorkspace({
                         </div>
                         <button
                           disabled={!!busy || row.status === "PROCESSING"}
-                          title={row.order?.deliveryDateTag && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "") ? "Retry only after resolving the profile conflict." : undefined}
+                          title={row.order?.deliveryDateTag && !row.order.skipReason && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "") ? "Retry only after resolving the profile conflict." : undefined}
                           onClick={() =>
                             run(
                               "retry:" + row.id,
@@ -649,7 +651,7 @@ export default function SettingsWorkspace({
                             )
                           }
                         >
-                          {row.order?.deliveryDateTag && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")
+                          {row.order?.deliveryDateTag && !row.order.skipReason && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")
                             ? "Retry after review"
                             : "Queue retry"}
                         </button>
@@ -662,7 +664,7 @@ export default function SettingsWorkspace({
                       </p>
                     )}
                     <p className="sw-hint">
-                      Tagged orders and other failed events still need review before retrying.
+                      Future delivery reminders with a profile conflict still need review before retrying.
                     </p>
                   </>
                 ) : (
@@ -676,8 +678,12 @@ export default function SettingsWorkspace({
                 </p>
               )}
               {!!data.health?.skippedOrderUpdates && <p className="sw-hint">
-                {data.health.skippedOrderUpdates} order updates in the last 30 days had an identity conflict but no delivery-date tag. Reef Ops recorded them without changing consent or sending a notice.
+                {data.health.skippedOrderUpdates} {data.health.skippedOrderUpdates === 1 ? "order update was" : "order updates were"} skipped in the last 30 days because their delivery reminder was expired or had no valid delivery date. Profile conflicts were recorded; consent was preserved and no notice was sent.
               </p>}
+              {!!data.health?.skippedOrderReviews?.length && <details>
+                <summary>Skipped order updates — profile conflicts retained</summary>
+                {data.health.skippedOrderReviews.map((row) => <p key={row.id}>{row.label} · {row.reason} · {date(row.createdAt)}</p>)}
+              </details>}
               <div className="sw-stat-line">
                 <div>
                   <span>Pending messages</span>
