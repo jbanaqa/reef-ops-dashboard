@@ -257,7 +257,7 @@ export async function runMarketing(onlyMessageId?: string) {
     }
 
     if (expansionSource.expandedAt) {
-      await atomic(async (tx) => {
+      const claimed = await atomic(async (tx) => {
         const current = await tx.marketingCampaign.findUnique({
           where: { id: campaign.id },
         });
@@ -266,15 +266,24 @@ export async function runMarketing(onlyMessageId?: string) {
           !current.expandedAt ||
           current.updatedAt.getTime() !== expansionSource.updatedAt.getTime()
         )
-          return;
-        await tx.marketingMessage.updateMany({
-          where: { campaignId: current.id, status: "PENDING" },
+          return null;
+        return tx.marketingCampaign.update({
+          where: { id: current.id },
           data: { content: json(preparedContent) },
         });
-        await tx.marketingCampaign.update({
-          where: { id: current.id },
-          data: { status: "SENDING", content: json(preparedContent) },
-        });
+      });
+      if (!claimed) continue;
+      await prisma.marketingMessage.updateMany({
+        where: { campaignId: claimed.id, status: "PENDING" },
+        data: { content: json(preparedContent) },
+      });
+      await prisma.marketingCampaign.updateMany({
+        where: {
+          id: claimed.id,
+          status: "SCHEDULED",
+          updatedAt: claimed.updatedAt,
+        },
+        data: { status: "SENDING" },
       });
       continue;
     }
@@ -294,10 +303,10 @@ export async function runMarketing(onlyMessageId?: string) {
       take: 500,
     });
 
-    // Re-check the source row before writing. If another worker, cancellation,
-    // or edit changed the campaign while the slow read was running, this page
-    // is discarded and the next cron run recalculates it from current data.
-    await atomic(async (tx) => {
+    // Claim this page with one short transaction. The idempotent bulk insert is
+    // intentionally outside the transaction because duplicating a full email
+    // payload across hundreds of recipients can take longer than its timeout.
+    const claimed = await atomic(async (tx) => {
       const current = await tx.marketingCampaign.findUnique({
         where: { id: campaign.id },
       });
@@ -307,31 +316,64 @@ export async function runMarketing(onlyMessageId?: string) {
         current.testOfCampaignId ||
         current.updatedAt.getTime() !== expansionSource.updatedAt.getTime()
       )
-        return;
-      await tx.marketingCampaign.update({
+        return null;
+      return tx.marketingCampaign.update({
         where: { id: current.id },
         data: { content: json(preparedContent) },
       });
-      if (profiles.length)
-        await tx.marketingMessage.createMany({
-          data: profiles.map((p) => ({
-            shop: shop(),
-            key: "campaign:" + campaign.id + ":" + p.id,
-            campaignId: campaign.id,
-            profileId: p.id,
-            channel: current.channel,
-            subject: current.subject,
-            content: json(preparedContent),
-            dueAt: now,
-          })),
-          skipDuplicates: true,
-        });
-      if (profiles.length < 500)
-        await tx.marketingCampaign.update({
-          where: { id: campaign.id },
-          data: { status: "SENDING", expandedAt: now },
-        });
     });
+    if (!claimed) continue;
+
+    const profileIds = profiles.map((profile) => profile.id);
+    for (let index = 0; index < profiles.length; index += 50) {
+      const page = profiles.slice(index, index + 50);
+      await prisma.marketingMessage.createMany({
+        data: page.map((p) => ({
+          shop: shop(),
+          key: "campaign:" + campaign.id + ":" + p.id,
+          campaignId: campaign.id,
+          profileId: p.id,
+          channel: claimed.channel,
+          subject: claimed.subject,
+          content: json(preparedContent),
+          dueAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    const stillClaimed = await prisma.marketingCampaign.findFirst({
+      where: {
+        id: claimed.id,
+        status: "SCHEDULED",
+        updatedAt: claimed.updatedAt,
+      },
+      select: { id: true },
+    });
+    if (!stillClaimed) {
+      if (profileIds.length)
+        await prisma.marketingMessage.updateMany({
+          where: {
+            campaignId: claimed.id,
+            profileId: { in: profileIds },
+            status: "PENDING",
+          },
+          data: {
+            status: "CANCELLED",
+            error: "Campaign changed during audience expansion",
+          },
+        });
+      continue;
+    }
+    if (profiles.length < 500)
+      await prisma.marketingCampaign.updateMany({
+        where: {
+          id: claimed.id,
+          status: "SCHEDULED",
+          updatedAt: claimed.updatedAt,
+        },
+        data: { status: "SENDING", expandedAt: now },
+      });
   }
   // Reserve capacity for both automation and campaign email; SMS never crowds
   // either out. Deferred records receive a future dueAt before the next run.
