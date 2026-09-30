@@ -126,6 +126,7 @@ model MarketingMessage {
   updatedAt DateTime @updatedAt
   @@index([shop, status, dueAt])
   @@index([profileId, flowKey])
+  @@index([campaignId, profileId])
 }
 
 model MarketingResource {

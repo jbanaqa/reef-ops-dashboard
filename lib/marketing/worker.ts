@@ -207,18 +207,29 @@ export async function runMarketing(onlyMessageId?: string) {
       });
       continue;
     }
-    // Expand only a bounded page per campaign/run. Exclude existing recipients
-    // so interrupted/overlapping expansion resumes without rescanning all pages.
-    await atomic(async (tx) => {
-      const current = await tx.marketingCampaign.findUnique({
-        where: { id: campaign.id },
-      });
-      if (current?.status !== "SCHEDULED") return;
-      await tx.marketingCampaign.update({
-        where: { id: current.id },
-        data: { content: json(preparedContent) },
-      });
-      if (current.testOfCampaignId) {
+    // Resolve the audience and select the next page outside an interactive
+    // transaction. On larger stores the anti-join against existing campaign
+    // messages can take tens of seconds, which would otherwise expire the
+    // transaction before its writes can commit.
+    const expansionSource = await prisma.marketingCampaign.findUnique({
+      where: { id: campaign.id },
+    });
+    if (expansionSource?.status !== "SCHEDULED") continue;
+
+    if (expansionSource.testOfCampaignId) {
+      await atomic(async (tx) => {
+        const current = await tx.marketingCampaign.findUnique({
+          where: { id: campaign.id },
+        });
+        if (
+          current?.status !== "SCHEDULED" ||
+          current.updatedAt.getTime() !== expansionSource.updatedAt.getTime()
+        )
+          return;
+        await tx.marketingCampaign.update({
+          where: { id: current.id },
+          data: { content: json(preparedContent) },
+        });
         const count = await tx.marketingMessage.count({
           where: { campaignId: current.id },
         });
@@ -233,8 +244,6 @@ export async function runMarketing(onlyMessageId?: string) {
           });
           return;
         }
-      }
-      if (current.expandedAt || current.testOfCampaignId) {
         await tx.marketingMessage.updateMany({
           where: { campaignId: current.id, status: "PENDING" },
           data: { content: json(preparedContent) },
@@ -243,18 +252,65 @@ export async function runMarketing(onlyMessageId?: string) {
           where: { id: current.id },
           data: { status: "SENDING" },
         });
+      });
+      continue;
+    }
+
+    if (expansionSource.expandedAt) {
+      await atomic(async (tx) => {
+        const current = await tx.marketingCampaign.findUnique({
+          where: { id: campaign.id },
+        });
+        if (
+          current?.status !== "SCHEDULED" ||
+          !current.expandedAt ||
+          current.updatedAt.getTime() !== expansionSource.updatedAt.getTime()
+        )
+          return;
+        await tx.marketingMessage.updateMany({
+          where: { campaignId: current.id, status: "PENDING" },
+          data: { content: json(preparedContent) },
+        });
+        await tx.marketingCampaign.update({
+          where: { id: current.id },
+          data: { status: "SENDING", content: json(preparedContent) },
+        });
+      });
+      continue;
+    }
+
+    const resolved = await resolveCampaignAudience(
+      prisma,
+      expansionSource.audience,
+    );
+    const profiles = await prisma.marketingProfile.findMany({
+      where: {
+        AND: [
+          resolvedAudienceWhere(resolved, expansionSource.channel),
+          { messages: { none: { campaignId: campaign.id } } },
+        ],
+      },
+      orderBy: { id: "asc" },
+      take: 500,
+    });
+
+    // Re-check the source row before writing. If another worker, cancellation,
+    // or edit changed the campaign while the slow read was running, this page
+    // is discarded and the next cron run recalculates it from current data.
+    await atomic(async (tx) => {
+      const current = await tx.marketingCampaign.findUnique({
+        where: { id: campaign.id },
+      });
+      if (
+        current?.status !== "SCHEDULED" ||
+        current.expandedAt ||
+        current.testOfCampaignId ||
+        current.updatedAt.getTime() !== expansionSource.updatedAt.getTime()
+      )
         return;
-      }
-      const resolved = await resolveCampaignAudience(tx, current.audience);
-      const profiles = await tx.marketingProfile.findMany({
-        where: {
-          AND: [
-            resolvedAudienceWhere(resolved, current.channel),
-            { messages: { none: { campaignId: campaign.id } } },
-          ],
-        },
-        orderBy: { id: "asc" },
-        take: 500,
+      await tx.marketingCampaign.update({
+        where: { id: current.id },
+        data: { content: json(preparedContent) },
       });
       if (profiles.length)
         await tx.marketingMessage.createMany({
@@ -263,8 +319,8 @@ export async function runMarketing(onlyMessageId?: string) {
             key: "campaign:" + campaign.id + ":" + p.id,
             campaignId: campaign.id,
             profileId: p.id,
-            channel: campaign.channel,
-            subject: campaign.subject,
+            channel: current.channel,
+            subject: current.subject,
             content: json(preparedContent),
             dueAt: now,
           })),
