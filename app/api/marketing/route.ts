@@ -46,7 +46,7 @@ import {
   withBranding,
 } from "@/lib/marketing/rules";
 import { resendProvider, setup } from "@/lib/marketing/delivery";
-import { processMarketingInbox, inboxUnresolved } from "@/lib/marketing/inbox";
+import { processMarketingInbox, inboxUnresolved, ingestionEnabled } from "@/lib/marketing/inbox";
 import { audienceDirectory, contactDetails } from "@/lib/marketing/audiences";
 import { runMarketing } from "@/lib/marketing/worker";
 import { importProfiles } from "@/lib/marketing/ingest";
@@ -56,7 +56,7 @@ import {
   sendTestMessageNow,
 } from "@/lib/marketing/message-test";
 import { validateFlow } from "@/lib/marketing/flow-config";
-import { deliveryUpsellDueAt } from "@/lib/marketing/delivery-upsell-config";
+import { deliveryDateFromTags, deliveryUpsellDueAt } from "@/lib/marketing/delivery-upsell-config";
 import { enrollExistingWelcomeTest, removeProfileFromList } from "@/lib/marketing/profile-testing";
 import { shopifyGraphql } from "@/lib/shopify";
 import { resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
@@ -746,8 +746,7 @@ export async function GET(request: Request) {
       revenue[p.currency] = (revenue[p.currency] || 0) + Number(p.revenue || 0);
     }
     const settings = await loadMarketingSettings();
-    const health = {
-      inbox: await prisma.marketingWebhookInbox.findMany({
+    const inboxRows = await prisma.marketingWebhookInbox.findMany({
         where: { shop: shop(), status: { not: "DONE" } },
         orderBy: { createdAt: "asc" },
         take: 20,
@@ -759,10 +758,31 @@ export async function GET(request: Request) {
           error: true,
           createdAt: true,
           dueAt: true,
+          payload: true,
         },
+      });
+    const health = {
+      inbox: inboxRows.map(({ payload, ...row }) => {
+        const order = row.topic === "orders/updated" && payload && typeof payload === "object" && !Array.isArray(payload)
+          ? payload as { id?: string | number; name?: string; tags?: unknown }
+          : null;
+        return {
+          ...row,
+          order: order ? {
+            label: String(order.name || order.id || "Unknown order"),
+            deliveryDateTag: order.tags == null ? null : !!deliveryDateFromTags(order.tags),
+          } : null,
+        };
       }),
       unresolved: await prisma.marketingWebhookInbox.count({
         where: { shop: shop(), status: { not: "DONE" } },
+      }),
+      skippedOrderUpdates: await prisma.marketingEvent.count({
+        where: {
+          shop: shop(),
+          type: "ORDER_UPDATE_IDENTITY_CONFLICT_SKIPPED",
+          occurredAt: { gte: new Date(Date.now() - 30 * 86400000) },
+        },
       }),
       lastProcessed: await prisma.marketingWebhookInbox.findFirst({
         where: { shop: shop(), status: "DONE", processedAt: { not: null } },
@@ -889,6 +909,33 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       return Response.json({ ...result, unresolved: await inboxUnresolved() });
+    }
+    if (b.action === "retry-conflicted-order-updates") {
+      if (!(await ingestionEnabled()))
+        return Response.json({ error: "Shopify ingestion is disabled." }, { status: 409 });
+      const rows = await prisma.marketingWebhookInbox.findMany({
+        where: {
+          shop: shop(), topic: "orders/updated",
+          status: { in: ["PENDING", "FAILED"] },
+          OR: [
+            { error: { startsWith: "Identity conflict:" } },
+            { error: { startsWith: "Identity change requires review;" } },
+          ],
+        },
+        select: { id: true },
+        take: 100,
+      });
+      if (!rows.length)
+        return Response.json({ retried: 0, processed: 0, unresolved: await inboxUnresolved() });
+      const ids = rows.map((row) => row.id);
+      const reset = await prisma.marketingWebhookInbox.updateMany({
+        where: { id: { in: ids }, shop: shop(), status: { in: ["PENDING", "FAILED"] } },
+        data: { status: "PENDING", dueAt: new Date(), claimedAt: null },
+      });
+      const result = await processMarketingInbox(100, ids);
+      if (result.disabled)
+        return Response.json({ error: "Shopify ingestion is disabled." }, { status: 409 });
+      return Response.json({ retried: reset.count, processed: result.processed, unresolved: await inboxUnresolved() });
     }
     if (b.action === "retry-inbox") {
       const result = await prisma.marketingWebhookInbox.updateMany({

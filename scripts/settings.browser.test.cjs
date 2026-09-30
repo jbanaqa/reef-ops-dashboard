@@ -81,6 +81,8 @@ const { chromium } = require("playwright");
     const saves = [];
     let failSave = false;
     let syncRuns = 0;
+    let conflictPending = false;
+    let conflictRetries = 0;
     let deliveryRuns = 0;
     let imports = 0;
     let engagementRunning = false;
@@ -109,6 +111,11 @@ const { chromium } = require("playwright");
         if (body.action === "process-inbox") {
           syncRuns++;
           return route.fulfill({ json: { processed: syncRuns === 1 ? 1 : 0, unresolved: 0 } });
+        }
+        if (body.action === "retry-conflicted-order-updates") {
+          conflictRetries++;
+          conflictPending = false;
+          return route.fulfill({ json: { retried: 1, processed: 1, unresolved: 0 } });
         }
         if (body.action === "start-klaviyo-opens") {
           engagementRunning = true;
@@ -188,8 +195,14 @@ const { chromium } = require("playwright");
             },
           },
           health: {
-            unresolved: 0,
-            inbox: [],
+            unresolved: conflictPending ? 1 : 0,
+            skippedOrderUpdates: 0,
+            inbox: conflictPending ? [{
+              id: "conflict-1", topic: "orders/updated", status: "PENDING", attempts: 7,
+              error: "Identity conflict: email and Shopify customer belong to different profiles. No consent was transferred.",
+              createdAt: "2026-09-24T14:01:00Z", dueAt: "2026-09-29T20:15:00Z",
+              order: { label: "#1234", deliveryDateTag: false },
+            }] : [],
             lastProcessed: { processedAt: "2026-09-09T12:00:00Z", topic: "customers/update" },
             oldestPending: { dueAt: "2026-09-09T12:00:00Z", error: null },
           },
@@ -224,6 +237,14 @@ const { chromium } = require("playwright");
       .click();
     await page.getByText(/No events waiting\. Shopify changes may already have processed automatically/).waitFor();
     assert.equal(syncRuns, 2);
+    conflictPending = true;
+    await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+    await page.getByText("#1234 · No delivery-date tag").waitFor();
+    await page.getByText("#1234 · No delivery-date tag").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, "order-identity-conflict.png") });
+    await page.getByRole("button", { name: "Recheck order updates", exact: true }).click();
+    await page.getByText("Rechecked 1 order update; 1 processed. 0 unresolved remain.").waitFor();
+    assert.equal(conflictRetries, 1);
     assert.equal(saves.length, 0);
     await page.getByRole("button", { name: /Sending & signup/ }).click();
     await page

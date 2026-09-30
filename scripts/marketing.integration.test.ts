@@ -671,6 +671,60 @@ test("Shopify delivery-date order tag schedules one upsell notice", async () => 
   sent.splice(sentBefore, 1);
 });
 
+test("identity-conflicted order updates without delivery tags cancel notices without moving consent", async () => {
+  const shopifyProfile = await prisma.marketingProfile.create({
+    data: { shop, shopifyId: "identity-conflict-customer", email: "old-order@example.com" },
+  });
+  const emailProfile = await prisma.marketingProfile.create({
+    data: { shop, email: "new-order@example.com" },
+  });
+  await prisma.marketingConsent.createMany({ data: [
+    { profileId: shopifyProfile.id, channel: "EMAIL", status: "SUBSCRIBED", source: "shopify", occurredAt: at },
+    { profileId: emailProfile.id, channel: "EMAIL", status: "UNSUBSCRIBED", suppressed: true, source: "shopify", occurredAt: at },
+  ] });
+  const pending = await prisma.marketingMessage.create({
+    data: {
+      shop,
+      key: `delivery-upsell:${shopifyProfile.id}:identity-conflict-order:0`,
+      profileId: shopifyProfile.id,
+      flowKey: "delivery-upsell",
+      channel: "EMAIL",
+      subject: "Delivery notice",
+      content: defaultContent,
+      dueAt: new Date(Date.now() + 86400000),
+    },
+  });
+  const update = {
+    id: "identity-conflict-order",
+    tags: ["VIP"],
+    customer: { id: "identity-conflict-customer", email: "new-order@example.com" },
+  };
+  await ingest.ingestShopify("orders/updated", "identity-conflict-no-tag", update);
+  await ingest.ingestShopify("orders/updated", "identity-conflict-no-tag", update);
+  assert.equal((await prisma.marketingMessage.findUniqueOrThrow({ where: { id: pending.id } })).status, "CANCELLED");
+  const audit = await prisma.marketingEvent.findUniqueOrThrow({
+    where: { shop_key: { shop, key: "identity-conflict-no-tag" } },
+  });
+  assert.equal(audit.type, "ORDER_UPDATE_IDENTITY_CONFLICT_SKIPPED");
+  assert.equal(audit.profileId, null);
+  assert.equal((await prisma.marketingProfile.findUniqueOrThrow({ where: { id: shopifyProfile.id } })).email, "old-order@example.com");
+  assert.equal((await prisma.marketingProfile.findUniqueOrThrow({ where: { id: emailProfile.id } })).shopifyId, null);
+  assert.equal((await prisma.marketingConsent.findUniqueOrThrow({ where: { profileId_channel: { profileId: emailProfile.id, channel: "EMAIL" } } })).status, "UNSUBSCRIBED");
+  const future = new Date(Date.now() + 30 * 86400000);
+  const deliveryTag = new Intl.DateTimeFormat("en-US", {
+    month: "long", day: "numeric", year: "numeric", timeZone: "UTC",
+  }).format(future).replace(",", "");
+  await assert.rejects(
+    ingest.ingestShopify("orders/updated", "identity-conflict-tagged", { ...update, tags: [deliveryTag] }),
+    /Identity conflict: email and Shopify customer belong to different profiles/,
+  );
+  await assert.rejects(
+    ingest.ingestShopify("orders/create", "identity-conflict-create", update),
+    /Identity conflict: email and Shopify customer belong to different profiles/,
+  );
+  assert.equal(await prisma.marketingEvent.count({ where: { shop, key: "identity-conflict-tagged" } }), 0);
+});
+
 test("tag removal cancels an unsent B2B welcome", async () => {
   customer = {
     ...customer,
@@ -1427,7 +1481,7 @@ test("manual inbox action requires login, respects ingestion switch, and never s
   const api = await import("../app/api/marketing/route");
   process.env.DASHBOARD_USERNAME = "staff";
   process.env.DASHBOARD_PASSWORD = "test-password";
-  const request = (authorized = true) =>
+  const request = (authorized = true, action = "process-inbox") =>
     new Request("https://app.example/api/marketing", {
       method: "POST",
       headers: {
@@ -1441,7 +1495,7 @@ test("manual inbox action requires login, respects ingestion switch, and never s
             }
           : {}),
       },
-      body: JSON.stringify({ action: "process-inbox" }),
+      body: JSON.stringify({ action }),
     });
   const previousIngest = process.env.MARKETING_INGEST_ENABLED;
   const beforeSent = sent.length;
@@ -1463,8 +1517,10 @@ test("manual inbox action requires login, respects ingestion switch, and never s
   });
   try {
     assert.equal((await api.POST(request(false))).status, 401);
+    assert.equal((await api.POST(request(false, "retry-conflicted-order-updates"))).status, 401);
     process.env.MARKETING_INGEST_ENABLED = "false";
     assert.equal((await api.POST(request())).status, 409);
+    assert.equal((await api.POST(request(true, "retry-conflicted-order-updates"))).status, 409);
     assert.equal(
       await prisma.marketingProfile.count({
         where: { shop, shopifyId: "990" },
@@ -1490,6 +1546,26 @@ test("manual inbox action requires login, respects ingestion switch, and never s
     );
     assert.equal(sent.length, beforeSent);
     assert.equal((await api.POST(request())).status, 200);
+    assert.equal(sent.length, beforeSent);
+    await inbox.queueShopify("orders/updated", "retry-identity-no-tag", {
+      id: "identity-conflict-retry-order",
+      tags: ["VIP"],
+      customer: { id: "identity-conflict-customer", email: "new-order@example.com" },
+    });
+    await prisma.marketingWebhookInbox.update({
+      where: { shop_key: { shop, key: "retry-identity-no-tag" } },
+      data: {
+        dueAt: new Date(Date.now() + 3600000),
+        attempts: 7,
+        error: "Identity conflict: email and Shopify customer belong to different profiles. No consent was transferred.",
+      },
+    });
+    const retried = await api.POST(request(true, "retry-conflicted-order-updates"));
+    assert.equal(retried.status, 200);
+    assert.equal((await retried.json()).processed, 1);
+    assert.equal((await prisma.marketingWebhookInbox.findUniqueOrThrow({
+      where: { shop_key: { shop, key: "retry-identity-no-tag" } },
+    })).status, "DONE");
     assert.equal(sent.length, beforeSent);
   } finally {
     if (previousIngest === undefined)

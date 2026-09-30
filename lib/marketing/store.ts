@@ -41,6 +41,8 @@ export async function atomic<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
     }
   }
 }
+export class IdentityConflictError extends Error {}
+
 export async function identify(
   tx: Tx,
   input: { email?: string; phone?: string; shopifyId?: string; name?: string },
@@ -70,12 +72,12 @@ export async function identify(
       ? profiles.find((profile) => profile.shopifyId === identity.shopifyId)
       : undefined;
     if (emailProfile && shopifyProfile && emailProfile.id !== shopifyProfile.id)
-      throw new Error(
+      throw new IdentityConflictError(
         "Identity conflict: email and Shopify customer belong to different profiles. No consent was transferred.",
       );
     existing = shopifyProfile || emailProfile;
     if (!existing)
-      throw new Error(
+      throw new IdentityConflictError(
         "Identity conflict: reconcile profiles before retrying. No consent was transferred.",
       );
     const existingId = existing.id;
@@ -89,7 +91,7 @@ export async function identify(
           profile.shopifyId !== identity.shopifyId,
       );
     if (!onlyPhoneAlias)
-      throw new Error(
+      throw new IdentityConflictError(
         "Identity conflict: reconcile profiles before retrying. No consent was transferred.",
       );
     // A phone number can remain attached to an older email profile after a
@@ -106,7 +108,7 @@ export async function identify(
         existing[k as keyof typeof identity] !== v,
     )
   )
-    throw new Error(
+    throw new IdentityConflictError(
       "Identity change requires review; consent cannot move to another address.",
     );
   return existing

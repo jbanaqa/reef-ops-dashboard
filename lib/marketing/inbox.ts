@@ -23,7 +23,7 @@ export async function queueShopify(
     update: {},
   });
 }
-export async function processMarketingInbox(limit = 100) {
+export async function processMarketingInbox(limit = 100, ids?: string[]) {
   if (!(await ingestionEnabled())) return { processed: 0, disabled: true };
   const now = new Date();
   await prisma.marketingWebhookInbox.updateMany({
@@ -35,7 +35,10 @@ export async function processMarketingInbox(limit = 100) {
     data: { status: "PENDING", claimedAt: null },
   });
   const rows = await prisma.marketingWebhookInbox.findMany({
-    where: { shop: shop(), status: "PENDING", dueAt: { lte: now } },
+    where: {
+      shop: shop(), status: "PENDING", dueAt: { lte: now },
+      ...(ids ? { id: { in: ids } } : {}),
+    },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: limit,
   });

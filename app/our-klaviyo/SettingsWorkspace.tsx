@@ -14,6 +14,7 @@ type InboxRow = {
   error: string | null;
   createdAt: string;
   dueAt: string;
+  order: { label: string; deliveryDateTag: boolean | null } | null;
 };
 type ImportResult = { row: number; status: string; error?: string };
 type ConnectionResult = {
@@ -52,6 +53,7 @@ export type SettingsData = {
   setup: Record<string, unknown>;
   health?: {
     unresolved: number;
+    skippedOrderUpdates: number;
     inbox: InboxRow[];
     lastProcessed: { processedAt: string; topic: string } | null;
     oldestPending: { dueAt: string; error: string | null } | null;
@@ -541,6 +543,21 @@ export default function SettingsWorkspace({
                       processing. Customer sending waits until they are
                       resolved.
                     </p>
+                    {data.health.inbox.some((row) => row.topic === "orders/updated" && /^(Identity conflict:|Identity change requires review;)/.test(row.error || "")) && (
+                      <div className="sw-sync-action">
+                        <div>
+                          <strong>Recheck conflicted order updates</strong>
+                          <p>Order updates without a delivery-date tag can be handled without joining customer profiles. Tagged orders will stay on hold for review.</p>
+                        </div>
+                        <button disabled={!!busy || !setup.ingestEnabled} onClick={() => run(
+                          "retry-order-updates",
+                          () => action<{ retried: number; processed: number; unresolved: number }>({ action: "retry-conflicted-order-updates" }),
+                          (r) => `Rechecked ${r.retried} ${r.retried === 1 ? "order update" : "order updates"}; ${r.processed} processed. ${r.unresolved} unresolved remain.`,
+                        )}>
+                          {busy === "retry-order-updates" ? "Rechecking…" : "Recheck order updates"}
+                        </button>
+                      </div>
+                    )}
                     {data.health.inbox.map((row) => (
                       <div className="sw-issue" key={row.id}>
                         <div>
@@ -561,6 +578,13 @@ export default function SettingsWorkspace({
                                 ? `Next retry: ${date(row.dueAt)}`
                                 : "Processing now"}
                           </small>
+                          {row.order && <small>
+                            {row.order.label} · {row.order.deliveryDateTag === null
+                              ? "Delivery-date tag unknown"
+                              : row.order.deliveryDateTag
+                                ? "Delivery-date tag found"
+                                : "No delivery-date tag"}
+                          </small>}
                           {row.error && <p>{row.error}</p>}
                           <details>
                             <summary>Technical details</summary>
@@ -590,7 +614,7 @@ export default function SettingsWorkspace({
                       </p>
                     )}
                     <p className="sw-hint">
-                      Fix the reported problem before retrying a failed event.
+                      Tagged orders and other failed events still need review before retrying.
                     </p>
                   </>
                 ) : (
@@ -603,6 +627,9 @@ export default function SettingsWorkspace({
                   Delivery health is unavailable. Refresh status to try again.
                 </p>
               )}
+              {!!data.health?.skippedOrderUpdates && <p className="sw-hint">
+                {data.health.skippedOrderUpdates} order updates in the last 30 days had an identity conflict but no delivery-date tag. Reef Ops recorded them without changing consent or sending a notice.
+              </p>}
               <div className="sw-stat-line">
                 <div>
                   <span>Pending messages</span>

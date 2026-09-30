@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
-import { atomic, consent, identify, json, record, shop, type Tx } from "./store";
+import { atomic, consent, identify, IdentityConflictError, json, record, shop, type Tx } from "./store";
 import { date } from "./rules";
 import { enroll } from "./flows";
 import {
@@ -292,12 +292,6 @@ export async function ingestShopify(
       });
       return { skipped: true };
     }
-    const profile = await identify(tx, {
-      email: c.email || p.email,
-      phone: c.phone || p.phone,
-      shopifyId: c.id ? String(c.id) : undefined,
-      name: [c.first_name, c.last_name].filter(Boolean).join(" "),
-    });
     const at = date(
       p.updated_at ||
         p.created_at ||
@@ -308,6 +302,42 @@ export async function ingestShopify(
     );
     if (at > new Date(Date.now() + 300000))
       throw new Error("Future event timestamp rejected.");
+    let profile;
+    try {
+      profile = await identify(tx, {
+        email: c.email || p.email,
+        phone: c.phone || p.phone,
+        shopifyId: c.id ? String(c.id) : undefined,
+        name: [c.first_name, c.last_name].filter(Boolean).join(" "),
+      });
+    } catch (error) {
+      // An order update without a delivery-date tag cannot create a marketing
+      // message. Cancel an older notice by order ID, without guessing which
+      // conflicting profile owns the customer or moving channel consent.
+      if (
+        topic !== "orders/updated" ||
+        !(error instanceof IdentityConflictError) ||
+        !p.id ||
+        p.tags == null ||
+        deliveryDateFromTags(p.tags)
+      ) throw error;
+      await tx.marketingMessage.updateMany({
+        where: {
+          shop: shop(),
+          flowKey: "delivery-upsell",
+          status: "PENDING",
+          key: { contains: `:${p.id}:` },
+        },
+        data: { status: "CANCELLED", error: "Delivery date removed or invalid" },
+      });
+      await record(tx, {
+        key,
+        type: "ORDER_UPDATE_IDENTITY_CONFLICT_SKIPPED",
+        occurredAt: at,
+        payload: { orderId: String(p.id), reason: error.message },
+      });
+      return { skipped: true };
+    }
     await record(tx, {
       key,
       type: topic,

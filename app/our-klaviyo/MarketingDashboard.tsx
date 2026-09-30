@@ -93,6 +93,7 @@ type CampaignReport = {
 type Data = {
   health?: {
     unresolved: number;
+    skippedOrderUpdates: number;
     lastProcessed: { processedAt: string; topic: string } | null;
     inbox: {
       id: string;
@@ -102,6 +103,7 @@ type Data = {
       error: string | null;
       createdAt: string;
       dueAt: string;
+      order: { label: string; deliveryDateTag: boolean | null } | null;
     }[];
     oldestPending: { dueAt: string; error: string | null } | null;
   };
