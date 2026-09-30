@@ -758,6 +758,7 @@ export async function GET(request: Request) {
           attempts: true,
           error: true,
           createdAt: true,
+          dueAt: true,
         },
       }),
       unresolved: await prisma.marketingWebhookInbox.count({

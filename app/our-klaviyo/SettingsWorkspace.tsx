@@ -13,6 +13,7 @@ type InboxRow = {
   attempts: number;
   error: string | null;
   createdAt: string;
+  dueAt: string;
 };
 type ImportResult = { row: number; status: string; error?: string };
 type ConnectionResult = {
@@ -552,6 +553,13 @@ export default function SettingsWorkspace({
                           </strong>
                           <small>
                             {date(row.createdAt)} · {row.attempts} attempts
+                          </small>
+                          <small>
+                            {row.status === "FAILED"
+                              ? "Automatic retries stopped"
+                              : row.status === "PENDING"
+                                ? `Next retry: ${date(row.dueAt)}`
+                                : "Processing now"}
                           </small>
                           {row.error && <p>{row.error}</p>}
                           <details>

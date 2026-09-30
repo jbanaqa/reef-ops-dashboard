@@ -101,6 +101,7 @@ type Data = {
       attempts: number;
       error: string | null;
       createdAt: string;
+      dueAt: string;
     }[];
     oldestPending: { dueAt: string; error: string | null } | null;
   };
