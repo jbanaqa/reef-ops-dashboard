@@ -1,0 +1,2 @@
+{% comment %}Reef Ops signup: consent is explicit; existing email subscribers are skipped.{% endcomment %}
+<script defer src="https://reef-ops-dashboard-production.up.railway.app/reef-marketing.js?v=20261015" data-endpoint="https://reef-ops-dashboard-production.up.railway.app/api/marketing/storefront" data-known-customer="{% if customer %}true{% else %}false{% endif %}" data-email-subscriber="{% if customer and customer.accepts_marketing %}true{% else %}false{% endif %}"></script>

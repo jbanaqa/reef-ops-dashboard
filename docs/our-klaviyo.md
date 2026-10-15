@@ -304,3 +304,11 @@ Audience profiles show flow progress in Overview and Messages: last accepted sen
 Product recommendations exclude Shipping Protection and Shipping Box titles and backfill with eligible products; the actual Shopify checkout is not changed.
 
 The isolated marketing integration suite advances stored timestamps to exercise follow-ups without real-time waits. It covers future messages remaining pending, sequential deadlines, both order-history branches, purchase cancellation, email-spacing deferral, and mocked Shopify discount creation/retry. This verifies application behavior, not the deployed scheduler uptime or live Shopify coupon redemption.
+# Storefront popup installation
+
+The reusable tag in `docs/storefront/reef-signup.liquid` belongs immediately before `</body>` in the published Shopify theme. Install it again when switching themes. The `data-email-subscriber` attribute comes from Shopify's signed-in customer marketing status; being signed in alone does not suppress the form. Do not pass customer email addresses in public config requests.
+
+Dismissal is remembered for the configured window (production: seven days), across navigation and sign-in changes in that browser. Local storage has a first-party cookie fallback; clearing both, private browsing, or changing devices resets anonymous recognition. Completed signup is remembered separately. Pending confirmations respect dismissal and expire locally after 24 hours. Multiple script tags do not create duplicate dialogs, and dismissal/submission in another tab closes an open dialog.
+
+The backend retains the existing consent and suppression checks. An existing mailable subscriber does not re-enter Welcome or receive another welcome coupon. Previously unsubscribed addresses retain the ownership-confirmation path; complaints, bounces, and staff suppressions remain protected. The theme uses Shopify marketing status to skip signed-in subscribers, while completed popup signups are recognized in the same browser. An unidentified visitor on a new browser cannot be matched to a subscriber until they identify themselves.
+

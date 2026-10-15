@@ -3,23 +3,34 @@
   const script = document.currentScript,
     endpoint = script?.dataset.endpoint;
   if (!endpoint) return;
+  if (window.reefMarketingPopupLoaded) return;
+  window.reefMarketingPopupLoaded = true;
+  // Keep preference cookies as a fallback when browser storage is unavailable.
+  const cookie = (k) => {
+    try {
+      const entry = document.cookie.split("; ").find((v) => v.startsWith(encodeURIComponent(k) + "="));
+      return entry ? decodeURIComponent(entry.slice(entry.indexOf("=") + 1)) : null;
+    } catch { return null; }
+  };
   const storage = {
     get: (k) => {
       try {
-        return localStorage.getItem(k);
+        return localStorage.getItem(k) || cookie(k);
       } catch {
-        return null;
+        return cookie(k);
       }
     },
     set: (k, v) => {
       try {
         localStorage.setItem(k, v);
       } catch {}
+      try { document.cookie = `${encodeURIComponent(k)}=${encodeURIComponent(v)}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`; } catch {}
     },
     remove: (k) => {
       try {
         localStorage.removeItem(k);
       } catch {}
+      try { document.cookie = `${encodeURIComponent(k)}=; Path=/; Max-Age=0; SameSite=Lax`; } catch {}
     },
   };
   const anonymousId = storage.get("reef-marketing-anon") || crypto.randomUUID();
@@ -54,11 +65,17 @@
     post({ action: "event", type, productId, id: crypto.randomUUID() }).catch(
       () => {},
     );
-  const pending = storage.get("reef-marketing-session");
+  let pending = storage.get("reef-marketing-session");
+  const sessionAt = Number(storage.get("reef-marketing-session-at") || 0);
+  if (pending && (!sessionAt || Date.now() - sessionAt >= 86400000)) {
+    storage.remove("reef-marketing-session");
+    storage.remove("reef-marketing-session-at");
+    pending = null;
+  }
+  const subscribed = script.dataset.emailSubscriber === "true" ||
+    (script.dataset.emailSubscriber === undefined && script.dataset.knownCustomer === "true");
   if (
-    !pending &&
-    (script.dataset.knownCustomer === "true" ||
-      storage.get("reef-marketing-submitted"))
+    subscribed || storage.get("reef-marketing-submitted")
   )
     return;
   (async () => {
@@ -84,7 +101,6 @@
         setTimeout(resolve, pending ? 0 : delaySeconds * 1000),
       );
       if (
-        !pending &&
         dismissalDays > 0 &&
         Date.now() - Number(storage.get("reef-marketing-dismissed") || 0) <
           dismissalDays * 86400000
@@ -235,6 +251,7 @@
       const finish = () => {
         storage.set("reef-marketing-submitted", "1");
         storage.remove("reef-marketing-session");
+        storage.remove("reef-marketing-session-at");
         session = null;
       };
       const close = () => {
@@ -242,10 +259,21 @@
         storage.set("reef-marketing-dismissed", String(Date.now()));
         event("FORM_DISMISSED");
         window.removeEventListener("focus", refresh);
+        window.removeEventListener("storage", syncPreferences);
         dialog.close();
         dialog.remove();
         style.remove();
       };
+      function syncPreferences(e) {
+        if (e.key === "reef-marketing-dismissed" || e.key === "reef-marketing-submitted") {
+          closed = true;
+          window.removeEventListener("focus", refresh);
+          window.removeEventListener("storage", syncPreferences);
+          dialog.close();
+          dialog.remove();
+          style.remove();
+        }
+      }
       const sms = () => {
         panel.innerHTML =
           '<p>Email confirmed. Add optional text alerts:</p><form><label>Phone (include country code)<input name="phone" type="tel" required></label><label><input name="consent" type="checkbox" required> I agree to recurring automated marketing texts. Consent is not a condition of purchase. Message and data rates may apply. Reply STOP to cancel.</label><p><button type="submit">Sign up for texts</button><button type="button">No thanks</button></p></form>';
@@ -282,6 +310,7 @@
         panel.querySelector("button").onclick = refresh;
         panel.querySelector(".retry").onclick = () => {
           storage.remove("reef-marketing-session");
+          storage.remove("reef-marketing-session-at");
           session = null;
           emailForm();
         };
@@ -342,6 +371,7 @@
             }
             session = result.session;
             storage.set("reef-marketing-session", session);
+            storage.set("reef-marketing-session-at", String(Date.now()));
             waiting();
             status.textContent = result.message;
           } catch (error) {
@@ -372,6 +402,7 @@
       dialog.showModal();
       event("FORM_VIEWED");
       window.addEventListener("focus", refresh);
+      window.addEventListener("storage", syncPreferences);
       if (session) {
         waiting();
         await refresh();

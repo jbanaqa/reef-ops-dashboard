@@ -19,7 +19,8 @@ const { chromium } = require("playwright");
       return response.end(artwork);
     }
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(html);
+    const mode = new URL(request.url, "http://localhost").searchParams.get("customer");
+    response.end(html.replace('data-endpoint="/api"', `data-endpoint="/api"${mode ? ` data-known-customer="true" data-email-subscriber="${mode === "subscribed"}"` : ""}`));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   let browser;
@@ -94,6 +95,52 @@ const { chromium } = require("playwright");
     await repeat.locator("dialog.reef-signup-dialog").waitFor();
     assert.ok(await repeat.evaluate(() => window.testTimeoutDelays.includes(25000)));
     await repeat.close();
+    for (const mode of ["subscribed", "not-subscribed"]) {
+      const page = await browser.newPage();
+      await page.goto(url + "?customer=" + mode);
+      await page.waitForTimeout(100);
+      assert.equal(await page.locator("dialog.reef-signup-dialog").count(), mode === "subscribed" ? 0 : 1);
+      await page.close();
+    }
+    const returning = await browser.newPage();
+    await returning.goto(url);
+    await returning.locator(".reef-signup-close").click();
+    await returning.reload();
+    await returning.waitForTimeout(100);
+    assert.equal(await returning.locator("dialog.reef-signup-dialog").count(), 0, "dismissal survives navigation");
+    await returning.evaluate(() => {
+      localStorage.setItem("reef-marketing-dismissed", String(Date.now() - 8 * 86400000));
+    });
+    await returning.reload();
+    await returning.locator("dialog.reef-signup-dialog").waitFor();
+    await returning.locator('[name="email"]').fill("popup-test@example.com");
+    await returning.locator('[name="consent"]').check();
+    await returning.locator('[type="submit"]').click();
+    await returning.getByText("Thanks for joining our reefing community!").waitFor();
+    await returning.reload();
+    await returning.waitForTimeout(100);
+    assert.equal(await returning.locator("dialog.reef-signup-dialog").count(), 0, "completed signup stays hidden");
+    await returning.close();
+    const pending = await browser.newPage();
+    await pending.addInitScript(() => {
+      localStorage.setItem("reef-marketing-session", "test-pending-session");
+      localStorage.setItem("reef-marketing-session-at", String(Date.now()));
+      localStorage.setItem("reef-marketing-dismissed", String(Date.now()));
+    });
+    await pending.goto(url);
+    await pending.waitForTimeout(100);
+    assert.equal(await pending.locator("dialog.reef-signup-dialog").count(), 0, "pending confirmation respects dismissal");
+    await pending.close();
+    const cookies = await browser.newPage();
+    await cookies.addInitScript(() => {
+      Object.defineProperty(window, "localStorage", { get() { throw Error("Storage disabled"); } });
+    });
+    await cookies.goto(url);
+    await cookies.locator(".reef-signup-close").click();
+    await cookies.reload();
+    await cookies.waitForTimeout(100);
+    assert.equal(await cookies.locator("dialog.reef-signup-dialog").count(), 0, "cookie fallback remembers dismissal");
+    await cookies.close();
     console.log("Popup browser checks passed at 1280, 390, and 320 pixels.");
   } finally {
     await browser?.close();
