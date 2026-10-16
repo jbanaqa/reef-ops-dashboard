@@ -4351,3 +4351,37 @@ test("mailable source fetch reads only the selected segment and refuses unsafe p
     klaviyoPages=[];
   }
 });
+
+test("Shopify audience exclusions survive Klaviyo refresh and block frozen campaigns without altering other audiences", async () => {
+ const previousShop=process.env.SHOPIFY_SHOP_DOMAIN;process.env.SHOPIFY_SHOP_DOMAIN="shopify-consent-scope.myshopify.com";
+ const currentShop=process.env.SHOPIFY_SHOP_DOMAIN;
+ try{
+  const {alignMailableSource}=await import("../lib/marketing/mailable-alignment");
+  const {resolveCampaignAudience,resolvedAudienceWhere}=await import("../lib/marketing/campaign-audience");
+  await store.seed();
+  const settings=await prisma.marketingResource.create({data:{shop:currentShop,kind:"SETTINGS",key:"global",name:"Settings",data:{postalAddress:"123 Test Street",operations:{sendingEnabled:false,ingestEnabled:true,migrationConfirmed:true}}}});
+  const review={source:"shopify",state:"NOT_SUBSCRIBED",checkedAt:new Date().toISOString()};
+  await prisma.marketingResource.update({where:{shop_kind_key:{shop:currentShop,kind:"SEGMENT",key:"mailable"}},data:{data:{klaviyoSegment:{id:"Rr5yRa",batch:crypto.randomUUID(),syncedAt:review.checkedAt,shopifyConsentCheckedAt:review.checkedAt}}}});
+  const profile=await prisma.marketingProfile.create({data:{shop:currentShop,email:"scope-shopify@example.com",tags:["ordinary"],properties:{keep:"original",klaviyoMailable:{id:"Rr5yRa",batch:crypto.randomUUID(),canReceiveMarketing:false,klaviyoCanReceiveMarketing:true,shopifyConsent:review}},consents:{create:{channel:"EMAIL",status:"SUBSCRIBED",suppressed:false,source:"test",occurredAt:new Date()}}}});
+  const consentBefore=await prisma.marketingConsent.findUniqueOrThrow({where:{profileId_channel:{profileId:profile.id,channel:"EMAIL"}}});
+  const report=await alignMailableSource({id:"Rr5yRa",name:"2025 Mailable Subscribers",checkedAt:new Date().toISOString(),members:[{id:"target",email:profile.email!,canReceiveMarketing:true}]},true);
+  assert.equal(report.shopifyExcluded,1);assert.equal(report.eligible,0);assert.equal(report.locallyBlocked,0);
+  const reviewedAudience=await prisma.marketingResource.findUniqueOrThrow({where:{shop_kind_key:{shop:currentShop,kind:"SEGMENT",key:"mailable"}}});
+  assert.equal((reviewedAudience.data as {klaviyoSegment:{shopifyConsentCheckedAt:string}}).klaviyoSegment.shopifyConsentCheckedAt,review.checkedAt);
+  const refreshed=await prisma.marketingProfile.findUniqueOrThrow({where:{id:profile.id}});
+  assert.equal((refreshed.properties as {klaviyoMailable:{canReceiveMarketing:boolean}}).klaviyoMailable.canReceiveMarketing,false);
+  assert.deepEqual((refreshed.properties as {klaviyoMailable:{shopifyConsent:unknown}}).klaviyoMailable.shopifyConsent,review);
+  const audience={version:2,includeKeys:["mailable"],excludeKeys:[]};
+  assert.equal(await prisma.marketingProfile.count({where:resolvedAudienceWhere(await resolveCampaignAudience(prisma,audience))}),0);
+  const campaigns=[];
+  for(const [name,rules] of [["mailable",audience],["ordinary",{tag:"ordinary"}]] as const){
+   const campaign=await prisma.marketingCampaign.create({data:{shop:currentShop,name,subject:name,content:store.json(defaultContent),audience:store.json(rules),status:"SENDING",recipientMode:"SCHEDULE_TIME",smartSendingHours:0}});campaigns.push(campaign);
+   await prisma.marketingMessage.create({data:{shop:currentShop,key:`shopify-scope-${name}`,profileId:profile.id,campaignId:campaign.id,channel:"EMAIL",subject:name,content:store.json(defaultContent),dueAt:new Date()}});
+  }
+  await prisma.marketingResource.update({where:{id:settings.id},data:{data:{postalAddress:"123 Test Street",operations:{sendingEnabled:true,ingestEnabled:true,migrationConfirmed:true}}}});
+  await worker.runMarketing();
+  assert.equal((await prisma.marketingMessage.findUniqueOrThrow({where:{key:"shopify-scope-mailable"}})).status,"CANCELLED");
+  assert.equal((await prisma.marketingMessage.findUniqueOrThrow({where:{key:"shopify-scope-ordinary"}})).status,"SENT");
+  assert.deepEqual(await prisma.marketingConsent.findUniqueOrThrow({where:{profileId_channel:{profileId:profile.id,channel:"EMAIL"}}}),consentBefore);
+ }finally{process.env.SHOPIFY_SHOP_DOMAIN=previousShop;}
+});

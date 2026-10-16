@@ -3,7 +3,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { audienceWhere, json, record, shop } from "./store";
 import { email } from "./rules";
-import { klaviyoMailableId, snapshotConsentAllowed } from "./segment-snapshot";
+import { klaviyoMailableId, snapshotConsentAllowed, refreshedSnapshotProof } from "./segment-snapshot";
 
 export type MailableSource = {
   id: string; name: string; checkedAt: string;
@@ -71,31 +71,37 @@ export async function alignMailableSource(source: MailableSource, apply = false)
       members.some((m) => !m.id || m.canReceiveMarketing !== true))
     throw new Error("Duplicate addresses or missing Klaviyo marketability evidence. No alignment applied.");
   const batch = randomUUID();
-  const snapshot = { id: source.id, batch, syncedAt: source.checkedAt };
   return prisma.$transaction(async (tx) => {
     const audience = await tx.marketingResource.findUniqueOrThrow({
       where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key: "mailable" } },
     });
+    const shopifyReviewAt = (audience.data as { klaviyoSegment?: { shopifyConsentCheckedAt?: string } }).klaviyoSegment?.shopifyConsentCheckedAt;
+    const snapshot = { id: source.id, batch, syncedAt: source.checkedAt,
+      ...(shopifyReviewAt ? { shopifyConsentCheckedAt: shopifyReviewAt } : {}) };
     const profiles = await tx.marketingProfile.findMany({ where: { shop: shop(), email: { in: members.map((m) => m.email) } },
-      select: { id: true, email: true, consents: { where: { channel: "EMAIL" } } } });
+      select: { id: true, email: true, properties: true, consents: { where: { channel: "EMAIL" } } } });
     if (profiles.length !== members.length)
       throw new Error(`${members.length - profiles.length} target contacts are missing locally. Nothing imported or changed.`);
     const blocked = profiles.filter((p) => !snapshotConsentAllowed(p.consents[0])).length;
+    const allowed = (p: typeof profiles[number]) => refreshedSnapshotProof(p.properties, snapshot).canReceiveMarketing;
+    const shopifyExcluded = profiles.filter((p) => !allowed(p)).length;
     const report = { mode: apply ? "apply" : "dry-run", sourceMembers: members.length,
-      locallyBlocked: blocked, eligible: members.length - blocked, importedProfiles: 0, syncedAt: source.checkedAt };
+      locallyBlocked: blocked, shopifyExcluded,
+      eligible: profiles.filter((p) => snapshotConsentAllowed(p.consents[0]) && allowed(p)).length,
+      importedProfiles: 0, syncedAt: source.checkedAt };
     if (!apply) return report;
     const settings = await tx.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } } });
     if ((settings?.data as { operations?: { sendingEnabled?: boolean } })?.operations?.sendingEnabled !== false)
       throw new Error("Pause customer sending before alignment.");
     if (await tx.marketingMessage.count({ where: { shop: shop(), status: { in: ["SENDING", "UNKNOWN"] } } }))
       throw new Error("Resolve sending or uncertain messages first.");
-    const proof = JSON.stringify({ ...snapshot, canReceiveMarketing: true });
     for (let start = 0; start < profiles.length; start += 250) {
-      const ids = profiles.slice(start, start + 250).map((p) => p.id);
-      await tx.$executeRaw(Prisma.sql`UPDATE "MarketingProfile"
-        SET properties = jsonb_set(CASE WHEN jsonb_typeof(properties)='object' THEN properties ELSE '{}'::jsonb END,
-          '{klaviyoMailable}', ${proof}::jsonb), "updatedAt"=NOW()
-        WHERE shop=${shop()} AND id IN (${Prisma.join(ids)})`);
+      const values = Prisma.join(profiles.slice(start, start + 250).map((p) =>
+        Prisma.sql`(${p.id}::text, ${JSON.stringify(refreshedSnapshotProof(p.properties, snapshot))}::jsonb)`));
+      await tx.$executeRaw(Prisma.sql`UPDATE "MarketingProfile" AS p
+        SET properties = jsonb_set(CASE WHEN jsonb_typeof(p.properties)='object' THEN p.properties ELSE '{}'::jsonb END,
+          '{klaviyoMailable}', source.proof), "updatedAt"=NOW()
+        FROM (VALUES ${values}) AS source(id, proof) WHERE p.shop=${shop()} AND p.id=source.id`);
     }
     await tx.marketingResource.update({ where: { id: audience.id }, data: { data: json({ klaviyoSegment: snapshot }) } });
     const actual = await tx.marketingProfile.count({ where: audienceWhere({ klaviyoSegment: snapshot }) });

@@ -104,11 +104,13 @@ export function campaignConsentEligible(
 ) {
   const consent = profile.consents.find((item) => item.channel === channel);
   if (resolved.missingKeys.length) return false;
-  if (eligible(consent)) return true;
-  if (channel !== "EMAIL" || !snapshotConsentAllowed(consent)) return false;
+  const standard = eligible(consent);
+  if (channel !== "EMAIL") return standard;
   const rules = resolved.legacy ? [resolved.legacy] : resolved.includes;
-  return rules.some((rule) => rule.klaviyoSegment &&
-    inSegmentSnapshot(profile.properties, rule.klaviyoSegment));
+  if (!rules.length) return standard;
+  return rules.some((rule) => rule.klaviyoSegment
+    ? snapshotConsentAllowed(consent) && inSegmentSnapshot(profile.properties, rule.klaviyoSegment)
+    : standard);
 }
 
 export function resolvedAudienceMatches(

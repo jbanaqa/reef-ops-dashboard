@@ -98,6 +98,7 @@ export function audienceRules(s: Segment) {
   return [
     s.klaviyoSegment ? "Klaviyo campaign eligibility; local opt-outs and blocks still apply" : "Subscribed to email and not blocked",
     s.klaviyoSegment && "Aligned from Klaviyo on " + date(s.klaviyoSegment.syncedAt),
+    s.klaviyoSegment?.shopifyConsentCheckedAt && "Only confirmed Shopify email subscribers · checked " + date(s.klaviyoSegment.shopifyConsentCheckedAt),
     s.tag && "Tagged “" + s.tag + "”",
     s.list && "In list “" + s.list + "”",
     s.openedDays && "Opened an email in the last " + s.openedDays + " days",

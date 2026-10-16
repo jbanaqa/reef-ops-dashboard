@@ -18,3 +18,13 @@ The source snapshot, dashboard total, audience directory, campaign audience coun
 Publish the compatible app and worker before applying the new resource format. An alignment audit records the source digest, timestamp, counts and previous audience definition. Full email artwork is not stored per contact.
 
 Verification: 110 marketing tests, TypeScript, targeted ESLint and production build pass, including actual isolated-database campaign delivery for source-confirmed non-subscribers, blocked contacts, frozen recipients, untouched unrelated profiles/consent/resources, unsafe pagination and failed reads.
+
+## Shopify consent cross-check
+
+The user subsequently requested keeping only source members whose exact email matches one Shopify customer with `defaultEmailAddress.marketingState = SUBSCRIBED`. The review reads only current source members using quoted email searches, checks pagination and exact returned addresses, and excludes NOT_SUBSCRIBED, UNSUBSCRIBED, missing/unknown and ambiguous matches. A failed API read aborts the review rather than treating a transport error as absence of consent. It does not change Shopify, delete customers, import profiles, alter channel-consent records, or start broad backfills.
+
+Reviewed source eligibility is stored in the existing small membership proof, together with the Shopify state, customer ID, consent-update timestamp, check timestamp and an email hash. `canReceiveMarketing` is false for excluded members. Local opt-outs and suppressions remain independent and sticky. The audience displays its Shopify review timestamp. This is a dated consent cross-check, not a continuous Shopify consent scan.
+
+A later `marketing:align-mailable` keeps each member's Shopify review and its exclusions, including the review label. A fresh Shopify review is required to reconsider those exclusions; a Klaviyo membership refresh alone cannot re-enable them. Pending snapshot-time campaigns also enforce revoked source eligibility even if the local profile still says SUBSCRIBED. Other audiences and flow consent requirements are unchanged.
+
+The private, targeted read/apply scripts and reports are kept outside Git in `C:/Users/GuestUser/.codex/artifacts/reef-shopify-consent-2026-10-15/`. Check `SEGMENT_CONSENT_REVIEW` resources and `SEGMENT_CONSENT_REVIEWED` audit events for the applied run and counts. Sending must remain paused during review/application. Verification now includes 111 passing marketing tests, including persistence across Klaviyo refresh and actual frozen-campaign rejection without changing ordinary campaign eligibility or subscription records.
