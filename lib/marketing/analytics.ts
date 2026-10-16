@@ -3,7 +3,7 @@ import { DAY } from "./rules";
 import { shop } from "./store";
 import {
   attributionConfiguration,
-  findEmailAttribution,
+  attributedOrders,
 } from "./attribution";
 
 const periods = new Set([7, 30, 90, 365]);
@@ -104,12 +104,6 @@ export async function marketingAnalytics(requestedDays = 30) {
     cursor = page[page.length - 1].id;
   }
 
-  const orderEvents = await prisma.marketingEvent.findMany({
-    where: { shop: shop(), type: "ORDER", occurredAt: { gte: since } },
-    orderBy: { occurredAt: "asc" },
-    select: { profileId: true, occurredAt: true, payload: true },
-  });
-
   const rowFor = new Map<string, Row>();
   for (const message of messages.values()) {
     const kind = message.campaignId ? "CAMPAIGN" : "FLOW";
@@ -139,30 +133,17 @@ export async function marketingAnalytics(requestedDays = 30) {
 
   const storeRevenue: Record<string, number> = {};
   const attributedRevenue: Record<string, number> = {};
-  for (let index = 0; index < orderEvents.length; index += 20) {
-    const batch = orderEvents.slice(index, index + 20);
-    const matches = await Promise.all(
-      batch.map((order) =>
-        order.profileId
-          ? findEmailAttribution(
-              prisma,
-              order.profileId,
-              order.occurredAt,
-              attribution,
-            )
-          : null,
-      ),
-    );
-    for (let offset = 0; offset < batch.length; offset++) {
-      const order = batch[offset];
-      const match = matches[offset];
-      money(storeRevenue, order.payload);
-      const row = match ? rowFor.get(match.messageId) : undefined;
-      if (row) {
-        row.orders++;
-        money(row.revenue, order.payload);
-        money(attributedRevenue, order.payload);
-      }
+  let trackedOrders = 0;
+  for await (const { order, match } of attributedOrders(prisma, {
+    since, configuration: attribution,
+  })) {
+    trackedOrders++;
+    money(storeRevenue, order.payload);
+    const row = match ? rowFor.get(match.messageId) : undefined;
+    if (row) {
+      row.orders++;
+      money(row.revenue, order.payload);
+      money(attributedRevenue, order.payload);
     }
   }
   const reportRows = [...rows.values()].sort(
@@ -183,7 +164,7 @@ export async function marketingAnalytics(requestedDays = 30) {
       opened: reportRows.reduce((sum, row) => sum + row.opened, 0),
       clicked: reportRows.reduce((sum, row) => sum + row.clicked, 0),
       orders: reportRows.reduce((sum, row) => sum + row.orders, 0),
-      trackedOrders: orderEvents.length,
+      trackedOrders,
       revenue: attributedRevenue,
       storeRevenue,
     },

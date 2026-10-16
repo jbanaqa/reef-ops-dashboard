@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { shop } from "./store";
+import { attributedOrders, attributionConfiguration } from "./attribution";
 
 export async function campaignReport(id: string) {
   const campaign = await prisma.marketingCampaign.findFirst({
@@ -21,6 +22,8 @@ export async function campaignReport(id: string) {
     revenue: {} as Record<string, number>,
   };
   const reasons = new Map<string, number>();
+  const sentMessageIds = new Set<string>();
+  let firstSentAt: Date | undefined;
   let cursor: string | undefined;
   for (;;) {
     const page = await prisma.marketingMessage.findMany({
@@ -31,10 +34,14 @@ export async function campaignReport(id: string) {
       },
       orderBy: { id: "asc" },
       take: 500,
-      select: { id: true, status: true, error: true },
+      select: { id: true, status: true, error: true, sentAt: true },
     });
     totals.messages += page.length;
     for (const message of page) {
+      if (message.sentAt) {
+        sentMessageIds.add(message.id);
+        if (!firstSentAt || message.sentAt < firstSentAt) firstSentAt = message.sentAt;
+      }
       if (["PENDING", "SENDING"].includes(message.status)) totals.queued++;
       if (message.status === "SENT") totals.sent++;
       if (message.status === "CANCELLED") totals.skipped++;
@@ -49,24 +56,14 @@ export async function campaignReport(id: string) {
         where: {
           shop: shop(),
           messageId: { in: messageIds },
-          type: { in: ["DELIVERED", "OPENED", "CLICKED", "ORDER"] },
+          type: { in: ["DELIVERED", "OPENED", "CLICKED"] },
         },
         select: { type: true, messageId: true, payload: true },
       });
       const seen = new Set<string>();
       for (const event of events) {
         const key = `${event.messageId}:${event.type}`;
-        if (event.type === "ORDER") {
-          totals.ordered++;
-          const payload = event.payload as {
-            currency?: string;
-            revenue?: string | number;
-          };
-          const amount = Number(payload.revenue);
-          if (payload.currency && Number.isFinite(amount))
-            totals.revenue[payload.currency] =
-              (totals.revenue[payload.currency] || 0) + amount;
-        } else if (!seen.has(key)) {
+        if (!seen.has(key)) {
           seen.add(key);
           if (event.type === "DELIVERED") totals.delivered++;
           if (event.type === "OPENED") totals.opened++;
@@ -76,6 +73,19 @@ export async function campaignReport(id: string) {
     }
     if (page.length < 500) break;
     cursor = page[page.length - 1].id;
+  }
+  if (firstSentAt) {
+    const configuration = await attributionConfiguration(prisma);
+    for await (const { order, match } of attributedOrders(prisma, {
+      since: firstSentAt, campaignId: id, configuration,
+    })) {
+      if (!match || !sentMessageIds.has(match.messageId)) continue;
+      totals.ordered++;
+      const payload = order.payload as { currency?: string; revenue?: string | number };
+      const amount = Number(payload.revenue);
+      if (payload.currency && Number.isFinite(amount))
+        totals.revenue[payload.currency] = (totals.revenue[payload.currency] || 0) + amount;
+    }
   }
   return {
     campaign,

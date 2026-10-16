@@ -3110,6 +3110,77 @@ test("marketing analytics separates campaign revenue and recipient rates", async
   assert.ok(report.rows.some((candidate) => candidate.kind === "FLOW"));
 });
 
+test("campaign results and analytics recalculate late engagement and changed attribution windows consistently", async () => {
+  const { campaignReport } = await import("../lib/marketing/campaign-report");
+  const { marketingAnalytics } = await import("../lib/marketing/analytics");
+  const settings = await prisma.marketingResource.findUniqueOrThrow({
+    where: { shop_kind_key: { shop, kind: "SETTINGS", key: "global" } },
+  });
+  const day = 86400000;
+  const at = (days: number) => new Date(Date.now() - days * day);
+  const profile = await prisma.marketingProfile.create({ data: {
+    shop, email: "consistent-reports@example.com",
+  } });
+  const createMessage = async (key: string, days: number, testOfCampaignId?: string) => {
+    const campaign = await prisma.marketingCampaign.create({ data: {
+      shop, name: key, subject: key, content: defaultContent, audience: {},
+      status: "COMPLETED", testOfCampaignId,
+    } });
+    return prisma.marketingMessage.create({ data: {
+      shop, key, profileId: profile.id, campaignId: campaign.id, channel: "EMAIL",
+      subject: key, content: defaultContent, status: "SENT", dueAt: at(days), sentAt: at(days),
+    } });
+  };
+  const older = await createMessage("consistent-reports-older", 4);
+  const newer = await createMessage("consistent-reports-newer", 3);
+  const testMessage = await createMessage("consistent-reports-test", 2, newer.campaignId!);
+  await prisma.marketingEvent.createMany({ data: [
+    { shop, key: "consistent-reports-click", type: "CLICKED", profileId: profile.id, messageId: older.id, occurredAt: at(2) },
+    { shop, key: "consistent-reports-test-open", type: "OPENED", profileId: profile.id, messageId: testMessage.id, occurredAt: at(0.75) },
+    // One stale saved assignment and one missing assignment: neither is authoritative.
+    { shop, key: "consistent-reports-order-usd", type: "ORDER", profileId: profile.id, messageId: older.id, occurredAt: at(0.5), payload: { currency: "USD", revenue: "42.50" } },
+    { shop, key: "consistent-reports-order-eur", type: "ORDER", profileId: profile.id, occurredAt: at(0.25), payload: { currency: "EUR", revenue: "12" } },
+  ] });
+  const setWindows = (openDays: number) => prisma.marketingResource.update({
+    where: { id: settings.id }, data: { data: store.json({
+      ...(settings.data as object), attribution: { emailClickDays: 5, emailOpenDays: openDays },
+    }) },
+  });
+  const expectCredit = async (winner: string) => {
+    const analytics = await marketingAnalytics(30);
+    for (const message of [older, newer]) {
+      const details = await campaignReport(message.campaignId!);
+      const row = analytics.rows.find((row) => row.key === message.campaignId)!;
+      const expectedOrders = message.id === winner ? 2 : 0;
+      assert.equal(details.totals.ordered, expectedOrders);
+      assert.equal(row.orders, expectedOrders);
+      assert.deepEqual(details.totals.revenue, row.revenue);
+      assert.deepEqual(row.revenue, expectedOrders ? { USD: 42.5, EUR: 12 } : {});
+    }
+    assert.equal((await campaignReport(testMessage.campaignId!)).totals.ordered, 0);
+    assert.equal(analytics.rows.some((row) => row.key === testMessage.campaignId), false);
+  };
+  try {
+    await setWindows(5);
+    await expectCredit(older.id);
+    // Arrives after both orders, but the open itself happened before purchase.
+    await prisma.marketingEvent.create({ data: {
+      shop, key: "consistent-reports-late-open", type: "OPENED", profileId: profile.id,
+      messageId: newer.id, occurredAt: at(1),
+    } });
+    await expectCredit(newer.id);
+    await setWindows(1);
+    await expectCredit(older.id);
+    await setWindows(5);
+    await expectCredit(newer.id);
+    assert.equal((await prisma.marketingEvent.findUniqueOrThrow({
+      where: { shop_key: { shop, key: "consistent-reports-order-usd" } },
+    })).messageId, older.id, "reporting does not rewrite order history");
+  } finally {
+    await prisma.marketingResource.update({ where: { id: settings.id }, data: { data: settings.data! } });
+  }
+});
+
 test("email attribution uses the latest qualifying interaction like Klaviyo", async () => {
   const { findEmailAttribution } = await import("../lib/marketing/attribution");
   const profile = await prisma.marketingProfile.create({
