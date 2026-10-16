@@ -154,6 +154,7 @@
         .reef-signup-art {
           min-width: 0;
           background: #7ad8df center / cover no-repeat;
+          background-image: var(--reef-signup-artwork, none);
         }
         .reef-signup-close {
           position: absolute;
@@ -229,15 +230,123 @@
         .reef-signup-status:empty { display: none; }
         .reef-signup-step .retry { margin-top: 8px; background: transparent; color: #315e69; font-size: 12px; text-decoration: underline; }
         @media (max-width: 520px) {
-          .reef-signup-dialog { width: min(390px, calc(100vw - 20px)); max-height: calc(100dvh - 20px); border-radius: 18px; }
+          .reef-signup-dialog {
+            width: min(376px, calc(100vw - 32px));
+            max-height: calc(100dvh - 32px);
+            border-radius: 24px;
+            color: #173e4b;
+            box-shadow: 0 20px 70px rgba(8, 34, 43, .3);
+            overscroll-behavior: contain;
+          }
+          .reef-signup-dialog::backdrop { background: rgba(12, 35, 44, .58); }
           .reef-signup-shell { grid-template-columns: 1fr; min-height: 0; }
-          .reef-signup-art { grid-row: 1; min-height: 190px; background-position: center 43%; }
-          .reef-signup-copy { grid-row: 2; padding: 22px 24px 24px; }
-          .reef-signup-eyebrow { font-size: 15px; }
-          .reef-signup-family { margin-top: 10px; }
-          .reef-signup-offer { margin-top: 15px; font-size: 36px; }
-          .reef-signup-detail { margin-top: 18px; font-size: 16px; }
-          .reef-signup-step { margin-top: 17px; }
+          .reef-signup-art {
+            position: relative;
+            grid-row: 1;
+            min-height: 148px;
+            background-image: none;
+            border-bottom: 1px solid rgba(23, 62, 75, .06);
+          }
+          .reef-signup-art::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            width: 156px;
+            margin: auto;
+            background: var(--reef-signup-artwork, none) center 45% / 156px auto no-repeat;
+            -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+            mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+          }
+          .reef-signup-copy { grid-row: 2; padding: 24px; }
+          .reef-signup-close {
+            top: 10px;
+            right: 10px;
+            width: 44px;
+            height: 44px;
+            border: 0;
+            background: #fff;
+            color: #173e4b;
+            box-shadow: 0 2px 10px rgba(23, 62, 75, .14);
+          }
+          .reef-signup-close:focus-visible { outline: 3px solid #173e4b; outline-offset: -5px; }
+          .reef-signup-eyebrow { display: none; }
+          .reef-signup-family {
+            margin: 0;
+            font-size: 22px;
+            font-style: normal;
+            font-weight: 700;
+            line-height: 1.25;
+            letter-spacing: -.4px;
+          }
+          .reef-signup-family br, .reef-signup-detail br { display: none; }
+          .reef-signup-offer {
+            margin-top: 16px;
+            color: #c74624;
+            font-size: clamp(42px, 12vw, 50px);
+            font-weight: 800;
+            line-height: 1;
+            letter-spacing: -1.8px;
+          }
+          .reef-signup-offer span {
+            margin-top: 6px;
+            color: #173e4b;
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.3;
+            letter-spacing: 0;
+          }
+          .reef-signup-detail {
+            max-width: 29ch;
+            margin: 14px auto 0;
+            color: #52676e;
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 1.5;
+          }
+          .reef-signup-step { margin-top: 20px; }
+          .reef-signup-step form { gap: 14px; }
+          .reef-signup-field input {
+            min-height: 52px;
+            padding: 14px 15px;
+            border: 1px solid #b4c6ca;
+            border-radius: 10px;
+            color: #173e4b;
+            font-size: 16px;
+            line-height: 1.4;
+          }
+          .reef-signup-field input::placeholder { color: #657a81; opacity: 1; }
+          .reef-signup-consent {
+            grid-template-columns: 18px 1fr;
+            gap: 10px;
+            padding: 2px 0;
+            color: #52676e;
+            font-size: 12px;
+            line-height: 1.5;
+            cursor: pointer;
+          }
+          .reef-signup-consent input { width: 18px; height: 18px; margin-top: 1px; accent-color: #173e4b; }
+          .reef-signup-submit,
+          .reef-signup-step button {
+            min-height: 52px;
+            border-radius: 10px;
+            background: #173e4b;
+            font-size: 16px;
+            line-height: 1.25;
+            box-shadow: 0 4px 12px rgba(23, 62, 75, .12);
+          }
+          .reef-signup-submit:hover,
+          .reef-signup-step button:hover { background: #24586a; }
+          .reef-signup-step button:focus-visible { outline: 3px solid #c74624; outline-offset: 3px; }
+        }
+        @media (max-width: 520px) and (max-height: 700px) {
+          .reef-signup-art { min-height: 112px; }
+          .reef-signup-art::before { width: 124px; background-size: 124px auto; }
+          .reef-signup-copy { padding: 20px; }
+          .reef-signup-family { font-size: 20px; }
+          .reef-signup-offer { margin-top: 12px; font-size: 42px; }
+          .reef-signup-detail { margin-top: 10px; }
+          .reef-signup-step { margin-top: 16px; }
+          .reef-signup-step form { gap: 12px; }
         }
         @media (max-height: 620px) and (min-width: 521px) {
           .reef-signup-shell { min-height: 560px; }
@@ -264,14 +373,14 @@
         '<button type="button" class="reef-signup-close" aria-label="Close signup form">×</button>' +
         '<div class="reef-signup-shell"><section class="reef-signup-copy" aria-labelledby="reef-signup-title">' +
         '<p class="reef-signup-eyebrow">Want to save more, and<br>spend more time reefing?</p>' +
-        '<h2 class="reef-signup-family" id="reef-signup-title">Join our Reefing<br>Family!</h2>' +
+        '<h2 class="reef-signup-family" id="reef-signup-title">Join our Reefing<br> Family!</h2>' +
         '<p class="reef-signup-offer">10% OFF<span>Entire Order</span></p>' +
-        '<p class="reef-signup-detail">Save 10% OFF your<br>first order and receive<br>exclusive deals weekly!</p>' +
+        '<p class="reef-signup-detail">Save 10% OFF your<br> first order and receive<br> exclusive deals weekly!</p>' +
         '<div class="reef-signup-step"></div><p class="reef-signup-status" role="status" aria-live="polite"></p>' +
         '</section><div class="reef-signup-art" role="img" aria-label="Two clownfish swimming through coral"></div></div>';
-      dialog.querySelector(".reef-signup-art").style.backgroundImage = artwork
+      dialog.querySelector(".reef-signup-art").style.setProperty("--reef-signup-artwork", artwork
         ? `url("${artwork}")`
-        : "none";
+        : "none");
       const panel = dialog.querySelector(".reef-signup-step"),
         status = dialog.querySelector('[role="status"]');
       let session = pending,

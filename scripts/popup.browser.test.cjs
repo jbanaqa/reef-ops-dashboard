@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
+const os = require("node:os");
 const { chromium } = require("playwright");
 
 (async () => {
@@ -25,6 +26,8 @@ const { chromium } = require("playwright");
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   let browser;
   try {
+    const screenshots = process.env.MARKETING_POPUP_SCREENSHOTS || await fs.mkdtemp(path.join(os.tmpdir(), "reef-popup-"));
+    await fs.mkdir(screenshots, { recursive: true });
     browser = await chromium.launch({
       headless: true,
       ...(process.env.MARKETING_TEST_BROWSER
@@ -43,6 +46,8 @@ const { chromium } = require("playwright");
     for (const viewport of [
       { width: 1280, height: 800, mobile: false },
       { width: 390, height: 844, mobile: true },
+      { width: 375, height: 667, mobile: true },
+      { width: 375, height: 568, mobile: true },
       { width: 320, height: 700, mobile: true },
     ]) {
       const page = await browser.newPage({
@@ -62,17 +67,27 @@ const { chromium } = require("playwright");
           art: box(".reef-signup-art"),
           close: box(".reef-signup-close"),
           scrollWidth: document.documentElement.scrollWidth,
+          dialogScrollWidth: document.querySelector("dialog").scrollWidth,
+          dialogClientWidth: document.querySelector("dialog").clientWidth,
+          consentFont: parseFloat(getComputedStyle(document.querySelector(".reef-signup-consent")).fontSize),
         };
       });
       assert.ok(layout.dialog.x >= 0 && layout.dialog.right <= viewport.width);
       assert.ok(layout.dialog.y >= 0 && layout.dialog.bottom <= viewport.height);
       assert.ok(layout.close.width >= 40 && layout.close.height >= 40);
       assert.equal(layout.scrollWidth, viewport.width);
+      assert.ok(layout.dialogScrollWidth <= layout.dialogClientWidth, "the popup never scrolls sideways");
       if (viewport.mobile) {
         assert.ok(layout.art.y < layout.copy.y, "mobile artwork should stack above the form");
+        assert.ok(layout.consentFont >= 12, "mobile consent stays readable");
       } else {
         assert.ok(layout.art.x > layout.copy.x, "desktop artwork should sit beside the form");
       }
+      await page.screenshot({ path: path.join(screenshots, `popup-${viewport.width}x${viewport.height}.png`) });
+      // Short screens may scroll vertically; the submit control must remain reachable.
+      await page.locator(".reef-signup-submit").scrollIntoViewIfNeeded();
+      assert.ok(await page.locator(".reef-signup-submit").isVisible());
+      await dialog.evaluate((element) => { element.scrollTop = 0; });
       await page.getByRole("button", { name: "Close signup form", exact: true }).click();
       const launcher = page.getByRole("button", { name: "Open email signup — get 10% off", exact: true });
       assert.ok(await launcher.isVisible());
@@ -158,7 +173,8 @@ const { chromium } = require("playwright");
     assert.equal(await cookies.locator("dialog.reef-signup-dialog[open]").count(), 0, "cookie fallback remembers dismissal");
     assert.ok(await cookies.locator(".reef-signup-launcher").isVisible());
     await cookies.close();
-    console.log("Popup browser checks passed at 1280, 390, and 320 pixels.");
+    console.log("Popup browser checks passed at desktop, 390, 375 (including short screens), and 320 pixels.");
+    console.log("Screenshots:", screenshots);
   } finally {
     await browser?.close();
     await new Promise((resolve) => server.close(resolve));
