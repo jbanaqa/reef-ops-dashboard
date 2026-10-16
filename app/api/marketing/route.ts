@@ -21,6 +21,7 @@ import { readStock, lowStock } from "@/lib/marketing/stock";
 import { validateStock } from "@/lib/marketing/stock-config";
 import { isDashboardRequestAuthorized } from "@/lib/dashboard-request-auth";
 import { prisma } from "@/lib/prisma";
+import { saveCampaignContent } from "@/lib/marketing/content-storage";
 import {
   audienceWhere,
   atomic,
@@ -176,6 +177,7 @@ async function scheduleCampaign(id: string, scheduledAt: Date) {
   if (!campaign) throw new Error("Only drafts can be scheduled.");
   const { resolved } = await checkedCampaignAudience(campaign.audience);
   if (campaign.recipientMode === "SCHEDULE_TIME") {
+    const storedContent = await saveCampaignContent(prisma, shop(), campaign.content);
     const profiles = await prisma.marketingProfile.findMany({
       where: resolvedAudienceWhere(resolved, campaign.channel),
       select: { id: true },
@@ -193,7 +195,7 @@ async function scheduleCampaign(id: string, scheduledAt: Date) {
           profileId: profile.id,
           channel: campaign.channel,
           subject: campaign.subject,
-          content: json(campaign.content),
+          content: storedContent,
           dueAt: scheduledAt,
         })),
         skipDuplicates: true,
@@ -285,7 +287,7 @@ async function scheduleCampaignTest(id: string, to: string, scheduledAt: Date) {
         profileId: profile.id,
         channel: original.channel,
         subject: original.subject,
-        content: json(original.content),
+        content: await saveCampaignContent(tx, shop(), original.content),
         dueAt: scheduledAt,
       },
     });

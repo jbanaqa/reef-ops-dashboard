@@ -4193,4 +4193,83 @@ test("staff prepares one-contact Shopify flow tests and simulates a delivery dat
   assert.equal(test.scheduledAt?.toISOString(), result.dueAt);
   assert.equal((await prisma.marketingResource.findUniqueOrThrow({ where: { id: deliveryResource.id } })).enabled, false);
 });
+test("campaign content is shared, compactable and delivered without expanding recipient storage", async () => {
+  const priorShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  const testShop = "storage-audit.myshopify.com";
+  process.env.SHOPIFY_SHOP_DOMAIN = testShop;
+  try {
+    const storage = await import("../lib/marketing/content-storage");
+    const maintenance = await import("../lib/marketing/storage-maintenance");
+    await store.seed();
+    await prisma.marketingResource.create({ data: { shop: testShop, kind: "SETTINGS", key: "global", name: "Storage test settings", data: {} } });
+    const settings = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: testShop, kind: "SETTINGS", key: "global" } } });
+    const setSending = (enabled: boolean) => prisma.marketingResource.update({ where: { id: settings.id }, data: { data: { ...(settings.data as object), postalAddress: "123 Test Street", operations: { sendingEnabled: enabled, ingestEnabled: true, migrationConfirmed: true } } } });
+    await setSending(false);
+    const copy = { ...defaultContent, body: "Shared immutable campaign copy", logo: "data:image/png;base64," + crypto.randomBytes(100000).toString("base64") };
+    const first = await storage.saveCampaignContent(prisma, testShop, copy);
+    const second = await storage.saveCampaignContent(prisma, testShop, copy);
+    assert.deepEqual(first, second);
+    assert.ok(JSON.stringify(first).length < 100);
+    assert.equal(await prisma.marketingResource.count({ where: { shop: testShop, kind: "CAMPAIGN_CONTENT" } }), 1);
+    const resolved = await storage.resolveCampaignContent(prisma, testShop, first);
+    assert.equal(resolved.logo, copy.logo);
+    await assert.rejects(storage.resolveCampaignContent(prisma, "other.myshopify.com", first), /missing or damaged/);
+    await assert.rejects(storage.resolveCampaignContent(prisma, testShop, { campaignContentRef: "broken" }), /Invalid/);
+    const campaign = await prisma.marketingCampaign.create({ data: { shop: testShop, name: "Storage test", subject: "Storage test", content: copy, audience: {}, status: "SENDING", recipientMode: "SCHEDULE_TIME", smartSendingHours: 0 } });
+    const messages = [];
+    for (let n = 0; n < 2; n++) {
+      const p = await store.atomic(async (tx) => {
+        const p = await store.identify(tx, { email: `storage-${n}@example.com` });
+        await store.consent(tx, p.id, "EMAIL", n ? "UNSUBSCRIBED" : "SUBSCRIBED", "test", new Date());
+        return p;
+      });
+      messages.push(await prisma.marketingMessage.create({ data: { shop: testShop, key: `storage-${n}`, profileId: p.id, campaignId: campaign.id, channel: "EMAIL", subject: "Storage test", content: copy, dueAt: new Date() } }));
+    }
+    const dry = await maintenance.compactCampaignMessages();
+    assert.equal(dry.candidates, 2);
+    assert.equal(dry.compacted, 0);
+    assert.ok(dry.serializedBytes > dry.uniqueSnapshotBytes);
+    const compacted = await maintenance.compactCampaignMessages({ apply: true });
+    assert.equal(compacted.compacted, 2);
+    for (const original of messages) {
+      const saved = await prisma.marketingMessage.findUniqueOrThrow({ where: { id: original.id } });
+      assert.deepEqual(saved.content, first);
+      for (const field of ["token", "status", "key", "profileId", "campaignId", "providerId"] as const) assert.equal(saved[field], original[field]);
+      assert.equal(saved.dueAt.getTime(), original.dueAt.getTime());
+    }
+    assert.equal((await maintenance.compactCampaignMessages({ apply: true })).compacted, 0, "maintenance is repeatable");
+    const old = new Date(Date.now() - 40 * 86400000);
+    await prisma.marketingWebhookInbox.createMany({ data: [
+      { shop: testShop, key: "storage-old-done", topic: "customers/update", payload: { body: "large".repeat(1000) }, status: "DONE", processedAt: old },
+      { shop: testShop, key: "storage-old-failed", topic: "customers/update", payload: { retain: true }, status: "FAILED", createdAt: old },
+      { shop: testShop, key: "storage-recent", topic: "customers/update", payload: { retain: true }, status: "DONE", processedAt: new Date() },
+    ] });
+    assert.equal((await maintenance.compactProcessedInbox()).candidates, 1);
+    assert.equal((await maintenance.compactProcessedInbox({ apply: true })).compacted, 1);
+    const retained = await prisma.marketingWebhookInbox.findMany({ where: { shop: testShop, key: { in: ["storage-old-failed", "storage-recent"] } } });
+    assert.ok(retained.every((row) => (row.payload as { retain?: boolean }).retain));
+    await prisma.marketingWebhookInbox.updateMany({ where: { shop: testShop }, data: { status: "DONE" } });
+    await setSending(true);
+    await assert.rejects(maintenance.compactProcessedInbox({ apply: true }), /Pause sending/);
+    const before = sent.length;
+    await worker.runMarketing();
+    const delivered = await prisma.marketingMessage.findUniqueOrThrow({ where: { id: messages[0].id } });
+    assert.equal(delivered.status, "SENT");
+    assert.deepEqual(delivered.content, first, "sending must not store expanded artwork in recipient rows again");
+    assert.equal((await prisma.marketingMessage.findUniqueOrThrow({ where: { id: messages[1].id } })).status, "CANCELLED", "consent is still enforced");
+    assert.equal(sent.length, before + 1);
+    assert.match(String(sent[sent.length - 1].html), /Shared immutable campaign copy/);
+    const attachments = sent[sent.length - 1].attachments as { content: string }[];
+    assert.equal(attachments[0].content, copy.logo.split(",")[1], "artwork bytes are unchanged");
+    await worker.runMarketing();
+    assert.equal(sent.length, before + 1, "replay cannot send a duplicate");
+    const damaged = await prisma.marketingMessage.create({ data: { shop: testShop, key: "storage-missing", profileId: messages[0].profileId, campaignId: campaign.id, channel: "EMAIL", subject: "Missing snapshot", content: { campaignContentRef: "0".repeat(64) }, dueAt: new Date() } });
+    await prisma.marketingCampaign.update({ where: { id: campaign.id }, data: { status: "SENDING" } });
+    await worker.runMarketing();
+    const failed = await prisma.marketingMessage.findUniqueOrThrow({ where: { id: damaged.id } });
+    assert.equal(failed.status, "FAILED");
+    assert.match(failed.error || "", /missing or damaged/);
+    assert.equal(sent.length, before + 1, "missing content never sends a fallback email");
+  } finally { process.env.SHOPIFY_SHOP_DOMAIN = priorShop; }
+});
 registerWelcomeTests(() => ({ prisma, store, worker }));

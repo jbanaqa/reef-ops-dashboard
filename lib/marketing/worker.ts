@@ -9,6 +9,7 @@ import {
   cartCoupon,
 } from "./cart";
 import { prisma } from "@/lib/prisma";
+import { saveCampaignContent, resolveCampaignContent, isCampaignContentReference } from "./content-storage";
 import { atomic, json, record, shop } from "./store";
 import {
   Content,
@@ -207,6 +208,7 @@ export async function runMarketing(onlyMessageId?: string) {
       });
       continue;
     }
+    const storedCampaignContent = await saveCampaignContent(prisma, shop(), preparedContent);
     // Resolve the audience and select the next page outside an interactive
     // transaction. On larger stores the anti-join against existing campaign
     // messages can take tens of seconds, which would otherwise expire the
@@ -246,7 +248,7 @@ export async function runMarketing(onlyMessageId?: string) {
         }
         await tx.marketingMessage.updateMany({
           where: { campaignId: current.id, status: "PENDING" },
-          data: { content: json(preparedContent) },
+          data: { content: storedCampaignContent },
         });
         await tx.marketingCampaign.update({
           where: { id: current.id },
@@ -275,7 +277,7 @@ export async function runMarketing(onlyMessageId?: string) {
       if (!claimed) continue;
       await prisma.marketingMessage.updateMany({
         where: { campaignId: claimed.id, status: "PENDING" },
-        data: { content: json(preparedContent) },
+        data: { content: storedCampaignContent },
       });
       await prisma.marketingCampaign.updateMany({
         where: {
@@ -335,7 +337,7 @@ export async function runMarketing(onlyMessageId?: string) {
           profileId: p.id,
           channel: claimed.channel,
           subject: claimed.subject,
-          content: json(preparedContent),
+          content: storedCampaignContent,
           dueAt: now,
         })),
         skipDuplicates: true,
@@ -987,8 +989,11 @@ export async function runMarketing(onlyMessageId?: string) {
         });
         return null;
       }
+      const storedMessageContent = m.content;
       try {
-        m.content = JSON.parse(JSON.stringify(content(m.content)));
+        m.content = JSON.parse(JSON.stringify(m.campaignId
+          ? await resolveCampaignContent(tx, shop(), m.content)
+          : content(m.content)));
       } catch (e) {
         await tx.marketingMessage.update({
           where: { id: m.id },
@@ -1010,7 +1015,11 @@ export async function runMarketing(onlyMessageId?: string) {
           error: null,
           subject: m.subject,
           flowCondition: m.flowCondition,
-          content: json(m.content),
+          content: m.campaignId
+            ? isCampaignContentReference(storedMessageContent)
+              ? json(storedMessageContent)
+              : await saveCampaignContent(tx, shop(), m.content)
+            : json(m.content),
         },
       });
       return result.count ? { message: m, settings } : null;

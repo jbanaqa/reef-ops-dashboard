@@ -416,7 +416,7 @@ test("welcome templates render the assigned offer, shared branding, date, and so
     "",
   );
   assert.doesNotMatch(reminder, /\{\{ coupon_expires \}\}/);
-  assert.match(reminder, /expire in \d+ days/);
+    assert.match(reminder, /expire in \d+ days?/);
   const social = render(welcomeSteps[3].content, "#unsubscribe", "");
   assert.match(social, /INSTAGRAM/);
   assert.match(social, /FACEBOOK/);
