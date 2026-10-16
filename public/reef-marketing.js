@@ -73,7 +73,7 @@
     pending = null;
   }
   const subscribed = script.dataset.emailSubscriber === "true" ||
-    (script.dataset.emailSubscriber === undefined && script.dataset.knownCustomer === "true");
+    script.dataset.knownCustomer === "true";
   if (
     subscribed || storage.get("reef-marketing-submitted")
   )
@@ -100,14 +100,33 @@
       await new Promise((resolve) =>
         setTimeout(resolve, pending ? 0 : delaySeconds * 1000),
       );
-      if (
-        dismissalDays > 0 &&
+      if (storage.get("reef-marketing-submitted")) return;
+      const dismissed = () => dismissalDays > 0 &&
         Date.now() - Number(storage.get("reef-marketing-dismissed") || 0) <
-          dismissalDays * 86400000
-      )
-        return;
+          dismissalDays * 86400000;
       const style = document.createElement("style");
       style.textContent = `
+        .reef-signup-launcher {
+          position: fixed;
+          left: max(16px, env(safe-area-inset-left));
+          bottom: max(16px, env(safe-area-inset-bottom));
+          z-index: 10000;
+          display: inline-flex;
+          align-items: center;
+          min-height: 44px;
+          max-width: calc(100vw - 32px);
+          padding: 11px 17px;
+          border: 1px solid rgba(255,255,255,.65);
+          border-radius: 999px;
+          background: #173e54;
+          color: #fff;
+          box-shadow: 0 3px 16px rgba(14,42,56,.22);
+          font: 700 14px/1.3 Arial, Helvetica, sans-serif;
+          cursor: pointer;
+        }
+        .reef-signup-launcher[hidden] { display: none !important; }
+        .reef-signup-launcher:hover { background: #24566c; }
+        .reef-signup-launcher:focus-visible { outline: 3px solid #e99d48; outline-offset: 3px; }
         .reef-signup-dialog {
           width: min(452px, calc(100vw - 24px));
           max-width: none;
@@ -230,8 +249,17 @@
         }
       `;
       const dialog = document.createElement("dialog");
+      dialog.id = "reef-signup-dialog";
       dialog.className = "reef-signup-dialog";
       dialog.setAttribute("aria-labelledby", "reef-signup-title");
+      const launcher = document.createElement("button");
+      launcher.type = "button";
+      launcher.className = "reef-signup-launcher";
+      launcher.textContent = "Get 10% off";
+      launcher.setAttribute("aria-label", "Open email signup — get 10% off");
+      launcher.setAttribute("aria-haspopup", "dialog");
+      launcher.setAttribute("aria-controls", dialog.id);
+      launcher.hidden = true;
       dialog.innerHTML =
         '<button type="button" class="reef-signup-close" aria-label="Close signup form">×</button>' +
         '<div class="reef-signup-shell"><section class="reef-signup-copy" aria-labelledby="reef-signup-title">' +
@@ -247,33 +275,54 @@
       const panel = dialog.querySelector(".reef-signup-step"),
         status = dialog.querySelector('[role="status"]');
       let session = pending,
-        closed = false;
+        closed = true;
+      const cleanup = () => {
+        closed = true;
+        window.removeEventListener("focus", refresh);
+        window.removeEventListener("storage", syncPreferences);
+        if (dialog.open) dialog.close();
+        dialog.remove();
+        launcher.remove();
+        style.remove();
+      };
       const finish = () => {
         storage.set("reef-marketing-submitted", "1");
         storage.remove("reef-marketing-session");
         storage.remove("reef-marketing-session-at");
         session = null;
+        launcher.remove();
       };
       const close = () => {
+        if (closed) return;
         closed = true;
         storage.set("reef-marketing-dismissed", String(Date.now()));
         event("FORM_DISMISSED");
-        window.removeEventListener("focus", refresh);
-        window.removeEventListener("storage", syncPreferences);
         dialog.close();
-        dialog.remove();
-        style.remove();
+        if (storage.get("reef-marketing-submitted")) cleanup();
+        else {
+          launcher.hidden = false;
+          launcher.focus({ preventScroll: true });
+        }
       };
       function syncPreferences(e) {
-        if (e.key === "reef-marketing-dismissed" || e.key === "reef-marketing-submitted") {
+        if (e.key === "reef-marketing-submitted" && storage.get("reef-marketing-submitted")) {
+          cleanup();
+        } else if (e.key === "reef-marketing-dismissed" && dismissed()) {
           closed = true;
-          window.removeEventListener("focus", refresh);
-          window.removeEventListener("storage", syncPreferences);
-          dialog.close();
-          dialog.remove();
-          style.remove();
+          if (dialog.open) dialog.close();
+          launcher.hidden = false;
         }
       }
+      const open = () => {
+        if (storage.get("reef-marketing-submitted")) return cleanup();
+        if (dialog.open) return;
+        closed = false;
+        launcher.hidden = true;
+        dialog.showModal();
+        event("FORM_VIEWED");
+        if (session) void refresh();
+      };
+      launcher.onclick = open;
       const sms = () => {
         panel.innerHTML =
           '<p>Email confirmed. Add optional text alerts:</p><form><label>Phone (include country code)<input name="phone" type="tel" required></label><label><input name="consent" type="checkbox" required> I agree to recurring automated marketing texts. Consent is not a condition of purchase. Message and data rates may apply. Reply STOP to cancel.</label><p><button type="submit">Sign up for texts</button><button type="button">No thanks</button></p></form>';
@@ -398,14 +447,13 @@
         }
       });
       document.head.append(style);
-      document.body.append(dialog);
-      dialog.showModal();
-      event("FORM_VIEWED");
+      document.body.append(dialog, launcher);
       window.addEventListener("focus", refresh);
       window.addEventListener("storage", syncPreferences);
       if (session) {
         waiting();
-        await refresh();
       } else emailForm();
+      if (dismissed()) launcher.hidden = false;
+      else open();
     })();
 })();

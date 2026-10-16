@@ -76,8 +76,77 @@ test("single-opt-in popup submits consent and finishes without a confirmation or
     assert.equal(requests.find(r => r.action === "signup")?.emailConsent, true);
     assert.equal(requests.some(r => r.action === "sms" || r.action === "status"), false);
     assert.equal(w.document.querySelector("form"), null);
+    assert.equal(w.document.querySelector(".reef-signup-launcher"), null);
     assert.match(w.document.body.textContent!, /Thanks for joining/);
   } finally { popup.window.close(); }
+});
+
+test("dismissed visitors can reopen signup; cross-tab signup removes both controls", async () => {
+  const popup = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://store.example", runScripts: "dangerously" });
+  const w = popup.window;
+  const requests: Record<string, unknown>[] = [];
+  w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  w.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
+  const nativeTimeout = w.setTimeout.bind(w);
+  w.setTimeout = ((handler: TimerHandler) => nativeTimeout(handler, 0)) as typeof w.setTimeout;
+  w.localStorage.setItem("reef-marketing-dismissed", String(Date.now()));
+  w.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)); requests.push(body);
+    return Response.json(body.action === "config" ? { enabled: true, singleOptIn: true, dismissalDays: 7 } : { ok: true });
+  };
+  try {
+    const script = w.document.createElement("script");
+    script.dataset.endpoint = "https://app.example/api/marketing/storefront";
+    script.textContent = await readFile("public/reef-marketing.js", "utf8");
+    w.document.body.append(script);
+    const { waitFor } = await import("@testing-library/react");
+    await waitFor(() => assert.ok(w.document.querySelector(".reef-signup-launcher")));
+    const launcher = w.document.querySelector<HTMLButtonElement>(".reef-signup-launcher")!;
+    const dialog = w.document.querySelector<HTMLDialogElement>("dialog")!;
+    assert.equal(dialog.open, false);
+    assert.equal(launcher.hidden, false);
+    assert.equal(requests.some(r => r.type === "FORM_VIEWED"), false);
+    launcher.click();
+    assert.equal(dialog.open, true);
+    assert.equal(launcher.hidden, true);
+    assert.equal(requests.filter(r => r.type === "FORM_VIEWED").length, 1);
+    dialog.dispatchEvent(new w.Event("cancel", { cancelable: true }));
+    assert.equal(dialog.open, false);
+    assert.equal(launcher.hidden, false);
+    assert.equal(w.document.activeElement, launcher);
+    launcher.click();
+    assert.equal(dialog.open, true);
+    assert.equal(w.document.querySelectorAll("form").length, 1);
+    w.localStorage.setItem("reef-marketing-submitted", "1");
+    w.dispatchEvent(new w.StorageEvent("storage", { key: "reef-marketing-submitted", newValue: "1" }));
+    assert.equal(w.document.querySelector("dialog"), null);
+    assert.equal(w.document.querySelector(".reef-signup-launcher"), null);
+  } finally { w.close(); }
+});
+
+test("signed-in customers, known subscribers, completed signups and disabled forms have no popup or tab", async () => {
+  const source = await readFile("public/reef-marketing.js", "utf8");
+  for (const mode of ["signed-in-unsubscribed", "signed-in-subscribed", "subscriber", "submitted", "disabled"]) {
+    const popup = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://store.example", runScripts: "dangerously" });
+    const w = popup.window;
+    const nativeTimeout = w.setTimeout.bind(w);
+    w.setTimeout = ((handler: TimerHandler) => nativeTimeout(handler, 0)) as typeof w.setTimeout;
+    w.fetch = async () => Response.json({ enabled: mode !== "disabled" });
+    try {
+      if (mode === "submitted") w.localStorage.setItem("reef-marketing-submitted", "1");
+      const script = w.document.createElement("script");
+      script.dataset.endpoint = "https://app.example/api/marketing/storefront";
+      if (mode.startsWith("signed-in")) {
+        script.dataset.knownCustomer = "true";
+        script.dataset.emailSubscriber = String(mode === "signed-in-subscribed");
+      }
+      if (mode === "subscriber") script.dataset.emailSubscriber = "true";
+      script.textContent = source;
+      w.document.body.append(script);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(w.document.querySelector("dialog, .reef-signup-launcher"), null, mode);
+    } finally { w.close(); }
+  }
 });
 test("settings presents the resumable Klaviyo audience backfill", async () => {
   const testing = await import("@testing-library/react");

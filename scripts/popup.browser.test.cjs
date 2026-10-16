@@ -73,6 +73,16 @@ const { chromium } = require("playwright");
       } else {
         assert.ok(layout.art.x > layout.copy.x, "desktop artwork should sit beside the form");
       }
+      await page.getByRole("button", { name: "Close signup form", exact: true }).click();
+      const launcher = page.getByRole("button", { name: "Open email signup — get 10% off", exact: true });
+      assert.ok(await launcher.isVisible());
+      const tab = await launcher.boundingBox();
+      assert.ok(tab.x >= 0 && tab.x + tab.width <= viewport.width);
+      assert.ok(tab.y >= 0 && tab.y + tab.height <= viewport.height);
+      assert.ok(tab.height >= 44, "reopen tab remains easy to tap");
+      await launcher.click();
+      assert.ok(await dialog.isVisible());
+      assert.equal(await launcher.isVisible(), false);
       await page.close();
     }
     const paused = await browser.newPage();
@@ -82,7 +92,10 @@ const { chromium } = require("playwright");
     });
     await paused.goto(url);
     await paused.waitForTimeout(100);
-    assert.equal(await paused.locator("dialog.reef-signup-dialog").count(), 0);
+    assert.equal(await paused.locator("dialog.reef-signup-dialog[open]").count(), 0);
+    assert.ok(await paused.locator(".reef-signup-launcher").isVisible());
+    await paused.locator(".reef-signup-launcher").click();
+    assert.ok(await paused.locator("dialog.reef-signup-dialog").isVisible(), "manual reopen bypasses the seven-day automatic pause");
     await paused.close();
 
     const repeat = await browser.newPage();
@@ -99,7 +112,7 @@ const { chromium } = require("playwright");
       const page = await browser.newPage();
       await page.goto(url + "?customer=" + mode);
       await page.waitForTimeout(100);
-      assert.equal(await page.locator("dialog.reef-signup-dialog").count(), mode === "subscribed" ? 0 : 1);
+      assert.equal(await page.locator("dialog.reef-signup-dialog, .reef-signup-launcher").count(), 0, "all signed-in customers stay hidden");
       await page.close();
     }
     const returning = await browser.newPage();
@@ -107,7 +120,8 @@ const { chromium } = require("playwright");
     await returning.locator(".reef-signup-close").click();
     await returning.reload();
     await returning.waitForTimeout(100);
-    assert.equal(await returning.locator("dialog.reef-signup-dialog").count(), 0, "dismissal survives navigation");
+    assert.equal(await returning.locator("dialog.reef-signup-dialog[open]").count(), 0, "dismissal survives navigation");
+    assert.ok(await returning.locator(".reef-signup-launcher").isVisible());
     await returning.evaluate(() => {
       localStorage.setItem("reef-marketing-dismissed", String(Date.now() - 8 * 86400000));
     });
@@ -120,6 +134,7 @@ const { chromium } = require("playwright");
     await returning.reload();
     await returning.waitForTimeout(100);
     assert.equal(await returning.locator("dialog.reef-signup-dialog").count(), 0, "completed signup stays hidden");
+    assert.equal(await returning.locator(".reef-signup-launcher").count(), 0, "completed signup hides the corner tab too");
     await returning.close();
     const pending = await browser.newPage();
     await pending.addInitScript(() => {
@@ -129,7 +144,8 @@ const { chromium } = require("playwright");
     });
     await pending.goto(url);
     await pending.waitForTimeout(100);
-    assert.equal(await pending.locator("dialog.reef-signup-dialog").count(), 0, "pending confirmation respects dismissal");
+    assert.equal(await pending.locator("dialog.reef-signup-dialog[open]").count(), 0, "pending confirmation respects dismissal");
+    assert.ok(await pending.locator(".reef-signup-launcher").isVisible());
     await pending.close();
     const cookies = await browser.newPage();
     await cookies.addInitScript(() => {
@@ -139,7 +155,8 @@ const { chromium } = require("playwright");
     await cookies.locator(".reef-signup-close").click();
     await cookies.reload();
     await cookies.waitForTimeout(100);
-    assert.equal(await cookies.locator("dialog.reef-signup-dialog").count(), 0, "cookie fallback remembers dismissal");
+    assert.equal(await cookies.locator("dialog.reef-signup-dialog[open]").count(), 0, "cookie fallback remembers dismissal");
+    assert.ok(await cookies.locator(".reef-signup-launcher").isVisible());
     await cookies.close();
     console.log("Popup browser checks passed at 1280, 390, and 320 pixels.");
   } finally {
