@@ -1,7 +1,7 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 import type { Segment } from "./rules";
 import { eligible, matches, segment } from "./rules";
-import { inSegmentSnapshot, inMasterMarketingAudience, snapshotConsentAllowed } from "./segment-snapshot";
+import { inSegmentSnapshot, inMasterMarketingAudience, masterEngagementAllowed, snapshotConsentAllowed } from "./segment-snapshot";
 import type { Tx } from "./store";
 import { audienceWhere, segmentWhere, shop } from "./store";
 
@@ -104,16 +104,18 @@ export function resolvedAudienceWhere(
 
 /** Does not change flow consent or general subscriber eligibility. */
 export function campaignConsentEligible(
-  profile: { properties?: unknown; consents: { channel: string; status: string; suppressed: boolean }[] },
+  profile: { properties?: unknown; lastOpenedAt?: Date | null; consents: { channel: string; status: string; suppressed: boolean }[] },
   resolved: ResolvedCampaignAudience,
   channel = "EMAIL",
+  now = new Date(),
 ) {
   const consent = profile.consents.find((item) => item.channel === channel);
   if (resolved.missingKeys.length) return false;
   const standard = eligible(consent);
   if (resolved.master?.klaviyoSegment && resolved.master.masterMarketing &&
       (!snapshotConsentAllowed(profile.consents.find(item => item.channel === "EMAIL")) ||
-       !inMasterMarketingAudience(profile.properties, resolved.master.klaviyoSegment, resolved.master.masterMarketing.startedAt))) return false;
+       !inMasterMarketingAudience(profile.properties, resolved.master.klaviyoSegment, resolved.master.masterMarketing.startedAt) ||
+       !masterEngagementAllowed({ properties: profile.properties, lastOpenedAt: profile.lastOpenedAt || null }, resolved.master.klaviyoSegment, resolved.master.masterMarketing, now))) return false;
   if (channel !== "EMAIL") return standard;
   const rules = resolved.legacy ? [resolved.legacy] : resolved.includes;
   if (!rules.length) return resolved.master ? snapshotConsentAllowed(consent) : standard;

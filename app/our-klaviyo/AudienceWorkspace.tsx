@@ -98,6 +98,7 @@ export function audienceRules(s: Segment) {
   return [
     s.masterMarketing ? "Your master marketing audience · new consenting signups join automatically" : s.klaviyoSegment ? "Klaviyo campaign eligibility; local opt-outs and blocks still apply" : "Subscribed to email and not blocked",
     s.masterMarketing && "Unsubscribes and blocked contacts are excluded. Customer marketing flows require membership.",
+    s.masterMarketing?.engagementDays && "Eligible for 365 days after signup or the latest recorded open. Migrated members start from the alignment date.",
     s.klaviyoSegment && (s.masterMarketing ? "Starting audience aligned on " : "Aligned from Klaviyo on ") + date(s.klaviyoSegment.syncedAt),
     s.klaviyoSegment?.shopifyConsentCheckedAt && (s.masterMarketing ? "Starting audience consent checked " : "Only confirmed Shopify email subscribers · checked ") + date(s.klaviyoSegment.shopifyConsentCheckedAt),
     s.tag && "Tagged “" + s.tag + "”",

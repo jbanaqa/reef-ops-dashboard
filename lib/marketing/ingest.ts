@@ -124,7 +124,9 @@ async function hydrateCustomerTagPayload(
   topic: string,
   p: Payload,
 ): Promise<Payload> {
-  if (!isCustomerTagTopic(topic)) return p;
+  const consentTopic = isCustomerConsentTopic(topic);
+  if (!isCustomerTagTopic(topic) && !(consentTopic &&
+      (!(p.email_address || p.email) || !p.email_marketing_consent))) return p;
   const id = customerIdFromTagPayload(p);
   if (!id) throw new Error("Shopify customer tag event is missing customerId.");
 
@@ -155,7 +157,8 @@ async function hydrateCustomerTagPayload(
       phone: c.phone || undefined,
       first_name: c.firstName || undefined,
       last_name: c.lastName || undefined,
-      email_marketing_consent: normalizeConsent(c.emailMarketingConsent),
+      email_marketing_consent: consentTopic && p.email_marketing_consent
+        ? p.email_marketing_consent : normalizeConsent(c.emailMarketingConsent),
       sms_marketing_consent: normalizeConsent(c.smsMarketingConsent),
       shopify_current_tags: c.tags || undefined,
     };
@@ -415,8 +418,8 @@ export async function ingestShopify(
       ["EMAIL", c.email_marketing_consent],
       ["SMS_MARKETING", c.sms_marketing_consent],
     ] as const) {
-      if (value)
-        await consent(
+      if (value) {
+        const newSubscriber = await consent(
           tx,
           profile.id,
           channel,
@@ -428,6 +431,11 @@ export async function ingestShopify(
           "shopify",
           date(value.consent_updated_at || at.toISOString()),
         );
+        if (newSubscriber && channel === "EMAIL" && !historical && !p.test && !tagTopic &&
+            value.state === "subscribed" && value.consent_updated_at) {
+          await enroll(tx, "welcome", profile.id, key, date(value.consent_updated_at));
+        }
+      }
     }
     // If consent arrived after the tag event, resume only an existing enrollment.
     // Imported B2B profiles without a tag-triggered message are never enrolled here.

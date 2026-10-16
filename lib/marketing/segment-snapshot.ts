@@ -1,6 +1,7 @@
 // A source membership snapshot is separate from a customer's subscription.
 // It authorizes only campaigns explicitly using this one migrated audience.
 export const klaviyoMailableId = "Rr5yRa";
+export type MasterMarketing = { startedAt: string; engagementDays?: number };
 export type SegmentSnapshot = { id: string; batch: string; syncedAt: string; shopifyConsentCheckedAt?: string };
 export function segmentSnapshot(value: unknown): SegmentSnapshot | undefined {
   if (value == null) return undefined;
@@ -27,6 +28,21 @@ export function snapshotConsentAllowed(consent: { status: string; suppressed: bo
 export function inMasterMarketingAudience(properties: unknown, snapshot: SegmentSnapshot, startedAt: string) {
   const joined = (properties as { masterMarketing?: { startedAt?: string } } | null)?.masterMarketing;
   return inSegmentSnapshot(properties, snapshot) || joined?.startedAt === startedAt;
+}
+
+export function masterEngagementAllowed(
+  profile: { properties?: unknown; lastOpenedAt: Date | null },
+  snapshot: SegmentSnapshot,
+  master: MasterMarketing,
+  now = new Date(),
+) {
+  if (!master.engagementDays) return true;
+  const recent = (value: Date | null) => !!value && value <= now &&
+    +value >= +now - master.engagementDays! * 86400000;
+  if (recent(profile.lastOpenedAt)) return true;
+  if (inSegmentSnapshot(profile.properties, snapshot) && recent(new Date(snapshot.syncedAt))) return true;
+  const joined = (profile.properties as { masterMarketing?: { startedAt?: string; joinedAt?: string } } | null)?.masterMarketing;
+  return joined?.startedAt === master.startedAt && !!joined.joinedAt && recent(new Date(joined.joinedAt));
 }
 
 /** A later Klaviyo refresh must not erase the user's Shopify consent review. */

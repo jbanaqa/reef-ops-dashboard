@@ -4431,6 +4431,118 @@ test("mailable source fetch reads only the selected segment and refuses unsafe p
   }
 });
 
+test("Shopify checkout consent starts Welcome once for new subscribers without replaying migrated or historical contacts", async () => {
+  const previousShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  const previousCustomer = customer;
+  process.env.SHOPIFY_SHOP_DOMAIN = "checkout-welcome.myshopify.com";
+  const currentShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  try {
+    await store.seed();
+    const startedAt = new Date(Date.now() - 60_000).toISOString();
+    const snapshot = { id: "Rr5yRa", batch: crypto.randomUUID(), syncedAt: startedAt };
+    await prisma.marketingResource.update({ where: { shop_kind_key: { shop: currentShop, kind: "SEGMENT", key: "mailable" } },
+      data: { data: { klaviyoSegment: snapshot, masterMarketing: { startedAt, engagementDays: 365 } } } });
+    const welcome = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: currentShop, kind: "FLOW", key: "welcome" } } });
+    await prisma.marketingResource.update({ where: { id: welcome.id }, data: { enabled: true, data: store.json({ ...welcome.data as object, reviewed: true }) } });
+    const consentAt = new Date().toISOString();
+    const emailConsent = { state: "subscribed", consent_updated_at: consentAt };
+    const address = "checkout-welcome-new@example.com";
+    await ingest.ingestShopify("checkouts/create", "checkout-welcome-checked", {
+      id: "checkout-welcome-1", email: address, customer: { id: "7001", email: address },
+      updated_at: consentAt,
+      // A checkout's email alone is not permission to market to it.
+    });
+    assert.equal(await prisma.marketingMessage.count({ where: { shop: currentShop, flowKey: "welcome" } }), 0);
+    customer = { ...customer, id: "gid://shopify/Customer/7001", legacyResourceId: "7001", email: address,
+      emailMarketingConsent: { marketingState: "SUBSCRIBED", consentUpdatedAt: consentAt }, tags: [] };
+    // Consent webhooks without an email hydrate the exact Shopify customer first.
+    await ingest.ingestShopify("customers_email_marketing_consent/update", "checkout-welcome-consent", {
+      customer_id: "7001", updated_at: consentAt, email_marketing_consent: emailConsent,
+    });
+    const profile = await prisma.marketingProfile.findUniqueOrThrow({ where: { shop_email: { shop: currentShop, email: address } } });
+    assert.equal(await prisma.marketingMessage.count({ where: { profileId: profile.id, flowKey: "welcome" } }), 4);
+    const audience = (await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: currentShop, kind: "SEGMENT", key: "mailable" } } })).data;
+    assert.equal(await prisma.marketingProfile.count({ where: { AND: [{ id: profile.id }, store.audienceWhere(audience as never)] } }), 1);
+    await ingest.ingestShopify("customers_email_marketing_consent/update", "checkout-welcome-consent", { customer_id: "7001" });
+    await ingest.ingestShopify("orders/create", "checkout-welcome-order", {
+      id: "7001-order", created_at: consentAt, customer: { id: "7001", email: address, email_marketing_consent: emailConsent },
+    });
+    assert.equal(await prisma.marketingMessage.count({ where: { profileId: profile.id, flowKey: "welcome" } }), 4, "different/replayed events never duplicate Welcome");
+    for (const [suffix, options] of [
+      ["seed", { seed: true }], ["existing", { subscribed: true }],
+      ["suppressed", { suppressed: true }], ["historical", { historical: true }],
+      ["stale", { stale: true }], ["new-order", {}],
+    ] as const) {
+      const flags = options as { seed?: boolean; subscribed?: boolean; suppressed?: boolean; historical?: boolean; stale?: boolean };
+      const email = `checkout-welcome-${suffix}@example.com`;
+      const p = await prisma.marketingProfile.create({ data: {
+        shop: currentShop, email, shopifyId: suffix,
+        properties: flags.seed ? { klaviyoMailable: { ...snapshot, canReceiveMarketing: true } } : {},
+        consents: { create: { channel: "EMAIL", status: flags.suppressed ? "UNSUBSCRIBED" : flags.subscribed ? "SUBSCRIBED" : "NEVER_SUBSCRIBED", suppressed: !!flags.suppressed, source: "test", occurredAt: new Date(0) } },
+      } });
+      await ingest.ingestShopify("orders/create", `checkout-welcome-${suffix}-order`, {
+        id: `${suffix}-order`, created_at: consentAt,
+        customer: { id: suffix, email, email_marketing_consent: { ...emailConsent, consent_updated_at: flags.stale ? new Date(0).toISOString() : consentAt } },
+      }, !!flags.historical);
+      assert.equal(await prisma.marketingMessage.count({ where: { profileId: p.id, flowKey: "welcome" } }), suffix === "new-order" ? 4 : 0, suffix);
+    }
+  } finally {
+    process.env.SHOPIFY_SHOP_DOMAIN = previousShop;
+    customer = previousCustomer;
+  }
+});
+
+test("365-day master engagement expires automatically and opens renew eligibility without changing consent or membership history", async () => {
+  const previousShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  process.env.SHOPIFY_SHOP_DOMAIN = "master-engagement.myshopify.com";
+  const currentShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  try {
+    const { segment, matches } = await import("../lib/marketing/rules");
+    const { masterAudienceAllows } = await import("../lib/marketing/master-audience");
+    const { resolveCampaignAudience, resolvedAudienceWhere, resolvedAudienceMatches, campaignConsentEligible } = await import("../lib/marketing/campaign-audience");
+    const now = new Date();
+    const ago = (days: number) => new Date(+now - days * 86400000);
+    const startedAt = ago(410).toISOString();
+    const snapshot = { id: "Rr5yRa", batch: crypto.randomUUID(), syncedAt: ago(400).toISOString() };
+    const rule = segment({ klaviyoSegment: snapshot, masterMarketing: { startedAt, engagementDays: 365 } });
+    await prisma.marketingResource.create({ data: { shop: currentShop, kind: "SEGMENT", key: "mailable", name: "2025 Mailable Subscribers", data: store.json(rule) } });
+    const create = (name: string, joinedDays: number | null, openedDays: number | null, seed = false) => prisma.marketingProfile.create({ data: {
+      shop: currentShop, email: name + "@example.com", lastOpenedAt: openedDays === null ? null : ago(openedDays),
+      properties: seed ? { klaviyoMailable: { ...snapshot, canReceiveMarketing: true } }
+        : joinedDays === null ? {} : { masterMarketing: { startedAt, joinedAt: ago(joinedDays).toISOString(), source: "shopify" } },
+      consents: { create: { channel: "EMAIL", status: "SUBSCRIBED", suppressed: false, source: "test", occurredAt: ago(400) } },
+    }, include: { consents: true } });
+    const expired = await create("engagement-expired", 366, null);
+    const fresh = await create("engagement-fresh", 364, null);
+    const edge = await create("engagement-boundary", 365, null);
+    const opened = await create("engagement-opened", 400, 2);
+    const seed = await create("engagement-seed-expired", null, null, true);
+    const outsider = await create("engagement-outsider", null, 1);
+    const resolved = await resolveCampaignAudience(prisma, { version: 2, includeKeys: ["mailable"], excludeKeys: [] });
+    for (const [p, expected] of [[expired, false], [fresh, true], [edge, true], [opened, true], [seed, false], [outsider, false]] as const) {
+      assert.equal(matches(p, rule, now), expected, p.email!);
+      assert.equal(resolvedAudienceMatches(p, resolved, now), expected);
+      assert.equal(campaignConsentEligible(p, resolved, "EMAIL", now), expected, "frozen recipients also obey engagement eligibility");
+      assert.equal(await prisma.marketingProfile.count({ where: { AND: [{ id: p.id }, resolvedAudienceWhere(resolved, "EMAIL", now)] } }), expected ? 1 : 0, "SQL and send-time rules agree");
+    }
+    assert.equal(await masterAudienceAllows(prisma, currentShop, expired.id), false);
+    const migrationRule = segment({ ...rule, klaviyoSegment: { ...snapshot, syncedAt: now.toISOString() } });
+    assert.equal(matches(seed, migrationRule, now), true, "migration baseline preserves members with missing history");
+    assert.equal(await prisma.marketingProfile.count({ where: { AND: [{ id: seed.id }, store.audienceWhere(migrationRule, "EMAIL", now)] } }), 1);
+    assert.equal(matches(seed, migrationRule, new Date(+now + 366 * 86400000)), false);
+    const message = await prisma.marketingMessage.create({ data: { shop: currentShop, key: "engagement-reopen", profileId: expired.id, channel: "EMAIL", subject: "Earlier campaign", content: defaultContent, status: "SENT", sentAt: ago(366), dueAt: ago(366), providerId: "engagement-reopen-provider" } });
+    await ingest.deliveryEvent("resend:engagement-reopen", message.providerId!, "OPENED", now, {});
+    const renewed = await prisma.marketingProfile.findUniqueOrThrow({ where: { id: expired.id }, include: { consents: true } });
+    assert.equal(matches(renewed, rule, now), true);
+    assert.equal(await masterAudienceAllows(prisma, currentShop, expired.id), true);
+    assert.deepEqual(renewed.properties, expired.properties);
+    assert.deepEqual(renewed.consents, expired.consents);
+    assert.equal(matches(renewed, rule, new Date(+now + 366 * 86400000)), false);
+    await store.atomic((tx) => store.consent(tx, expired.id, "EMAIL", "UNSUBSCRIBED", "unsubscribe-link", new Date()));
+    assert.equal(await prisma.marketingProfile.count({ where: { AND: [{ id: expired.id }, store.audienceWhere(rule)] } }), 0);
+  } finally { process.env.SHOPIFY_SHOP_DOMAIN = previousShop; }
+});
+
 test("maintained master audience preserves reviewed members, admits new consent before Welcome, and gates flow sends", async () => {
  const oldShop=process.env.SHOPIFY_SHOP_DOMAIN;
  process.env.SHOPIFY_SHOP_DOMAIN="master-marketing.myshopify.com";

@@ -199,13 +199,15 @@ export async function consent(
     create: { profileId, channel, ...data },
     update: data,
   });
-  if (channel === "EMAIL" && status === "SUBSCRIBED" && !data.suppressed)
-    await joinMasterAudience(tx, shop(), profileId, source, occurredAt);
+  const newlyJoined = channel === "EMAIL" && status === "SUBSCRIBED" && !data.suppressed
+    ? await joinMasterAudience(tx, shop(), profileId, source, occurredAt)
+    : false;
   if (suppress)
     await tx.marketingMessage.updateMany({
       where: { profileId, channel, status: "PENDING" },
       data: { status: "CANCELLED", error: "Channel suppressed" },
     });
+  return !!newlyJoined && current?.status !== "SUBSCRIBED";
 }
 export function audienceWhere(
   audience: Segment,
@@ -231,6 +233,21 @@ export function segmentWhere(
   audience: Segment,
   now = new Date(),
 ): Prisma.MarketingProfileWhereInput {
+  const engagement: Prisma.MarketingProfileWhereInput[] = [];
+  if (audience.masterMarketing?.engagementDays && audience.klaviyoSegment) {
+    const cutoff = new Date(+now - audience.masterMarketing.engagementDays * DAY);
+    engagement.push({ lastOpenedAt: { gte: cutoff, lte: now } });
+    engagement.push({ AND: [
+      { properties: { path: ["masterMarketing", "startedAt"], equals: audience.masterMarketing.startedAt } },
+      { properties: { path: ["masterMarketing", "joinedAt"], gte: cutoff.toISOString(), lte: now.toISOString() } },
+    ] });
+    const baseline = new Date(audience.klaviyoSegment.syncedAt);
+    if (baseline >= cutoff && baseline <= now) engagement.push({ AND: [
+      { properties: { path: ["klaviyoMailable", "id"], equals: audience.klaviyoSegment.id } },
+      { properties: { path: ["klaviyoMailable", "batch"], equals: audience.klaviyoSegment.batch } },
+      { properties: { path: ["klaviyoMailable", "canReceiveMarketing"], equals: true } },
+    ] });
+  }
   return {
     ...(audience.klaviyoSegment ? { AND: [audience.masterMarketing ? { OR: [
       { AND: [
@@ -243,7 +260,7 @@ export function segmentWhere(
       { properties: { path: ["klaviyoMailable", "id"], equals: audience.klaviyoSegment.id } },
       { properties: { path: ["klaviyoMailable", "batch"], equals: audience.klaviyoSegment.batch } },
       { properties: { path: ["klaviyoMailable", "canReceiveMarketing"], equals: true } },
-    ] }] } : {}),
+    ] }, ...(engagement.length ? [{ OR: engagement }] : [])] } : {}),
     ...(audience.openedDays
       ? {
           lastOpenedAt: {

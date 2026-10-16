@@ -1,6 +1,6 @@
 import { FilterXSS } from "xss";
 import { decode } from "he";
-import { inSegmentSnapshot, inMasterMarketingAudience, segmentSnapshot, type SegmentSnapshot } from "./segment-snapshot";
+import { inSegmentSnapshot, inMasterMarketingAudience, masterEngagementAllowed, segmentSnapshot, type SegmentSnapshot, type MasterMarketing } from "./segment-snapshot";
 import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
 export const channels = [
   "EMAIL",
@@ -522,7 +522,7 @@ export function marketingSettings(
 }
 export type Segment = {
   klaviyoSegment?: SegmentSnapshot;
-  masterMarketing?: { startedAt: string };
+  masterMarketing?: MasterMarketing;
   openedDays?: number;
   tag?: string;
   list?: string;
@@ -1158,6 +1158,11 @@ export function segment(value: unknown): Segment {
     if (!result.klaviyoSegment || typeof s.masterMarketing.startedAt !== "string" || !Number.isFinite(Date.parse(s.masterMarketing.startedAt)))
       throw Error("Invalid master marketing audience");
     result.masterMarketing = { startedAt: s.masterMarketing.startedAt };
+    if (s.masterMarketing.engagementDays !== undefined) {
+      if (s.masterMarketing.engagementDays !== 365)
+        throw Error("The master audience engagement window must be 365 days");
+      result.masterMarketing.engagementDays = 365;
+    }
   }
   for (const key of [
     "openedDays",
@@ -1194,7 +1199,8 @@ export function matches(
     !!d && d.getTime() >= now.getTime() - days * DAY && d <= now;
   return (
     (!s.klaviyoSegment || (s.masterMarketing
-      ? inMasterMarketingAudience(profile.properties, s.klaviyoSegment, s.masterMarketing.startedAt)
+      ? inMasterMarketingAudience(profile.properties, s.klaviyoSegment, s.masterMarketing.startedAt) &&
+        masterEngagementAllowed(profile, s.klaviyoSegment, s.masterMarketing, now)
       : inSegmentSnapshot(profile.properties, s.klaviyoSegment))) &&
     (!s.openedDays || recent(profile.lastOpenedAt, s.openedDays)) &&
     (!s.tag || profile.tags.includes(s.tag)) &&
