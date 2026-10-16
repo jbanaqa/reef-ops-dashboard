@@ -2,6 +2,30 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/app/generated/prisma/client";
 import { shop } from "./store";
 
+async function deliveryAttentionProfiles(enrollments: Prisma.MarketingEventWhereInput) {
+  const profiles = new Set<string>();
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await prisma.marketingEvent.findMany({
+      where: {
+        shop: shop(), type: { in: ["BOUNCED", "COMPLAINED"] }, messageId: { not: null },
+        profile: { is: { shop: shop(), events: { some: enrollments } } },
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
+      orderBy: { id: "asc" }, take: 500, select: { id: true, messageId: true },
+    });
+    if (page.length) {
+      const messages = await prisma.marketingMessage.findMany({
+        where: { shop: shop(), flowKey: "welcome", id: { in: page.map((event) => event.messageId!) } },
+        select: { profileId: true }, distinct: ["profileId"],
+      });
+      for (const message of messages) profiles.add(message.profileId);
+    }
+    if (page.length < 500) return [...profiles];
+    cursor = page[page.length - 1].id;
+  }
+}
+
 /** Read-only enrollment ledger: never expose saved email content or delivery tokens. */
 export async function welcomeActivity(url: URL) {
   const scope = url.searchParams.get("scope") || "live";
@@ -33,7 +57,7 @@ export async function welcomeActivity(url: URL) {
       shop: shop(), flowKey: "welcome", flowStep: 0, status: { in: status },
     } } } } }],
   });
-  const [page, joined, sent, waiting, attention] = await Promise.all([
+  const [page, joined, sent, waiting, deliveryIssues] = await Promise.all([
     prisma.marketingEvent.findMany({
       where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 26,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -51,10 +75,14 @@ export async function welcomeActivity(url: URL) {
     prisma.marketingEvent.count({ where }),
     prisma.marketingEvent.count({ where: firstMessage(["SENT"]) }),
     prisma.marketingEvent.count({ where: firstMessage(["PENDING", "SENDING"]) }),
-    prisma.marketingEvent.count({ where: { AND: [where, { profile: { is: { messages: { some: {
-      shop: shop(), flowKey: "welcome", status: { in: ["FAILED", "UNKNOWN"] },
-    } } } } }] } }),
+    deliveryAttentionProfiles(where),
   ]);
+  const attention = await prisma.marketingEvent.count({ where: { AND: [where, { OR: [
+    { profileId: { in: deliveryIssues } },
+    { profile: { is: { messages: { some: {
+      shop: shop(), flowKey: "welcome", status: { in: ["FAILED", "UNKNOWN"] },
+    } } } } },
+  ] }] } });
   const rows = page.slice(0, 25);
   const events = await prisma.marketingEvent.findMany({
     where: {

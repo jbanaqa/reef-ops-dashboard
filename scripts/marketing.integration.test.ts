@@ -4589,6 +4589,13 @@ test("Welcome activity lists timestamped live customer enrollments with bounded 
     assert.ok(searched.rows[0].signupAt < activation, "late processed signups are included based on actual enrollment time");
     assert.ok(searched.rows[0].triggeredAt > activation);
     assert.deepEqual(searched.rows[0].messages[0].events.map((event) => event.type), ["DELIVERED", "OPENED"]);
+    const secondMessage = await prisma.marketingMessage.findUniqueOrThrow({ where: { key: "activity-message-1" } });
+    for (const [index, type] of ["BOUNCED", "BOUNCED", "COMPLAINED"].entries())
+      await prisma.marketingEvent.create({ data: { shop: currentShop, key: `activity-delivery-issue-${index}`, profileId: profiles[1].id, messageId: secondMessage.id, type, occurredAt: new Date() } });
+    assert.equal((await welcomeActivity(url())).totals.attention, 2, "failed messages and bounced/complained customer enrollments count once each");
+    const campaignMessage = await prisma.marketingMessage.create({ data: { shop: currentShop, key: "activity-non-welcome-bounce", profileId: profiles[3].id, channel: "EMAIL", subject: "Other email", content: defaultContent, status: "SENT", sentAt: new Date(), dueAt: new Date() } });
+    await prisma.marketingEvent.create({ data: { shop: currentShop, key: "activity-unrelated-bounce", profileId: profiles[3].id, messageId: campaignMessage.id, type: "BOUNCED", occurredAt: new Date() } });
+    assert.equal((await welcomeActivity(url())).totals.attention, 2, "unrelated email bounces do not inflate Welcome's counter");
     assert.doesNotMatch(JSON.stringify(searched), /PRIVATE_EMAIL_CONTENT|PRIVATE_UNSUBSCRIBE_TOKEN|PRIVATE_PROVIDER_ID/);
     assert.equal((await welcomeActivity(url("&scope=all"))).totals.joined, 29, "old customers are available separately, tests remain excluded");
     await assert.rejects(welcomeActivity(url("&scope=invalid")), /valid activity period/);
