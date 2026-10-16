@@ -904,7 +904,8 @@ export async function runMarketing(onlyMessageId?: string) {
         });
         if (reservation) deferred = "Another message delivery is being checked";
         const campaignSmartSending =
-          !m.campaign || m.campaign.smartSendingHours > 0;
+          !m.campaign ||
+          (!m.campaign.testOfCampaignId && m.campaign.smartSendingHours > 0);
         if (
           !reservation &&
           campaignSmartSending &&

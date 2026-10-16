@@ -295,9 +295,9 @@ function CampaignTestEmail({
         address you entered. <strong>Schedule campaign test</strong> queues one real campaign
         message for that same address at the selected local time. The worker sends it
         at or shortly after that time. The contact
-        must be subscribed and in the selected audience. Smart Sending and
-        suppression apply; a successful test can affect that contact’s next
-        16-hour send window. No other audience members are contacted.
+        must be subscribed and in the selected audience. Tests bypass recent-email
+        spacing; consent and suppression still apply. A sent test still counts
+        toward normal campaign spacing. No other audience members are contacted.
       </small>
       {!sendAt && <small>Choose a future date and time to enable the campaign test. The direct email preview does not need a send time.</small>}
       {!!sendAt && !validSendAt && <small>Choose a future date and time for the campaign test.</small>}

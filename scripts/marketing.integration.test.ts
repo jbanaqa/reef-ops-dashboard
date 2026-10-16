@@ -4098,6 +4098,8 @@ test("one-contact campaign test uses the real worker without expanding or attrib
     assert.equal(testRun.testOfCampaignId, source.id);
     assert.equal(testRun.status, "SCHEDULED");
     assert.equal(testRun.recipientMode, "SEND_TIME");
+    assert.equal(testRun.smartSendingHours, 0);
+    assert.equal((await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: source.id } })).smartSendingHours, 16);
     assert.equal(testRun.messages.length, 1);
     assert.equal(testRun.messages[0].profileId, target.id);
     assert.equal(testRun.scheduledAt?.toISOString(), scheduledAt.toISOString());
@@ -4125,10 +4127,16 @@ test("one-contact campaign test uses the real worker without expanding or attrib
     const another = await api.POST(testRequest(target.email));
     const secondId = (await another.json()).id;
     assert.notEqual(secondId, testId);
-    await prisma.marketingCampaign.update({ where: { id: secondId }, data: { scheduledAt: dueNow } });
+    // Previously queued tests retain the source's window but must also bypass it.
+    await prisma.marketingCampaign.update({ where: { id: secondId }, data: { scheduledAt: dueNow, smartSendingHours: 16 } });
     await prisma.marketingMessage.updateMany({ where: { campaignId: secondId }, data: { dueAt: dueNow } });
     await worker.runMarketing();
-    const skipped = await prisma.marketingMessage.findFirstOrThrow({ where: { campaignId: secondId } });
+    const repeated = await prisma.marketingMessage.findFirstOrThrow({ where: { campaignId: secondId } });
+    assert.equal(repeated.status, "SENT", "a repeated scheduled test bypasses recent-email spacing");
+    assert.equal(sent.length, sentBefore + 2);
+    await prisma.marketingCampaign.update({ where: { id: source.id }, data: { status: "SCHEDULED", scheduledAt: dueNow } });
+    await worker.runMarketing();
+    const skipped = await prisma.marketingMessage.findFirstOrThrow({ where: { campaignId: source.id, profileId: target.id } });
     assert.equal(skipped.status, "CANCELLED");
     assert.match(skipped.error || "", /Smart Sending/);
 });

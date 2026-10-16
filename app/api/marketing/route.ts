@@ -270,7 +270,7 @@ async function scheduleCampaignTest(id: string, to: string, scheduledAt: Date) {
         channel: original.channel,
         content: json(original.content),
         audience: json(original.audience),
-        smartSendingHours: original.smartSendingHours,
+        smartSendingHours: 0,
         recipientMode: "SEND_TIME",
         testOfCampaignId: original.id,
         status: "SCHEDULED",
