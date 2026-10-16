@@ -4352,6 +4352,81 @@ test("mailable source fetch reads only the selected segment and refuses unsafe p
   }
 });
 
+test("maintained master audience preserves reviewed members, admits new consent before Welcome, and gates flow sends", async () => {
+ const oldShop=process.env.SHOPIFY_SHOP_DOMAIN;
+ process.env.SHOPIFY_SHOP_DOMAIN="master-marketing.myshopify.com";
+ const currentShop=process.env.SHOPIFY_SHOP_DOMAIN;
+ try {
+  const {segment,matches}=await import("../lib/marketing/rules");
+  const {masterAudienceAllows}=await import("../lib/marketing/master-audience");
+  const {resolveCampaignAudience,campaignConsentEligible,resolvedAudienceWhere}=await import("../lib/marketing/campaign-audience");
+  const {POST}=await import("../app/api/marketing/storefront/route");
+  await store.seed();
+  const startedAt=new Date(Date.now()-1000).toISOString();
+  const snapshot={id:"Rr5yRa",batch:crypto.randomUUID(),syncedAt:startedAt};
+  const rule=segment({klaviyoSegment:snapshot,masterMarketing:{startedAt}});
+  await prisma.marketingResource.update({where:{shop_kind_key:{shop:currentShop,kind:"SEGMENT",key:"mailable"}},data:{data:store.json(rule)}});
+  await prisma.marketingResource.create({data:{shop:currentShop,kind:"SETTINGS",key:"global",name:"Settings",data:{postalAddress:"123 Test Street",operations:{sendingEnabled:true,ingestEnabled:true,migrationConfirmed:true,formEnabled:true}}}});
+  const create=async(name:string,seed=false,status="SUBSCRIBED",suppressed=false)=>prisma.marketingProfile.create({data:{shop:currentShop,email:name+"@example.com",tags:["b2b"],properties:seed?{klaviyoMailable:{...snapshot,canReceiveMarketing:true}}:{},consents:{create:{channel:"EMAIL",status,suppressed,source:"test",occurredAt:new Date()}}},include:{consents:true}});
+  const seeded=await create("master-seed",true);
+  await create("master-reviewed-legacy",true,"NEVER_SUBSCRIBED");
+  const blocked=await create("master-blocked",true,"UNSUBSCRIBED",true);
+  const outsider=await create("master-outside");
+  assert.equal(await prisma.marketingProfile.count({where:store.audienceWhere(rule)}),2);
+  assert.equal(await masterAudienceAllows(prisma,currentShop,seeded.id),true);
+  assert.equal(await masterAudienceAllows(prisma,currentShop,outsider.id),false);
+  const accepted=await create("master-shopify-new",false,"NEVER_SUBSCRIBED");
+  await store.atomic(tx=>store.consent(tx,accepted.id,"EMAIL","SUBSCRIBED","shopify",new Date()));
+  assert.equal(await masterAudienceAllows(prisma,currentShop,accepted.id),true);
+  await store.atomic(tx=>store.consent(tx,accepted.id,"EMAIL","SUBSCRIBED","shopify",new Date()));
+  assert.equal(await prisma.marketingEvent.count({where:{profileId:accepted.id,type:"MASTER_AUDIENCE_JOINED"}}),1);
+  await store.atomic(tx=>store.consent(tx,blocked.id,"EMAIL","SUBSCRIBED","shopify",new Date()));
+  assert.equal((await prisma.marketingConsent.findUniqueOrThrow({where:{profileId_channel:{profileId:blocked.id,channel:"EMAIL"}}})).suppressed,true);
+  const imported=await create("master-historical",false,"NEVER_SUBSCRIBED");
+  await store.atomic(tx=>store.consent(tx,imported.id,"EMAIL","SUBSCRIBED","klaviyo:api",new Date()));
+  assert.equal(await masterAudienceAllows(prisma,currentShop,imported.id),false);
+  const older=await create("master-older",false,"NEVER_SUBSCRIBED");
+  await store.atomic(tx=>store.consent(tx,older.id,"EMAIL","SUBSCRIBED","shopify",new Date(+new Date(startedAt)-1000)));
+  assert.equal(await masterAudienceAllows(prisma,currentShop,older.id),false);
+  const welcome=await prisma.marketingResource.findUniqueOrThrow({where:{shop_kind_key:{shop:currentShop,kind:"FLOW",key:"welcome"}}});
+  await prisma.marketingResource.update({where:{id:welcome.id},data:{enabled:true,data:store.json({...welcome.data as object,reviewed:true})}});
+  const signup=await POST(new Request("https://app.example/api/marketing/storefront",{method:"POST",headers:{origin:"https://store.example"},body:JSON.stringify({action:"signup",email:"master-popup@example.com",emailConsent:true,timezone:"America/Los_Angeles"})}));
+  assert.equal(signup.status,200,JSON.stringify(await signup.clone().json()));
+  const joined=await prisma.marketingProfile.findUniqueOrThrow({where:{shop_email:{shop:currentShop,email:"master-popup@example.com"}},include:{consents:true}});
+  assert.equal(await masterAudienceAllows(prisma,currentShop,joined.id),true,"timezone save must preserve membership");
+  assert.equal(await prisma.marketingMessage.count({where:{profileId:joined.id,flowKey:"welcome"}}),4,"signup joined before Welcome enrollment");
+  assert.equal(matches(joined,rule),true);
+  const resolved=await resolveCampaignAudience(prisma,{version:2,includeKeys:["mailable"],excludeKeys:[]});
+  assert.equal(campaignConsentEligible(joined,resolved),true);
+  const other=await resolveCampaignAudience(prisma,{version:2,includeKeys:["b2b"],excludeKeys:[]});
+  assert.equal(campaignConsentEligible(outsider,other),false,"other campaign audiences also stay within the master audience");
+  assert.equal(await prisma.marketingProfile.count({where:{AND:[{id:outsider.id},resolvedAudienceWhere(other)]}}),0);
+  assert.equal(await prisma.marketingProfile.count({where:resolvedAudienceWhere(resolved)}),4);
+  const flow=await prisma.marketingResource.findUniqueOrThrow({where:{shop_kind_key:{shop:currentShop,kind:"FLOW",key:"b2b-welcome"}}});
+  await prisma.marketingResource.update({where:{id:flow.id},data:{enabled:true,data:store.json({...flow.data as object,reviewed:true})}});
+  for(const p of [outsider,accepted]){
+   const m=await prisma.marketingMessage.create({data:{shop:currentShop,key:"master-guard:"+p.id,profileId:p.id,flowKey:"b2b-welcome",channel:"EMAIL",subject:"Master guard",content:store.json(defaultContent),dueAt:new Date()}});
+   await worker.runMarketing(m.id);
+   const result=await prisma.marketingMessage.findUniqueOrThrow({where:{id:m.id}});
+   assert.equal(result.status,p.id===outsider.id?"CANCELLED":"SENT");
+   if(p.id===outsider.id)assert.equal(result.error,"Not in 2025 Mailable Subscribers");
+  }
+  await store.atomic(tx=>store.consent(tx,joined.id,"EMAIL","UNSUBSCRIBED","unsubscribe-link",new Date()));
+  assert.equal(await prisma.marketingProfile.count({where:{AND:[{id:joined.id},store.audienceWhere(rule)]}}),0,"unsubscribing excludes membership from campaigns immediately");
+  const fresh=await prisma.marketingProfile.findUniqueOrThrow({where:{id:joined.id},include:{consents:true}});
+  assert.equal(campaignConsentEligible(fresh,resolved),false);
+  const resubscribed=await POST(new Request("https://app.example/api/marketing/storefront",{method:"POST",headers:{origin:"https://store.example"},body:JSON.stringify({action:"signup",email:joined.email,emailConsent:true,timezone:"America/New_York"})}));
+  assert.equal(resubscribed.status,200);
+  const confirmation=await prisma.marketingMessage.findFirstOrThrow({where:{profileId:joined.id,flowKey:"email-confirmation"},orderBy:{createdAt:"desc"}});
+  const {POST:confirm}=await import("../app/api/marketing/confirm/route");
+  assert.equal((await confirm(new Request((confirmation.content as {url:string}).url,{method:"POST"}))).status,200);
+  assert.equal(await prisma.marketingProfile.count({where:{AND:[{id:joined.id},store.audienceWhere(rule)]}}),1,"confirmed resubscription restores eligibility");
+  assert.equal(await prisma.marketingMessage.count({where:{profileId:joined.id,flowKey:"welcome"}}),4,"resubscription must not restart Welcome");
+  const {alignMailableSource}=await import("../lib/marketing/mailable-alignment");
+  await assert.rejects(alignMailableSource({id:"Rr5yRa",name:"2025 Mailable Subscribers",checkedAt:new Date().toISOString(),members:[{id:"source",email:seeded.email!,canReceiveMarketing:true}]}),/maintained master audience/);
+ }finally{process.env.SHOPIFY_SHOP_DOMAIN=oldShop;}
+});
+
 test("Shopify audience exclusions survive Klaviyo refresh and block frozen campaigns without altering other audiences", async () => {
  const previousShop=process.env.SHOPIFY_SHOP_DOMAIN;process.env.SHOPIFY_SHOP_DOMAIN="shopify-consent-scope.myshopify.com";
  const currentShop=process.env.SHOPIFY_SHOP_DOMAIN;

@@ -4,6 +4,7 @@ import {
   confirmationHash,
 } from "@/lib/marketing/confirmation";
 import { enroll } from "@/lib/marketing/flows";
+import { joinMasterAudience } from "@/lib/marketing/master-audience";
 export const dynamic = "force-dynamic";
 const headers = {
   "Content-Type": "text/html",
@@ -120,6 +121,8 @@ export async function POST(request: Request) {
             confirmedAt,
           );
         }
+        if (resubscribe)
+          await joinMasterAudience(tx, shop(), d.profileId, "storefront-resubscribe-confirmed-v1", confirmedAt);
         await tx.marketingResource.update({
           where: { id: session!.id },
           data: { data: { ...d, confirmed: true } },

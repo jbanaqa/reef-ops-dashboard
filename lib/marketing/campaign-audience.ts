@@ -1,7 +1,7 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 import type { Segment } from "./rules";
 import { eligible, matches, segment } from "./rules";
-import { inSegmentSnapshot, snapshotConsentAllowed } from "./segment-snapshot";
+import { inSegmentSnapshot, inMasterMarketingAudience, snapshotConsentAllowed } from "./segment-snapshot";
 import type { Tx } from "./store";
 import { audienceWhere, segmentWhere, shop } from "./store";
 
@@ -17,6 +17,7 @@ export type ResolvedCampaignAudience = {
   excludes: Segment[];
   missingKeys: string[];
   legacy?: Segment;
+  master?: Segment;
 };
 
 const keys = (value: unknown) =>
@@ -46,6 +47,8 @@ export async function resolveCampaignAudience(
   value: unknown,
 ): Promise<ResolvedCampaignAudience> {
   const parsed = campaignAudience(value);
+  const masterRow = await tx.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key: "mailable" } } });
+  const master = (masterRow?.data as { masterMarketing?: unknown } | undefined)?.masterMarketing ? segment(masterRow!.data) : undefined;
   if (!("version" in parsed))
     return {
       config: null,
@@ -53,6 +56,7 @@ export async function resolveCampaignAudience(
       excludes: [],
       missingKeys: [],
       legacy: parsed,
+      master,
     };
   const requested = Array.from(
     new Set([...parsed.includeKeys, ...parsed.excludeKeys]),
@@ -73,6 +77,7 @@ export async function resolveCampaignAudience(
       byKey.has(key) ? [byKey.get(key)!] : [],
     ),
     missingKeys: requested.filter((key) => !byKey.has(key)),
+    master,
   };
 }
 
@@ -81,14 +86,15 @@ export function resolvedAudienceWhere(
   channel = "EMAIL",
   now = new Date(),
 ): Prisma.MarketingProfileWhereInput {
-  if (resolved.legacy) return audienceWhere(resolved.legacy, channel, now);
+  if (resolved.legacy) return { AND: [audienceWhere(resolved.legacy, channel, now), ...(resolved.master ? [audienceWhere(resolved.master, channel, now)] : [])] };
   if (resolved.missingKeys.length)
     return { shop: shop(), id: "missing-campaign-audience" };
   return {
     AND: [
+      ...(resolved.master ? [audienceWhere(resolved.master, channel, now)] : []),
       ...(resolved.includes.length
         ? [{ OR: resolved.includes.map((item) => audienceWhere(item, channel, now)) }]
-        : [audienceWhere({}, channel, now)]),
+        : [audienceWhere(resolved.master || {}, channel, now)]),
       ...(resolved.excludes.length
         ? [{ NOT: { OR: resolved.excludes.map((item) => segmentWhere(item, now)) } }]
         : []),
@@ -105,11 +111,16 @@ export function campaignConsentEligible(
   const consent = profile.consents.find((item) => item.channel === channel);
   if (resolved.missingKeys.length) return false;
   const standard = eligible(consent);
+  if (resolved.master?.klaviyoSegment && resolved.master.masterMarketing &&
+      (!snapshotConsentAllowed(profile.consents.find(item => item.channel === "EMAIL")) ||
+       !inMasterMarketingAudience(profile.properties, resolved.master.klaviyoSegment, resolved.master.masterMarketing.startedAt))) return false;
   if (channel !== "EMAIL") return standard;
   const rules = resolved.legacy ? [resolved.legacy] : resolved.includes;
-  if (!rules.length) return standard;
+  if (!rules.length) return resolved.master ? snapshotConsentAllowed(consent) : standard;
   return rules.some((rule) => rule.klaviyoSegment
-    ? snapshotConsentAllowed(consent) && inSegmentSnapshot(profile.properties, rule.klaviyoSegment)
+    ? snapshotConsentAllowed(consent) && (rule.masterMarketing
+      ? inMasterMarketingAudience(profile.properties, rule.klaviyoSegment, rule.masterMarketing.startedAt)
+      : inSegmentSnapshot(profile.properties, rule.klaviyoSegment))
     : standard);
 }
 
@@ -118,6 +129,7 @@ export function resolvedAudienceMatches(
   resolved: ResolvedCampaignAudience,
   now = new Date(),
 ) {
+  if (resolved.master && !matches(profile, resolved.master, now)) return false;
   if (resolved.legacy) return matches(profile, resolved.legacy, now);
   if (resolved.missingKeys.length) return false;
   return (

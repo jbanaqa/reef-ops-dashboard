@@ -1,6 +1,6 @@
 import { FilterXSS } from "xss";
 import { decode } from "he";
-import { inSegmentSnapshot, segmentSnapshot, type SegmentSnapshot } from "./segment-snapshot";
+import { inSegmentSnapshot, inMasterMarketingAudience, segmentSnapshot, type SegmentSnapshot } from "./segment-snapshot";
 import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
 export const channels = [
   "EMAIL",
@@ -522,6 +522,7 @@ export function marketingSettings(
 }
 export type Segment = {
   klaviyoSegment?: SegmentSnapshot;
+  masterMarketing?: { startedAt: string };
   openedDays?: number;
   tag?: string;
   list?: string;
@@ -1153,6 +1154,11 @@ export function segment(value: unknown): Segment {
   const s = (value || {}) as Segment;
   const result: Segment = {};
   if (s.klaviyoSegment) result.klaviyoSegment = segmentSnapshot(s.klaviyoSegment);
+  if (s.masterMarketing) {
+    if (!result.klaviyoSegment || typeof s.masterMarketing.startedAt !== "string" || !Number.isFinite(Date.parse(s.masterMarketing.startedAt)))
+      throw Error("Invalid master marketing audience");
+    result.masterMarketing = { startedAt: s.masterMarketing.startedAt };
+  }
   for (const key of [
     "openedDays",
     "purchasedDays",
@@ -1187,7 +1193,9 @@ export function matches(
   const recent = (d: Date | null, days: number) =>
     !!d && d.getTime() >= now.getTime() - days * DAY && d <= now;
   return (
-    (!s.klaviyoSegment || inSegmentSnapshot(profile.properties, s.klaviyoSegment)) &&
+    (!s.klaviyoSegment || (s.masterMarketing
+      ? inMasterMarketingAudience(profile.properties, s.klaviyoSegment, s.masterMarketing.startedAt)
+      : inSegmentSnapshot(profile.properties, s.klaviyoSegment))) &&
     (!s.openedDays || recent(profile.lastOpenedAt, s.openedDays)) &&
     (!s.tag || profile.tags.includes(s.tag)) &&
     (!s.list || profile.lists.includes(s.list)) &&

@@ -76,6 +76,8 @@ export async function alignMailableSource(source: MailableSource, apply = false)
       where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key: "mailable" } },
     });
     const shopifyReviewAt = (audience.data as { klaviyoSegment?: { shopifyConsentCheckedAt?: string } }).klaviyoSegment?.shopifyConsentCheckedAt;
+    if ((audience.data as { masterMarketing?: unknown }).masterMarketing)
+      throw Error("2025 Mailable Subscribers is now the maintained master audience. Snapshot replacement is disabled.");
     const snapshot = { id: source.id, batch, syncedAt: source.checkedAt,
       ...(shopifyReviewAt ? { shopifyConsentCheckedAt: shopifyReviewAt } : {}) };
     const profiles = await tx.marketingProfile.findMany({ where: { shop: shop(), email: { in: members.map((m) => m.email) } },

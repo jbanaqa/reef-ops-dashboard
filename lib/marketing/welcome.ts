@@ -6,6 +6,7 @@ import { json, record, shop, type Tx } from "./store";
 import { uniqueDiscount, type SavedDiscount } from "./discounts";
 import { welcomeLabels, upgradeWelcomeStep } from "./welcome-config";
 import { resolveWelcomeSocialProducts } from "./campaign-product-feed";
+import { masterAudienceAllows } from "./master-audience";
 
 export type WelcomeRun = {
   profileId: string;
@@ -46,6 +47,7 @@ export async function enrollWelcome(
   config: FlowConfig,
 ) {
   if (!config.welcome) return;
+  if (!(await masterAudienceAllows(tx, shop(), profileId))) return;
   const p = await tx.marketingProfile.findUniqueOrThrow({
     where: { id: profileId },
     include: { consents: true },

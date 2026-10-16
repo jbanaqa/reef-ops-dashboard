@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { getShopifyShopDomain } from "@/lib/shopify";
 import { Prisma } from "@/app/generated/prisma/client";
+import { joinMasterAudience } from "./master-audience";
 import {
   Channel,
   DAY,
@@ -198,6 +199,8 @@ export async function consent(
     create: { profileId, channel, ...data },
     update: data,
   });
+  if (channel === "EMAIL" && status === "SUBSCRIBED" && !data.suppressed)
+    await joinMasterAudience(tx, shop(), profileId, source, occurredAt);
   if (suppress)
     await tx.marketingMessage.updateMany({
       where: { profileId, channel, status: "PENDING" },
@@ -229,11 +232,18 @@ export function segmentWhere(
   now = new Date(),
 ): Prisma.MarketingProfileWhereInput {
   return {
-    ...(audience.klaviyoSegment ? { AND: [
+    ...(audience.klaviyoSegment ? { AND: [audience.masterMarketing ? { OR: [
+      { AND: [
+        { properties: { path: ["klaviyoMailable", "id"], equals: audience.klaviyoSegment.id } },
+        { properties: { path: ["klaviyoMailable", "batch"], equals: audience.klaviyoSegment.batch } },
+        { properties: { path: ["klaviyoMailable", "canReceiveMarketing"], equals: true } },
+      ] },
+      { properties: { path: ["masterMarketing", "startedAt"], equals: audience.masterMarketing.startedAt } },
+    ] } : { AND: [
       { properties: { path: ["klaviyoMailable", "id"], equals: audience.klaviyoSegment.id } },
       { properties: { path: ["klaviyoMailable", "batch"], equals: audience.klaviyoSegment.batch } },
       { properties: { path: ["klaviyoMailable", "canReceiveMarketing"], equals: true } },
-    ] } : {}),
+    ] }] } : {}),
     ...(audience.openedDays
       ? {
           lastOpenedAt: {

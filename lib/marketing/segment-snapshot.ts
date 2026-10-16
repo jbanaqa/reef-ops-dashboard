@@ -24,6 +24,11 @@ export function snapshotConsentAllowed(consent: { status: string; suppressed: bo
   return !consent?.suppressed && (!consent || ["SUBSCRIBED", "NEVER_SUBSCRIBED"].includes(consent.status));
 }
 
+export function inMasterMarketingAudience(properties: unknown, snapshot: SegmentSnapshot, startedAt: string) {
+  const joined = (properties as { masterMarketing?: { startedAt?: string } } | null)?.masterMarketing;
+  return inSegmentSnapshot(properties, snapshot) || joined?.startedAt === startedAt;
+}
+
 /** A later Klaviyo refresh must not erase the user's Shopify consent review. */
 export function refreshedSnapshotProof(properties: unknown, snapshot: SegmentSnapshot) {
   const review = (properties as { klaviyoMailable?: { shopifyConsent?: {

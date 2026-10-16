@@ -1,4 +1,5 @@
 import { cartTestBlock, type CartConfig } from "./cart-config";
+import { customerMarketingFlows, masterAudienceAllows } from "./master-audience";
 import {
   CartRun,
   advanceCart,
@@ -521,6 +522,8 @@ export async function runMarketing(onlyMessageId?: string) {
           ? "Not eligible for this channel"
           : null;
       let deferred: string | null = null;
+      if (m.flowKey && customerMarketingFlows.has(m.flowKey) && !(await masterAudienceAllows(tx, shop(), m.profileId)))
+        reason = "Not in 2025 Mailable Subscribers";
       let deferredUntil: Date | null = null;
       if (m.channel === "EMAIL" ? !m.profile.email : !m.profile.phone)
         reason = "Recipient address missing";
@@ -1283,6 +1286,10 @@ export async function runMarketing(onlyMessageId?: string) {
       }
       const provider =
         message.channel === "EMAIL" ? resendProvider : smsProvider;
+      if (message.flowKey && customerMarketingFlows.has(message.flowKey) && !(await masterAudienceAllows(prisma, shop(), message.profileId))) {
+        await prisma.marketingMessage.update({ where: { id: message.id }, data: { status: "CANCELLED", error: "Not in 2025 Mailable Subscribers" } });
+        continue;
+      }
       if (message.channel === "EMAIL") lastEmailAttempt = Date.now();
       const providerId = await provider.send({
         id: message.id,

@@ -21,6 +21,7 @@ import {
 import { setup } from "@/lib/marketing/delivery";
 import { enroll } from "@/lib/marketing/flows";
 import { validateFlow } from "@/lib/marketing/flow-config";
+import { joinMasterAudience } from "@/lib/marketing/master-audience";
 export const dynamic = "force-dynamic";
 const allowedOrigin = (request: Request) => {
   const origin = request.headers.get("origin");
@@ -279,17 +280,20 @@ export async function POST(request: Request) {
           if (
             existing?.status === "SUBSCRIBED" &&
             p.lists.includes("Mailable Subscribers")
-          )
+          ) {
+            await joinMasterAudience(tx, shop(), p.id, "storefront-single-opt-in-v1", new Date());
             return { completed: true, session };
+          }
           const flow = validateFlow("welcome", welcome.data);
           let timezone = flow.welcome!.fallbackTimezone;
           if (typeof b.timezone === "string") {
             try { new Intl.DateTimeFormat("en", { timeZone: b.timezone }).format(); timezone = b.timezone; } catch {}
           }
           await consent(tx, p.id, "EMAIL", "SUBSCRIBED", "storefront-single-opt-in-v1", new Date());
+          const latestProfile = await tx.marketingProfile.findUniqueOrThrow({ where: { id: p.id } });
           await tx.marketingProfile.update({ where: { id: p.id }, data: {
             lists: [...new Set([...p.lists, "Mailable Subscribers"])],
-            properties: json({ ...(p.properties as object), timezone }),
+            properties: json({ ...(latestProfile.properties as object), timezone }),
           } });
           await record(tx, { key: `subscribed:${session}`, type: "EMAIL_SUBSCRIBED", profileId: p.id,
             payload: { list: "Mailable Subscribers", source: "reef-ops-popup", optIn: "single" } });

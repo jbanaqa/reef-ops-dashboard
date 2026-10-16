@@ -96,9 +96,10 @@ export function emailStatus(
 }
 export function audienceRules(s: Segment) {
   return [
-    s.klaviyoSegment ? "Klaviyo campaign eligibility; local opt-outs and blocks still apply" : "Subscribed to email and not blocked",
-    s.klaviyoSegment && "Aligned from Klaviyo on " + date(s.klaviyoSegment.syncedAt),
-    s.klaviyoSegment?.shopifyConsentCheckedAt && "Only confirmed Shopify email subscribers · checked " + date(s.klaviyoSegment.shopifyConsentCheckedAt),
+    s.masterMarketing ? "Your master marketing audience · new consenting signups join automatically" : s.klaviyoSegment ? "Klaviyo campaign eligibility; local opt-outs and blocks still apply" : "Subscribed to email and not blocked",
+    s.masterMarketing && "Unsubscribes and blocked contacts are excluded. Customer marketing flows require membership.",
+    s.klaviyoSegment && (s.masterMarketing ? "Starting audience aligned on " : "Aligned from Klaviyo on ") + date(s.klaviyoSegment.syncedAt),
+    s.klaviyoSegment?.shopifyConsentCheckedAt && (s.masterMarketing ? "Starting audience consent checked " : "Only confirmed Shopify email subscribers · checked ") + date(s.klaviyoSegment.shopifyConsentCheckedAt),
     s.tag && "Tagged “" + s.tag + "”",
     s.list && "In list “" + s.list + "”",
     s.openedDays && "Opened an email in the last " + s.openedDays + " days",
@@ -302,6 +303,7 @@ function eventLabel(e: Activity) {
     UNSUBSCRIBED: "Unsubscribed",
     EMAIL_SUBSCRIBED: "Joined Mailable Subscribers",
     CONSENT_RECONCILED: "Email subscription restored from verified consent history",
+    MASTER_AUDIENCE_JOINED: "Joined 2025 Mailable Subscribers",
     WELCOME_ENTERED: "Entered the welcome series",
     PROFILE_LIST_REMOVED: "Removed from a Reef Ops audience list",
     FORM_EMAIL_SUBMITTED: "Email signup submitted",
@@ -1478,7 +1480,7 @@ export default function AudienceWorkspace({
             {data?.groups.map((g) => (
               <article className="aw-group-card" key={g.key}>
                 <span className="aw-group-icon">◎</span>
-                <small>{g.data.klaviyoSegment ? "KLAVIYO SEGMENT SNAPSHOT" : g.key.startsWith("klaviyo-list-") ? "LIST" : "DYNAMIC SEGMENT"}</small>
+                <small>{g.data.masterMarketing ? "MASTER MARKETING AUDIENCE" : g.data.klaviyoSegment ? "KLAVIYO SEGMENT SNAPSHOT" : g.key.startsWith("klaviyo-list-") ? "LIST" : "DYNAMIC SEGMENT"}</small>
                 <h3>{g.name}</h3>
                 <ul>
                   {audienceRules(g.data).map((r) => (
