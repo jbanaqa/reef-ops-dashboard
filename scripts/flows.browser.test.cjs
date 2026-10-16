@@ -32,7 +32,7 @@ const { chromium } = require("playwright");
       res.end(css);
     } else
       res.end(
-        '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body style="margin:0;background:#e8efef"><div id="root"></div><script src="/app.js"></script></body></html>',
+        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body style="margin:0;background:#e8efef"><div id="root"></div><script src="/app.js"></script></body></html>',
       );
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -660,6 +660,52 @@ const { chromium } = require("playwright");
     await page.getByRole("button", { name: "← All flows", exact: true }).click();
     await page.getByLabel("Find a workflow", { exact: true }).fill("Welcome Series");
     await page.getByRole("button", { name: "Open Welcome Series 08.2025", exact: true }).click();
+    const activityRequests = [];
+    await page.route("**/api/marketing?view=welcome-activity**", async (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      activityRequests.push(params.toString());
+      const q = params.get("q") || "";
+      if (q === "error") return route.fulfill({ status: 500, json: { error: "Activity temporarily unavailable" } });
+      const second = !!params.get("cursor");
+      const empty = q === "nobody";
+      const at = "2026-10-16T03:24:00.000Z";
+      await route.fulfill({ json: {
+        liveSince: "2026-10-16T03:22:00.000Z", totals: { joined: empty ? 0 : 2, sent: 1, waiting: 1, attention: 0 },
+        rows: empty ? [] : [{ id: second ? "entry-2" : "entry-1", triggeredAt: at, signupAt: at,
+          profile: { id: "profile-1", email: second ? "next-reefer@example.com" : "new-reefer@example.com", name: "New Reefer" },
+          messages: [{ id: "welcome-1", flowStep: 0, status: "SENT", dueAt: at, sentAt: at, error: null,
+            events: [{ type: "DELIVERED", occurredAt: at }, { type: "OPENED", occurredAt: at }] },
+            { id: "welcome-2", flowStep: 1, status: "PENDING", dueAt: "2026-10-19T03:24:00.000Z", sentAt: null, error: null, events: [] }],
+        }], nextCursor: empty || second ? null : "entry-1",
+      } });
+    });
+    const activity = page.locator(".fw-welcome-activity");
+    await activity.locator(":scope > summary").click();
+    await activity.getByText("new-reefer@example.com", { exact: true }).waitFor();
+    assert.ok(activityRequests[0].includes("scope=live"));
+    await activity.locator(".fw-welcome-entry > summary").click();
+    await activity.getByText("Welcome · 10% off", { exact: true }).waitFor();
+    assert.ok(await activity.getByText(/Opened Oct 15/).isVisible());
+    await activity.getByRole("button", { name: "Next", exact: true }).click();
+    await activity.getByText("next-reefer@example.com", { exact: true }).waitFor();
+    await activity.getByRole("button", { name: "Previous", exact: true }).click();
+    await activity.getByText("new-reefer@example.com", { exact: true }).waitFor();
+    await activity.getByLabel("Search customers", { exact: true }).fill("nobody");
+    await activity.getByText("No customer Welcome signups match this view yet.").waitFor();
+    await activity.getByLabel("Search customers", { exact: true }).fill("error");
+    await activity.getByRole("alert").waitFor();
+    await activity.getByLabel("Search customers", { exact: true }).fill("");
+    await activity.getByText("new-reefer@example.com", { exact: true }).waitFor();
+    await activity.getByLabel("Activity period", { exact: true }).selectOption("all");
+    await activity.getByText("new-reefer@example.com", { exact: true }).waitFor();
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await activity.locator(".fw-welcome-entry").evaluate((element) => { element.open = true; });
+      await activity.getByText(/Opened Oct 15/).waitFor();
+      await activity.screenshot({ path: path.join(output, `welcome-activity-${width}.png`) });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Welcome activity fits " + width);
+    }
+    await activity.locator(":scope > summary").click();
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByText("Day 10", { exact: true }).waitFor();
     const welcomeMap = page.locator(".mk-welcome-map");

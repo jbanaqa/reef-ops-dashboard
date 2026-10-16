@@ -49,6 +49,7 @@ import {
 } from "@/lib/marketing/rules";
 import { resendProvider, setup } from "@/lib/marketing/delivery";
 import { processMarketingInbox, inboxUnresolved, ingestionEnabled } from "@/lib/marketing/inbox";
+import { welcomeActivity } from "@/lib/marketing/welcome-activity";
 import { audienceDirectory, contactDetails } from "@/lib/marketing/audiences";
 import { runMarketing } from "@/lib/marketing/worker";
 import { importProfiles } from "@/lib/marketing/ingest";
@@ -563,6 +564,8 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url),
       view = url.searchParams.get("view") || "overview";
+    if (view === "welcome-activity")
+      return Response.json(await welcomeActivity(url), { headers: { "Cache-Control": "no-store" } });
     if (view === "cart-report")
       return Response.json(await cartReport(), {
         headers: { "Cache-Control": "no-store" },

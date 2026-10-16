@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import FlowEditor from "./FlowEditor";
 import LowStockEditor from "./LowStockEditor";
+import WelcomeActivity from "./WelcomeActivity";
 import { flowSequence, type FlowConfig } from "@/lib/marketing/flow-config";
 import type { Content, MarketingSettings } from "@/lib/marketing/rules";
 export type FlowResource = {
@@ -209,6 +210,7 @@ export default function FlowsWorkspace({
               {selectedTestTarget && selected.enabled ? "Test only" : statusLabels[status!]}
             </span>
           </div>
+          {selected.key === "welcome" && <WelcomeActivity key={selected.id} />}
           {selected.key !== "low-stock" && (
             <details className="fw-test-panel" aria-label="Test this flow">
               <summary>Test this flow</summary>

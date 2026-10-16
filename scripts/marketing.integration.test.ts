@@ -4543,6 +4543,70 @@ test("365-day master engagement expires automatically and opens renew eligibilit
   } finally { process.env.SHOPIFY_SHOP_DOMAIN = previousShop; }
 });
 
+test("Welcome activity lists timestamped live customer enrollments with bounded history and no delivery secrets", async () => {
+  const previousShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  process.env.SHOPIFY_SHOP_DOMAIN = "welcome-activity.myshopify.com";
+  const currentShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  try {
+    const { welcomeActivity } = await import("../lib/marketing/welcome-activity");
+    const activation = new Date(Date.now() - 10000);
+    await prisma.marketingEvent.create({ data: { shop: currentShop, key: "welcome-enabled:activity-test", type: "CONFIG_CHANGED", occurredAt: activation } });
+    const profiles = [];
+    for (let index = 0; index < 30; index++) {
+      const profile = await prisma.marketingProfile.create({ data: { shop: currentShop, name: `Activity customer ${index}`, email: `welcome-activity-${index}@example.com` } });
+      profiles.push(profile);
+      const entryAt = new Date(+activation + (index === 28 ? -100 : 100 + index));
+      await prisma.marketingEvent.create({ data: {
+        shop: currentShop, key: `welcome-entry-${index}`, type: "WELCOME_ENTERED", profileId: profile.id,
+        createdAt: entryAt, occurredAt: index === 0 ? new Date(+activation - 86400000) : entryAt,
+        payload: index === 27 ? {} : { test: index === 29 },
+      } });
+      if (index < 27) await prisma.marketingMessage.create({ data: {
+        shop: currentShop, profileId: profile.id, key: `activity-message-${index}`, flowKey: "welcome", flowStep: 0,
+        channel: "EMAIL", subject: "Welcome", content: { ...defaultContent, body: "PRIVATE_EMAIL_CONTENT" },
+        status: index < 2 ? "SENT" : index === 2 ? "FAILED" : "PENDING",
+        sentAt: index < 2 ? entryAt : null, dueAt: entryAt,
+        token: `PRIVATE_UNSUBSCRIBE_TOKEN_${index}`, providerId: `PRIVATE_PROVIDER_ID_${index}`,
+        error: index === 2 ? "Provider rejected request" : null,
+      } });
+    }
+    const message = await prisma.marketingMessage.findUniqueOrThrow({ where: { key: "activity-message-0" } });
+    for (const [index, type] of ["DELIVERED", "DELIVERED", "OPENED"].entries())
+      await prisma.marketingEvent.create({ data: { shop: currentShop, key: `activity-event-${index}`, profileId: profiles[0].id, messageId: message.id, type, occurredAt: new Date(+activation + 1000 + index) } });
+    const url = (suffix = "") => new URL("https://app.example/api/marketing?view=welcome-activity" + suffix);
+    const first = await welcomeActivity(url());
+    assert.equal(first.liveSince, activation.toISOString());
+    assert.deepEqual(first.totals, { joined: 28, sent: 2, waiting: 24, attention: 1 });
+    assert.equal(first.rows.length, 25);
+    assert.ok(first.nextCursor);
+    const second = await welcomeActivity(url("&cursor=" + first.nextCursor));
+    assert.equal(second.rows.length, 3);
+    assert.equal(second.nextCursor, null);
+    assert.equal(new Set([...first.rows, ...second.rows].map((row) => row.id)).size, 28);
+    const searched = await welcomeActivity(url("&q=welcome-activity-0%40example.com"));
+    assert.equal(searched.totals.joined, 1);
+    assert.equal(searched.rows[0].profile?.id, profiles[0].id);
+    assert.ok(searched.rows[0].signupAt < activation, "late processed signups are included based on actual enrollment time");
+    assert.ok(searched.rows[0].triggeredAt > activation);
+    assert.deepEqual(searched.rows[0].messages[0].events.map((event) => event.type), ["DELIVERED", "OPENED"]);
+    assert.doesNotMatch(JSON.stringify(searched), /PRIVATE_EMAIL_CONTENT|PRIVATE_UNSUBSCRIBE_TOKEN|PRIVATE_PROVIDER_ID/);
+    assert.equal((await welcomeActivity(url("&scope=all"))).totals.joined, 29, "old customers are available separately, tests remain excluded");
+    await assert.rejects(welcomeActivity(url("&scope=invalid")), /valid activity period/);
+    const foreign = await prisma.marketingEvent.create({ data: { shop: "elsewhere.myshopify.com", key: "foreign-entry", type: "WELCOME_ENTERED", occurredAt: new Date() } });
+    await assert.rejects(welcomeActivity(url("&cursor=" + foreign.id)), /first page/);
+    const api = await import("../app/api/marketing/route");
+    assert.equal((await api.GET(new Request(url()))).status, 401);
+    process.env.DASHBOARD_USERNAME = "staff";
+    process.env.DASHBOARD_PASSWORD = "test-password";
+    const response = await api.GET(new Request(url("&q=welcome-activity-0%40example.com"), { headers: { authorization: "Basic " + Buffer.from("staff:test-password").toString("base64") } }));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    process.env.SHOPIFY_SHOP_DOMAIN = "no-welcome-activation.myshopify.com";
+    assert.equal((await welcomeActivity(url())).totals.joined, 0);
+    assert.equal((await welcomeActivity(url())).liveSince, null);
+  } finally { process.env.SHOPIFY_SHOP_DOMAIN = previousShop; }
+});
+
 test("maintained master audience preserves reviewed members, admits new consent before Welcome, and gates flow sends", async () => {
  const oldShop=process.env.SHOPIFY_SHOP_DOMAIN;
  process.env.SHOPIFY_SHOP_DOMAIN="master-marketing.myshopify.com";

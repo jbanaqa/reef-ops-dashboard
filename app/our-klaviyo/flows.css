@@ -6,6 +6,45 @@
   font-size: 14px;
   min-width: 0;
 }
+.fw-welcome-activity {
+  margin: 18px 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text-main);
+}
+.fw-welcome-activity > summary { cursor: pointer; font-size: 16px; font-weight: 650; }
+.fw-welcome-activity > summary span { margin-left: 10px; font-size: 13px; font-weight: 400; color: var(--text-muted); }
+.fw-welcome-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; margin-top: 20px; }
+.fw-welcome-toolbar label { display: grid; gap: 7px; flex: 1 1 180px; margin: 0; }
+.fw-welcome-toolbar input, .fw-welcome-toolbar select { width: 100%; min-width: 0; }
+.fw-welcome-caption { margin: 14px 0; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+.fw-welcome-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+.fw-welcome-stats div { padding: 14px; border-radius: 9px; background: var(--surface-muted); }
+.fw-welcome-stats dt { color: var(--text-muted); font-size: 12px; }
+.fw-welcome-stats dd { margin: 6px 0 0; font-size: 24px; font-weight: 650; }
+.fw-welcome-entry { padding: 16px 0; border-top: 1px solid var(--border); }
+.fw-welcome-entry > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; cursor: pointer; }
+.fw-welcome-entry > summary::before { content: "›"; font-size: 22px; line-height: 1; }
+.fw-welcome-entry[open] > summary::before { transform: rotate(90deg); }
+.fw-welcome-entry > summary > span:first-child { flex: 1 1 200px; min-width: 0; }
+.fw-welcome-entry strong { overflow-wrap: anywhere; }
+.fw-welcome-entry > summary > span:first-child > span { display: block; margin-top: 5px; color: var(--text-muted); font-size: 12px; }
+.fw-welcome-entry time { font-size: 12px; color: var(--text-muted); }
+.fw-welcome-message-status { padding: 5px 10px; border-radius: 20px; background: var(--surface-muted); font-size: 12px; }
+.fw-welcome-messages { display: grid; gap: 12px; margin: 16px 0; padding-left: 22px; }
+.fw-welcome-messages li { padding: 12px; background: var(--surface-muted); border-radius: 8px; }
+.fw-welcome-messages li > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.fw-welcome-messages p { margin: 6px 0 0; font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.fw-welcome-pagination { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+.fw-welcome-pagination > span { margin-right: auto; font-size: 12px; color: var(--text-muted); }
+@media (max-width: 600px) {
+  .fw-welcome-activity { padding: 16px; }
+  .fw-welcome-activity > summary span { display: block; margin: 6px 0 0; }
+  .fw-welcome-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .fw-welcome-entry > summary { gap: 10px; }
+}
 .fw-intro {
   display: flex;
   justify-content: space-between;
