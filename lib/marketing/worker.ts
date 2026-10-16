@@ -19,7 +19,7 @@ import {
   eligible,
   marketingSettings,
 } from "./rules";
-import { DeliveryError, resendProvider, setup, smsProvider } from "./delivery";
+import { DeliveryError, checkEmailBeforeSending, resendProvider, setup, smsProvider } from "./delivery";
 import { lowStock, stockStateKey } from "./stock";
 import {
   validateStock,
@@ -1036,6 +1036,7 @@ export async function runMarketing(onlyMessageId?: string) {
     if (!claimed) continue;
     const { message, settings } = claimed;
     try {
+      if (message.channel === "EMAIL") await checkEmailBeforeSending(message.profile.email!);
       if (welcomeRun) {
         try {
           const readyKey = {
@@ -1336,13 +1337,15 @@ export async function runMarketing(onlyMessageId?: string) {
           data: {
             status: e.uncertain
               ? "UNKNOWN"
-              : e.retryable && message.attempts < 6
+              : e.addressCheck && !e.retryable
+                ? "CANCELLED"
+              : e.retryable && (e.addressCheck || message.attempts < 6)
                 ? "PENDING"
                 : "FAILED",
             error: e.message,
             dueAt: new Date(
               Date.now() +
-                Math.max(60000 * 2 ** message.attempts, e.retryAfterMs),
+                (e.addressCheck ? 300000 : Math.max(60000 * 2 ** message.attempts, e.retryAfterMs)),
             ),
           },
         });

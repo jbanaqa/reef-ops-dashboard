@@ -508,6 +508,8 @@
           '<button class="reef-signup-submit" type="submit">Continue</button></form>';
         if (singleOptIn) panel.querySelector("p").textContent = "Sign up for emails and get 10% off your first order. Your personal offer lasts " + couponDays + " days.";
         const form = panel.querySelector("form");
+        let confirmedAddress = "";
+        form.elements.email.addEventListener("input", () => { confirmedAddress = ""; status.textContent = ""; });
         form.onsubmit = async (e) => {
           e.preventDefault();
           const button = form.querySelector("button");
@@ -517,10 +519,37 @@
             const result = await post({
               action: "signup",
               email: f.get("email"),
+              confirmEmailDomain: confirmedAddress,
               emailConsent: f.get("consent") === "on",
               website: f.get("website"),
               timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             });
+            if (result.emailSuggestion) {
+              status.textContent = "Check your email address: ";
+              const suggestion = document.createElement("button");
+              suggestion.type = "button";
+              suggestion.textContent = "Use " + result.emailSuggestion;
+              suggestion.onclick = () => {
+                form.elements.email.value = result.emailSuggestion;
+                confirmedAddress = "";
+                status.textContent = "";
+                form.requestSubmit();
+              };
+              const keep = document.createElement("button");
+              keep.type = "button";
+              keep.textContent = "Keep my address";
+              keep.onclick = () => {
+                confirmedAddress = String(f.get("email")).trim().toLowerCase();
+                status.textContent = "";
+                form.requestSubmit();
+              };
+              for (const choice of [suggestion, keep]) {
+                choice.style.cssText = "display:block;margin-top:8px;min-height:44px;padding:8px 12px;border:1px solid #b7cbd1;border-radius:8px;background:white;color:#173e4b;cursor:pointer;width:100%;overflow-wrap:anywhere";
+                status.append(choice);
+              }
+              button.disabled = false;
+              return;
+            }
             if (result.completed) {
               finish();
               panel.textContent = "Thanks for joining our reefing community!";

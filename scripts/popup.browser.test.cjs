@@ -173,7 +173,36 @@ const { chromium } = require("playwright");
     assert.equal(await cookies.locator("dialog.reef-signup-dialog[open]").count(), 0, "cookie fallback remembers dismissal");
     assert.ok(await cookies.locator(".reef-signup-launcher").isVisible());
     await cookies.close();
-    console.log("Popup browser checks passed at desktop, 390, 375 (including short screens), and 320 pixels.");
+    for (const width of [390, 320]) {
+      const page = await browser.newPage({ viewport: { width, height: 700 } });
+      await page.goto(url);
+      await page.locator("dialog.reef-signup-dialog").waitFor();
+      await page.evaluate(() => {
+        const original = window.fetch;
+        window.signupChecks = [];
+        window.fetch = async (url, init) => {
+          const body = JSON.parse(init.body);
+          if (body.action !== "signup") return original(url, init);
+          window.signupChecks.push(body);
+          return Response.json(window.signupChecks.length === 1
+            ? { emailSuggestion: "test@gmail.com" }
+            : { completed: true, message: "Offer queued." });
+        };
+      });
+      await page.getByRole("textbox", { name: "Email", exact: true }).fill("test@gmial.com");
+      await page.locator('[name="consent"]').check();
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.getByRole("button", { name: "Keep my address", exact: true }).waitFor();
+      assert.equal(await page.locator('[name="email"]').inputValue(), "test@gmial.com");
+      assert.ok(await page.evaluate(() => document.querySelector("dialog").scrollWidth <= document.querySelector("dialog").clientWidth));
+      await page.getByRole("button", { name: "Use test@gmail.com", exact: true }).scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(screenshots, `popup-email-suggestion-${width}.png`) });
+      await page.getByRole("button", { name: "Use test@gmail.com", exact: true }).click();
+      await page.getByText("Thanks for joining our reefing community!").waitFor();
+      assert.equal(await page.evaluate(() => window.signupChecks[1].email), "test@gmail.com");
+      await page.close();
+    }
+    console.log("Popup browser checks passed at desktop, 390, 375 (including short screens), and 320 pixels, including email correction.");
     console.log("Screenshots:", screenshots);
   } finally {
     await browser?.close();

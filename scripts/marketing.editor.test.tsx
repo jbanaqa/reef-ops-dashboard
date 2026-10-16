@@ -81,6 +81,46 @@ test("single-opt-in popup submits consent and finishes without a confirmation or
   } finally { popup.window.close(); }
 });
 
+test("signup typo suggestions require an explicit correction or confirmation and never silently change an email", async () => {
+  for (const choice of ["correct", "keep"]) {
+    const popup = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://store.example", runScripts: "dangerously" });
+    const w = popup.window;
+    w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+    const nativeTimeout = w.setTimeout.bind(w);
+    w.setTimeout = ((handler: TimerHandler) => nativeTimeout(handler, 0)) as typeof w.setTimeout;
+    const requests: Record<string, unknown>[] = [];
+    w.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.action === "config") return Response.json({ enabled: true, singleOptIn: true });
+      if (body.action !== "signup") return Response.json({ ok: true });
+      requests.push(body);
+      if (requests.length === 1) return Response.json({ emailSuggestion: "test@gmail.com" });
+      return Response.json({ completed: true });
+    };
+    try {
+      const script = w.document.createElement("script");
+      script.dataset.endpoint = "https://app.example/api/marketing/storefront";
+      script.textContent = await readFile("public/reef-marketing.js", "utf8");
+      w.document.body.append(script);
+      const { waitFor } = await import("@testing-library/react");
+      await waitFor(() => assert.ok(w.document.querySelector("form")));
+      w.document.querySelector<HTMLInputElement>('[name="email"]')!.value = "test@gmial.com";
+      w.document.querySelector<HTMLInputElement>('[name="consent"]')!.checked = true;
+      w.document.querySelector("form")!.dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
+      await waitFor(() => assert.match(w.document.body.textContent!, /Keep my address/));
+      assert.equal(requests.length, 1);
+      assert.equal(w.document.querySelector<HTMLInputElement>('[name="email"]')!.value, "test@gmial.com");
+      const button = [...w.document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === (choice === "correct" ? "Use test@gmail.com" : "Keep my address"))!;
+      button.click();
+      await waitFor(() => assert.equal(w.localStorage.getItem("reef-marketing-submitted"), "1"));
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1].email, choice === "correct" ? "test@gmail.com" : "test@gmial.com");
+      assert.equal(requests[1].emailConsent, true);
+      assert.equal(requests[1].confirmEmailDomain, choice === "keep" ? "test@gmial.com" : "");
+    } finally { w.close(); }
+  }
+});
+
 test("dismissed visitors can reopen signup; cross-tab signup removes both controls", async () => {
   const popup = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://store.example", runScripts: "dangerously" });
   const w = popup.window;

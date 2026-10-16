@@ -80,7 +80,10 @@ export async function welcomeActivity(url: URL) {
   const attention = await prisma.marketingEvent.count({ where: { AND: [where, { OR: [
     { profileId: { in: deliveryIssues } },
     { profile: { is: { messages: { some: {
-      shop: shop(), flowKey: "welcome", status: { in: ["FAILED", "UNKNOWN"] },
+      shop: shop(), flowKey: "welcome", OR: [
+        { status: { in: ["FAILED", "UNKNOWN"] } },
+        { status: "CANCELLED", error: { startsWith: "Email check:" } },
+      ],
     } } } } },
   ] }] } });
   const rows = page.slice(0, 25);

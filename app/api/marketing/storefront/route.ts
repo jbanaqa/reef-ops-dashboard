@@ -3,6 +3,8 @@ import {
   newConfirmation,
 } from "@/lib/marketing/confirmation";
 import crypto from "node:crypto";
+import { screenEmail } from "@/lib/marketing/email-screen";
+import { emailSuggestion, normalizeEmail } from "@/lib/marketing/email-address";
 import { prisma } from "@/lib/prisma";
 import {
   atomic,
@@ -14,7 +16,6 @@ import {
 } from "@/lib/marketing/store";
 import {
   defaultContent,
-  email,
   marketingSettings,
   phone,
 } from "@/lib/marketing/rules";
@@ -161,9 +162,17 @@ export async function POST(request: Request) {
         throw new Error("Signup is temporarily unavailable.");
       if (b.emailConsent !== true)
         throw new Error("Email marketing consent is required.");
-      const address = email(b.email),
+      const address = normalizeEmail(b.email),
         session = crypto.randomUUID(),
         confirmation = newConfirmation();
+      const suggestion = emailSuggestion(address);
+      if (suggestion && b.confirmEmailDomain !== address)
+        return reply({ emailSuggestion: suggestion });
+      const screened = await screenEmail(address);
+      if (screened.status !== "allowed")
+        return reply({ error: screened.status === "invalid"
+          ? "This email domain cannot receive mail. Please check your address."
+          : "We couldn’t check your email domain right now. Please try again shortly." }, screened.status === "invalid" ? 400 : 503);
       const result = await atomic(async (tx) => {
         const p = await identify(tx, { email: address });
         const existing = await tx.marketingConsent.findUnique({

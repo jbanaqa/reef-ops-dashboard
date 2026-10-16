@@ -10,6 +10,7 @@ import {
   defaultGeneratedEmailCopy,
   personalize,
 } from "./rules";
+import { screenEmail } from "./email-screen";
 
 export type Delivery = {
   id: string;
@@ -153,12 +154,19 @@ export class DeliveryError extends Error {
     public uncertain = false,
     public retryable = false,
     public retryAfterMs = 0,
+    public addressCheck = false,
   ) {
     super(message);
   }
 }
+export async function checkEmailBeforeSending(address: string) {
+  const result = await screenEmail(address);
+  if (result.status !== "allowed")
+    throw new DeliveryError("Email check: " + result.reason, false, result.status === "temporary", 300000, true);
+}
 export const resendProvider: DeliveryProvider = {
   async send(m) {
+    await checkEmailBeforeSending(m.to);
     const key = process.env.RESEND_API_KEY,
       from = process.env.RESEND_FROM_EMAIL,
       address = m.address || process.env.MARKETING_POSTAL_ADDRESS,

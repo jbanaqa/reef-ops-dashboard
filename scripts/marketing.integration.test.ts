@@ -1,4 +1,5 @@
-import test, { before, after } from "node:test";
+import test, { before, after, mock } from "node:test";
+import { Resolver } from "node:dns/promises";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import crypto from "node:crypto";
@@ -39,6 +40,12 @@ let klaviyoPages: Record<string, unknown>[] = [];
 const shopifyUnsubscribeUpdates: Record<string, unknown>[] = [];
 let shopifyUnsubscribeUnavailable = false;
 before(async () => {
+  // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
+  mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {
+    if (domain === "invalid-mail.example") throw Object.assign(new Error("No domain"), { code: "ENOTFOUND" });
+    if (domain === "temporary-mail.example") throw Object.assign(new Error("DNS outage"), { code: "ESERVFAIL" });
+    return [{ exchange: "mx.fixture.example", priority: 10 }];
+  });
   console.log("integration: creating isolated database");
   db = await PGlite.create();
   console.log("integration: applying migrations");
@@ -141,6 +148,7 @@ before(async () => {
   });
 });
 after(async () => {
+  mock.restoreAll();
   globalThis.fetch = originalFetch;
   await prisma?.$disconnect();
   await server?.stop();
@@ -4687,6 +4695,45 @@ test("maintained master audience preserves reviewed members, admits new consent 
   const {alignMailableSource}=await import("../lib/marketing/mailable-alignment");
   await assert.rejects(alignMailableSource({id:"Rr5yRa",name:"2025 Mailable Subscribers",checkedAt:new Date().toISOString(),members:[{id:"source",email:seeded.email!,canReceiveMarketing:true}]}),/maintained master audience/);
  }finally{process.env.SHOPIFY_SHOP_DOMAIN=oldShop;}
+});
+
+test("free email screening blocks invalid signup/send domains, retries DNS outages and preserves consent", async () => {
+  const previousShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  const currentShop = "email-screen.myshopify.com";
+  process.env.SHOPIFY_SHOP_DOMAIN = currentShop;
+  try {
+    await store.seed();
+    await prisma.marketingResource.create({ data: { shop: currentShop, kind: "SETTINGS", key: "global", name: "Settings", data: { postalAddress: "123 Test Street", operations: { sendingEnabled: true, ingestEnabled: true, migrationConfirmed: true, formEnabled: true } } } });
+    const flow = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: currentShop, kind: "FLOW", key: "welcome" } } });
+    await prisma.marketingResource.update({ where: { id: flow.id }, data: { enabled: true, data: store.json({ ...(flow.data as object), reviewed: true }) } });
+    const { POST } = await import("../app/api/marketing/storefront/route");
+    const signup = (email: string, extra = {}) => POST(new Request("https://app.example/api/marketing/storefront", { method: "POST", headers: { origin: "https://store.example" }, body: JSON.stringify({ action: "signup", email, emailConsent: true, anonymousId: crypto.randomUUID(), ...extra }) }));
+    assert.equal((await signup("reef@invalid-mail.example")).status, 400);
+    assert.equal((await signup("reef@temporary-mail.example")).status, 503);
+    const suggested = await signup("reef@gmial.com");
+    assert.equal((await suggested.json()).emailSuggestion, "reef@gmail.com");
+    assert.equal(await prisma.marketingProfile.count({ where: { shop: currentShop } }), 0, "validation and suggestions must not create profiles, consent or Welcome runs");
+    assert.equal((await signup("reef@gmial.com", { confirmEmailDomain: "reef@gmial.com" })).status, 200, "visitor can explicitly keep a routable domain");
+    await prisma.marketingMessage.updateMany({ where: { shop: currentShop }, data: { status: "CANCELLED" } });
+    const campaign = await prisma.marketingCampaign.create({ data: { shop: currentShop, name: "Email checks", subject: "Email checks", content: store.json(defaultContent), audience: {}, status: "SENDING", recipientMode: "SCHEDULE_TIME", smartSendingHours: 0 } });
+    const before = sent.length;
+    for (const [label, domain] of [["invalid", "invalid-mail.example"], ["temporary", "temporary-mail.example"], ["valid", "gmail.com"]]) {
+      await prisma.marketingCampaign.update({ where: { id: campaign.id }, data: { status: "SENDING" } });
+      const profile = await prisma.marketingProfile.create({ data: { shop: currentShop, email: `screen-${label}@${domain}`, consents: { create: { channel: "EMAIL", status: "SUBSCRIBED", suppressed: false, source: "test", occurredAt: new Date() } } } });
+      const consentBefore = await prisma.marketingConsent.findUniqueOrThrow({ where: { profileId_channel: { profileId: profile.id, channel: "EMAIL" } } });
+      const message = await prisma.marketingMessage.create({ data: { shop: currentShop, key: `screen-${label}`, profileId: profile.id, campaignId: campaign.id, channel: "EMAIL", subject: "Email checks", content: store.json(defaultContent), dueAt: new Date(), attempts: label === "temporary" ? 9 : 0 } });
+      await worker.runMarketing();
+      const updated = await prisma.marketingMessage.findUniqueOrThrow({ where: { id: message.id } });
+      assert.equal(updated.status, label === "invalid" ? "CANCELLED" : label === "temporary" ? "PENDING" : "SENT", updated.error || label);
+      if (label !== "valid") { assert.match(updated.error!, /Email check:/); assert.equal(updated.providerId, null); }
+      if (label === "temporary") assert.ok(updated.dueAt.getTime() > Date.now());
+      assert.deepEqual(await prisma.marketingConsent.findUniqueOrThrow({ where: { profileId_channel: { profileId: profile.id, channel: "EMAIL" } } }), consentBefore);
+    }
+    assert.equal(sent.length, before + 1, "only the valid domain reaches Resend");
+    const { resendProvider, DeliveryError } = await import("../lib/marketing/delivery");
+    await assert.rejects(resendProvider.send({ id: "preview-screen", to: "reef@invalid-mail.example", channel: "EMAIL", subject: "Preview", content: defaultContent, unsubscribe: "https://app.example/unsubscribe", internalPreview: true }), (e: unknown) => e instanceof DeliveryError && e.addressCheck && !e.uncertain);
+    assert.equal(sent.length, before + 1, "direct preview also uses the final provider guard");
+  } finally { process.env.SHOPIFY_SHOP_DOMAIN = previousShop; }
 });
 
 test("Shopify audience exclusions survive Klaviyo refresh and block frozen campaigns without altering other audiences", async () => {
