@@ -216,7 +216,9 @@ export function audienceWhere(
         ...(channel === "EMAIL"
           ? { email: { not: null } }
           : { phone: { not: null } }),
-        consents: { some: { channel, status: "SUBSCRIBED", suppressed: false } },
+        ...(channel === "EMAIL" && audience.klaviyoSegment
+          ? { consents: { none: { channel, OR: [{ suppressed: true }, { status: { notIn: ["SUBSCRIBED", "NEVER_SUBSCRIBED"] } }] } } }
+          : { consents: { some: { channel, status: "SUBSCRIBED", suppressed: false } } }),
       },
       segmentWhere(audience, now),
     ],
@@ -227,6 +229,11 @@ export function segmentWhere(
   now = new Date(),
 ): Prisma.MarketingProfileWhereInput {
   return {
+    ...(audience.klaviyoSegment ? { AND: [
+      { properties: { path: ["klaviyoMailable", "id"], equals: audience.klaviyoSegment.id } },
+      { properties: { path: ["klaviyoMailable", "batch"], equals: audience.klaviyoSegment.batch } },
+      { properties: { path: ["klaviyoMailable", "canReceiveMarketing"], equals: true } },
+    ] } : {}),
     ...(audience.openedDays
       ? {
           lastOpenedAt: {

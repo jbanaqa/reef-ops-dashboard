@@ -4273,3 +4273,81 @@ test("campaign content is shared, compactable and delivered without expanding re
   } finally { process.env.SHOPIFY_SHOP_DOMAIN = priorShop; }
 });
 registerWelcomeTests(() => ({ prisma, store, worker }));
+
+test("direct mailable alignment is scoped, atomic, and preserves consent while campaigns use source eligibility", async () => {
+  const previousShop=process.env.SHOPIFY_SHOP_DOMAIN;
+  process.env.SHOPIFY_SHOP_DOMAIN="alignment.myshopify.com";
+  const currentShop=process.env.SHOPIFY_SHOP_DOMAIN;
+  try {
+    const {alignMailableSource}=await import("../lib/marketing/mailable-alignment");
+    const {resolveCampaignAudience,resolvedAudienceWhere,campaignConsentEligible}=await import("../lib/marketing/campaign-audience");
+    const {eligible}=await import("../lib/marketing/rules");
+    await store.seed();
+    const settings=await prisma.marketingResource.create({data:{shop:currentShop,kind:"SETTINGS",key:"global",name:"Settings",data:{postalAddress:"123 Test Street",operations:{sendingEnabled:false,ingestEnabled:true,migrationConfirmed:true}}}});
+    const profiles=[];
+    for(let i=0;i<7;i++) profiles.push(await prisma.marketingProfile.create({data:{shop:currentShop,email:`aligned-${i}@example.com`,properties:{keep:"original"},lists:i===6?["VIP"]:[],consents:i===2?undefined:{create:{channel:"EMAIL",status:i===3?"UNSUBSCRIBED":i===1||i===6?"NEVER_SUBSCRIBED":"SUBSCRIBED",suppressed:i===3||i===4,source:"original",occurredAt:new Date()}}}}));
+    const consentsBefore=await prisma.marketingConsent.findMany({where:{profile:{shop:currentShop}},orderBy:{id:"asc"}});
+    const untouchedBefore=await prisma.marketingProfile.findMany({where:{id:{in:profiles.slice(5).map(p=>p.id)}},orderBy:{id:"asc"}});
+    const unrelatedBefore=await prisma.marketingResource.findMany({where:{shop:currentShop,NOT:{kind:"SEGMENT",key:"mailable"}},orderBy:{id:"asc"}});
+    const source={id:"Rr5yRa",name:"2025 Mailable Subscribers",checkedAt:new Date().toISOString(),members:profiles.slice(0,5).map((p,i)=>({id:`k-${i}`,email:p.email!,canReceiveMarketing:true}))};
+    const dry=await alignMailableSource(source);
+    assert.equal(dry.eligible,3);assert.equal(dry.locallyBlocked,2);assert.equal(dry.importedProfiles,0);
+    assert.deepEqual((await prisma.marketingProfile.findUniqueOrThrow({where:{id:profiles[1].id}})).properties,{keep:"original"});
+    await assert.rejects(alignMailableSource({...source,members:[...source.members,{id:"missing",email:"not-imported@example.com",canReceiveMarketing:true}]},true),/missing locally/);
+    await assert.rejects(alignMailableSource({...source,members:source.members.map(m=>({...m,canReceiveMarketing:false}))},true),/marketability evidence/);
+    const applied=await alignMailableSource(source,true);assert.equal(applied.eligible,3);
+    assert.deepEqual(await prisma.marketingConsent.findMany({where:{profile:{shop:currentShop}},orderBy:{id:"asc"}}),consentsBefore);
+    assert.deepEqual(await prisma.marketingProfile.findMany({where:{id:{in:profiles.slice(5).map(p=>p.id)}},orderBy:{id:"asc"}}),untouchedBefore);
+    assert.deepEqual(await prisma.marketingResource.findMany({where:{id:{in:unrelatedBefore.map(r=>r.id)}},orderBy:{id:"asc"}}),unrelatedBefore);
+    assert.equal(await prisma.marketingMessage.count({where:{shop:currentShop}}),0);
+    const audience={version:2,includeKeys:["mailable"],excludeKeys:[]};
+    const resolved=await resolveCampaignAudience(prisma,audience);
+    assert.equal(await prisma.marketingProfile.count({where:resolvedAudienceWhere(resolved)}),3);
+    assert.equal(await prisma.marketingProfile.count({where:store.audienceWhere({list:"VIP"})}),0,"proof does not grant other list eligibility");
+    const never=await prisma.marketingProfile.findUniqueOrThrow({where:{id:profiles[1].id},include:{consents:true}});
+    assert.equal(eligible(never.consents[0]),false,"flow consent is unchanged");
+    assert.equal(campaignConsentEligible(never,resolved),true);
+    assert.equal(campaignConsentEligible(never,{...resolved,includes:[{list:"VIP"}]}),false);
+    assert.equal(campaignConsentEligible(never,resolved,"SMS_MARKETING"),false);
+    const {audienceDirectory}=await import("../lib/marketing/audiences");
+    assert.equal((await audienceDirectory(new URL("https://app.example/api/marketing?view=audience&group=mailable"))).total,3);
+    await prisma.marketingResource.update({where:{id:settings.id},data:{data:{postalAddress:"123 Test Street",operations:{sendingEnabled:true,ingestEnabled:true,migrationConfirmed:true}}}});
+    await assert.rejects(alignMailableSource(source,true),/Pause customer sending/);
+    const campaign=await prisma.marketingCampaign.create({data:{shop:currentShop,name:"Aligned source",subject:"Scoped campaign",content:store.json(defaultContent),audience,status:"SCHEDULED",scheduledAt:new Date(Date.now()-1000),smartSendingHours:0}});
+    await prisma.marketingMessage.create({data:{shop:currentShop,key:"alignment-flow",profileId:never.id,flowKey:"b2b-welcome",channel:"EMAIL",subject:"Must not send flow",content:store.json(defaultContent),dueAt:new Date()}});
+    const sentBefore=sent.length;await worker.runMarketing();
+    assert.equal(sent.length,sentBefore+3,"only eligible source members receive campaign email");
+    assert.equal(await prisma.marketingMessage.count({where:{campaignId:campaign.id,status:"SENT"}}),3);
+    assert.equal((await prisma.marketingMessage.findUniqueOrThrow({where:{key:"alignment-flow"}})).status,"CANCELLED");
+    // Frozen membership never freezes opt-outs or the source marketability proof.
+    const frozen=await prisma.marketingCampaign.create({data:{shop:currentShop,name:"Frozen aligned",subject:"Frozen",content:store.json(defaultContent),audience,status:"SENDING",recipientMode:"SCHEDULE_TIME",smartSendingHours:0}});
+    await prisma.marketingConsent.update({where:{profileId_channel:{profileId:never.id,channel:"EMAIL"}},data:{status:"UNSUBSCRIBED",suppressed:true}});
+    await prisma.marketingProfile.update({where:{id:profiles[2].id},data:{properties:{keep:"original"}}});
+    for(const p of [profiles[0],never,profiles[2],profiles[6]]) await prisma.marketingMessage.create({data:{shop:currentShop,key:`frozen-align-${p.id}`,profileId:p.id,campaignId:frozen.id,channel:"EMAIL",subject:"Frozen",content:store.json(defaultContent),dueAt:new Date()}});
+    await worker.runMarketing();
+    assert.equal(await prisma.marketingMessage.count({where:{campaignId:frozen.id,status:"SENT"}}),1);
+    assert.equal(await prisma.marketingMessage.count({where:{campaignId:frozen.id,status:"CANCELLED"}}),3);
+    assert.equal(await prisma.marketingProfile.count({where:{shop:currentShop}}),7);
+  } finally {process.env.SHOPIFY_SHOP_DOMAIN=previousShop;}
+});
+
+test("mailable source fetch reads only the selected segment and refuses unsafe pagination", async () => {
+  const previousKey=process.env.KLAVIYO_PRIVATE_API_KEY;
+  process.env.KLAVIYO_PRIVATE_API_KEY="test-klaviyo-key";
+  try {
+  const {fetchMailableSource}=await import("../lib/marketing/mailable-alignment");
+  const metadata={data:{attributes:{name:"2025 Mailable Subscribers",is_processing:false,profile_count:1}}};
+  const row={id:"target",attributes:{email:"target@example.com",subscriptions:{email:{marketing:{can_receive_email_marketing:true}}}}};
+  klaviyoPages=[metadata,{data:[row],links:{next:null}}];
+  assert.equal((await fetchMailableSource()).members.length,1);
+  klaviyoPages=[metadata,{data:[row],links:{next:"https://a.klaviyo.com/api/profiles/"}}];
+  await assert.rejects(fetchMailableSource(),/Only the 2025/);
+  klaviyoPages=[metadata,{data:[],links:{next:null}}];
+  await assert.rejects(fetchMailableSource(),/membership changed/);
+  klaviyoPages=[];
+  } finally {
+    if (previousKey === undefined) delete process.env.KLAVIYO_PRIVATE_API_KEY;
+    else process.env.KLAVIYO_PRIVATE_API_KEY=previousKey;
+    klaviyoPages=[];
+  }
+});

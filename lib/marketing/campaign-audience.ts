@@ -1,6 +1,7 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 import type { Segment } from "./rules";
-import { matches, segment } from "./rules";
+import { eligible, matches, segment } from "./rules";
+import { inSegmentSnapshot, snapshotConsentAllowed } from "./segment-snapshot";
 import type { Tx } from "./store";
 import { audienceWhere, segmentWhere, shop } from "./store";
 
@@ -85,15 +86,29 @@ export function resolvedAudienceWhere(
     return { shop: shop(), id: "missing-campaign-audience" };
   return {
     AND: [
-      audienceWhere({}, channel, now),
       ...(resolved.includes.length
-        ? [{ OR: resolved.includes.map((item) => segmentWhere(item, now)) }]
-        : []),
+        ? [{ OR: resolved.includes.map((item) => audienceWhere(item, channel, now)) }]
+        : [audienceWhere({}, channel, now)]),
       ...(resolved.excludes.length
         ? [{ NOT: { OR: resolved.excludes.map((item) => segmentWhere(item, now)) } }]
         : []),
     ],
   };
+}
+
+/** Does not change flow consent or general subscriber eligibility. */
+export function campaignConsentEligible(
+  profile: { properties?: unknown; consents: { channel: string; status: string; suppressed: boolean }[] },
+  resolved: ResolvedCampaignAudience,
+  channel = "EMAIL",
+) {
+  const consent = profile.consents.find((item) => item.channel === channel);
+  if (resolved.missingKeys.length) return false;
+  if (eligible(consent)) return true;
+  if (channel !== "EMAIL" || !snapshotConsentAllowed(consent)) return false;
+  const rules = resolved.legacy ? [resolved.legacy] : resolved.includes;
+  return rules.some((rule) => rule.klaviyoSegment &&
+    inSegmentSnapshot(profile.properties, rule.klaviyoSegment));
 }
 
 export function resolvedAudienceMatches(

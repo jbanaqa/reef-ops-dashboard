@@ -1,5 +1,6 @@
 import { FilterXSS } from "xss";
 import { decode } from "he";
+import { inSegmentSnapshot, segmentSnapshot, type SegmentSnapshot } from "./segment-snapshot";
 import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
 export const channels = [
   "EMAIL",
@@ -520,6 +521,7 @@ export function marketingSettings(
   };
 }
 export type Segment = {
+  klaviyoSegment?: SegmentSnapshot;
   openedDays?: number;
   tag?: string;
   list?: string;
@@ -1150,6 +1152,7 @@ export function sharedEmailFooter(value: unknown): EmailBranding {
 export function segment(value: unknown): Segment {
   const s = (value || {}) as Segment;
   const result: Segment = {};
+  if (s.klaviyoSegment) result.klaviyoSegment = segmentSnapshot(s.klaviyoSegment);
   for (const key of [
     "openedDays",
     "purchasedDays",
@@ -1172,6 +1175,7 @@ export function eligible(
 }
 export function matches(
   profile: {
+    properties?: unknown;
     tags: string[];
     lists: string[];
     lastOpenedAt: Date | null;
@@ -1183,6 +1187,7 @@ export function matches(
   const recent = (d: Date | null, days: number) =>
     !!d && d.getTime() >= now.getTime() - days * DAY && d <= now;
   return (
+    (!s.klaviyoSegment || inSegmentSnapshot(profile.properties, s.klaviyoSegment)) &&
     (!s.openedDays || recent(profile.lastOpenedAt, s.openedDays)) &&
     (!s.tag || profile.tags.includes(s.tag)) &&
     (!s.list || profile.lists.includes(s.list)) &&

@@ -96,7 +96,8 @@ export function emailStatus(
 }
 export function audienceRules(s: Segment) {
   return [
-    "Subscribed to email and not blocked",
+    s.klaviyoSegment ? "Klaviyo campaign eligibility; local opt-outs and blocks still apply" : "Subscribed to email and not blocked",
+    s.klaviyoSegment && "Aligned from Klaviyo on " + date(s.klaviyoSegment.syncedAt),
     s.tag && "Tagged “" + s.tag + "”",
     s.list && "In list “" + s.list + "”",
     s.openedDays && "Opened an email in the last " + s.openedDays + " days",
@@ -1476,7 +1477,7 @@ export default function AudienceWorkspace({
             {data?.groups.map((g) => (
               <article className="aw-group-card" key={g.key}>
                 <span className="aw-group-icon">◎</span>
-                <small>{g.key.startsWith("klaviyo-list-") ? "LIST" : "DYNAMIC SEGMENT"}</small>
+                <small>{g.data.klaviyoSegment ? "KLAVIYO SEGMENT SNAPSHOT" : g.key.startsWith("klaviyo-list-") ? "LIST" : "DYNAMIC SEGMENT"}</small>
                 <h3>{g.name}</h3>
                 <ul>
                   {audienceRules(g.data).map((r) => (
@@ -1494,7 +1495,7 @@ export default function AudienceWorkspace({
                   >
                     View contacts
                   </button>
-                  {!g.key.startsWith("klaviyo-list-") && (
+                  {!g.key.startsWith("klaviyo-list-") && !g.data.klaviyoSegment && (
                     <button
                       aria-label={"Edit " + g.name}
                       onClick={() => setEditor(g)}

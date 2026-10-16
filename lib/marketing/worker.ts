@@ -36,6 +36,7 @@ import {
   resolveCampaignAudience,
   resolvedAudienceMatches,
   resolvedAudienceWhere,
+  campaignConsentEligible,
 } from "./campaign-audience";
 import {
   loadWelcome,
@@ -511,8 +512,12 @@ export async function runMarketing(onlyMessageId?: string) {
       const isStock = m.flowKey === "low-stock";
       const verification = m.flowKey === "email-confirmation",
         consent = m.profile.consents.find((c) => c.channel === m.channel);
+      const campaignAudience = m.campaign
+        ? await resolveCampaignAudience(tx, m.campaign.audience) : null;
       let reason =
-        !verification && !isStock && !eligible(consent)
+        !verification && !isStock && !(campaignAudience
+          ? campaignConsentEligible(m.profile, campaignAudience, m.channel)
+          : eligible(consent))
           ? "Not eligible for this channel"
           : null;
       let deferred: string | null = null;
@@ -554,8 +559,7 @@ export async function runMarketing(onlyMessageId?: string) {
         if (!["SENDING", "SCHEDULED"].includes(m.campaign.status))
           reason = "Campaign cancelled";
         else if (m.campaign.recipientMode === "SEND_TIME") {
-          const resolved = await resolveCampaignAudience(tx, m.campaign.audience);
-          if (!resolvedAudienceMatches(m.profile, resolved))
+          if (!resolvedAudienceMatches(m.profile, campaignAudience!))
             reason = "No longer in the campaign audience";
         }
       }

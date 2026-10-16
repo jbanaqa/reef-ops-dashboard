@@ -14,6 +14,7 @@ import {
   campaignAudience,
   resolveCampaignAudience,
   resolvedAudienceWhere,
+  campaignConsentEligible,
 } from "@/lib/marketing/campaign-audience";
 import { cartProducts } from "@/lib/marketing/cart";
 import { cartReadiness } from "@/lib/marketing/cart";
@@ -242,7 +243,7 @@ async function scheduleCampaignTest(id: string, to: string, scheduledAt: Date) {
     });
     if (!profile)
       throw new Error("This test address is not in Profiles yet. Import or sync the contact before testing.");
-    if (!eligible(profile.consents.find((consent) => consent.channel === "EMAIL")))
+    if (!campaignConsentEligible(profile, resolved, original.channel))
       throw new Error("This contact cannot receive marketing email. Check email consent and suppression in Audiences.");
     if (!(await tx.marketingProfile.count({
       where: { id: profile.id, AND: [resolvedAudienceWhere(resolved, original.channel)] },
@@ -657,6 +658,9 @@ export async function GET(request: Request) {
       });
       return Response.json({ profile });
     }
+    const mailableAudience = await prisma.marketingResource.findUnique({
+      where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key: "mailable" } },
+    });
     const [
       profiles,
       campaigns,
@@ -722,7 +726,7 @@ export async function GET(request: Request) {
       Promise.all([
         prisma.marketingProfile.count({ where: { shop: shop() } }),
         prisma.marketingProfile.count({
-          where: audienceWhere({ openedDays: 365 }),
+          where: audienceWhere(segment(mailableAudience?.data || { openedDays: 365 })),
         }),
         prisma.marketingConsent.count({
           where: { suppressed: true, profile: { shop: shop() } },
@@ -1221,6 +1225,14 @@ export async function POST(request: Request) {
       if (!["SEGMENT", "TEMPLATE", "FLOW"].includes(b.kind))
         throw new Error("Unsupported resource.");
       let data;
+      if (b.kind === "SEGMENT") {
+        const current = await prisma.marketingResource.findUnique({
+          where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key: String(b.key || "") } },
+        });
+        if ((current?.data as { klaviyoSegment?: unknown })?.klaviyoSegment ||
+            (b.data as { klaviyoSegment?: unknown })?.klaviyoSegment)
+          throw new Error("This audience is aligned directly from Klaviyo; its membership is managed by the scoped alignment.");
+      }
       if (b.kind === "FLOW") {
         const f = validateFlow(String(b.key || ""), b.data);
         const current = await prisma.marketingResource.findUnique({
