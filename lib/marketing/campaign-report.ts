@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { shop } from "./store";
 import { attributedOrders, attributionConfiguration } from "./attribution";
+import { Prisma } from "@/app/generated/prisma/client";
 
-export async function campaignReport(id: string) {
+export async function campaignReport(id: string, requestedPage = 1) {
+  if (!Number.isSafeInteger(requestedPage) || requestedPage < 1)
+    throw new Error("Invalid orders page.");
   const campaign = await prisma.marketingCampaign.findFirst({
     where: { id, shop: shop() },
     select: { id: true, name: true, status: true, scheduledAt: true },
@@ -23,6 +26,7 @@ export async function campaignReport(id: string) {
   };
   const reasons = new Map<string, number>();
   const sentMessageIds = new Set<string>();
+  const orders: { id: string; orderId: string | null; label: string | null; profileId: string | null; placedAt: Date; amount: number | null; currency: string | null; interaction: "CLICKED" | "OPENED"; interactedAt: Date }[] = [];
   let firstSentAt: Date | undefined;
   let cursor: string | undefined;
   for (;;) {
@@ -81,15 +85,43 @@ export async function campaignReport(id: string) {
     })) {
       if (!match || !sentMessageIds.has(match.messageId)) continue;
       totals.ordered++;
-      const payload = order.payload as { currency?: string; revenue?: string | number };
+      const payload = order.payload as { currency?: string; revenue?: string | number; orderId?: string; orderLabel?: string };
       const amount = Number(payload.revenue);
       if (payload.currency && Number.isFinite(amount))
         totals.revenue[payload.currency] = (totals.revenue[payload.currency] || 0) + amount;
+      const orderId = String(payload.orderId || "").replace(/^gid:\/\/shopify\/Order\//, "");
+      orders.push({ id: order.id, orderId: /^\d+$/.test(orderId) ? orderId : null,
+        label: payload.orderLabel || null, profileId: order.profileId, placedAt: order.occurredAt,
+        amount: payload.revenue != null && Number.isFinite(amount) ? amount : null,
+        currency: payload.currency || null, interaction: match.interaction, interactedAt: match.interactedAt });
     }
   }
+  orders.sort((a, b) => +b.placedAt - +a.placedAt || b.id.localeCompare(a.id));
+  const pageSize = 25;
+  const pages = Math.max(1, Math.ceil(orders.length / pageSize));
+  const page = Math.min(requestedPage, pages);
+  const visible = orders.slice((page - 1) * pageSize, page * pageSize);
+  const profileIds = [...new Set(visible.flatMap(order => order.profileId ? [order.profileId] : []))];
+  const profiles = profileIds.length ? await prisma.marketingProfile.findMany({
+    where: { shop: shop(), id: { in: profileIds } }, select: { id: true, name: true, email: true },
+  }) : [];
+  // Historical ORDER summaries didn't save the human-readable order number.
+  // Read only that label from existing Shopify events, without copying order bodies.
+  const missingLabels = visible.flatMap(order => !order.label && order.orderId ? [order.orderId] : []);
+  const labels = missingLabels.length ? await prisma.$queryRaw<{ orderId: string; label: string | null }[]>(Prisma.sql`
+    SELECT "payload"->>'id' AS "orderId", COALESCE(NULLIF("payload"->>'name', ''), NULLIF("payload"->>'order_number', '')) AS label
+    FROM "MarketingEvent" WHERE "shop" = ${shop()} AND "type" IN ('orders/create', 'orders/updated')
+      AND "payload"->>'id' IN (${Prisma.join(missingLabels)}) ORDER BY "createdAt" DESC
+  `) : [];
   return {
     campaign,
     totals,
+    orders: visible.map(({ profileId, ...order }) => ({ ...order,
+      label: order.label || labels.find(label => label.orderId === order.orderId && label.label)?.label || (order.orderId ? `Order ${order.orderId}` : "Order number unavailable"),
+      customer: profiles.find(profile => profile.id === profileId) || null,
+      shopifyUrl: order.orderId ? `https://${shop()}/admin/orders/${order.orderId}` : null,
+    })),
+    ordersPage: { page, pageSize, total: orders.length, pages },
     reasons: [...reasons]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)

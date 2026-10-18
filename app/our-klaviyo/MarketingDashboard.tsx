@@ -9,6 +9,8 @@ import "./stock.css";
 import AudienceWorkspace from "./AudienceWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
 import AnalyticsWorkspace from "./AnalyticsWorkspace";
+import CampaignOrders from "./CampaignOrders";
+import type { CampaignReport } from "./campaign-report-types";
 import "./settings.css";
 import "./audiences.css";
 import {
@@ -72,23 +74,6 @@ type CampaignForm = {
   audience: CampaignAudience;
   smartSending: boolean;
   recipientMode: "SEND_TIME" | "SCHEDULE_TIME";
-};
-type CampaignReport = {
-  campaign: { id: string; name: string; status: string; scheduledAt: string | null };
-  totals: {
-    messages: number;
-    queued: number;
-    sent: number;
-    delivered: number;
-    opened: number;
-    clicked: number;
-    ordered: number;
-    skipped: number;
-    failed: number;
-    needsAttention: number;
-    revenue: Record<string, number>;
-  };
-  reasons: { reason: string; count: number }[];
 };
 type Data = {
   health?: {
@@ -1087,6 +1072,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                           Attributed revenue: {Object.entries(campaignReport.totals.revenue).map(([currency, amount]) => `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`).join(" · ")}
                         </p>
                       )}
+                      <CampaignOrders key={campaignReport.campaign.id} report={campaignReport} onLoaded={setCampaignReport} />
                       {!!campaignReport.reasons.length && (
                         <details>
                           <summary>Why messages were skipped or need attention</summary>

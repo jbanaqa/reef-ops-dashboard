@@ -30,7 +30,7 @@ const { chromium } = require("playwright");
       res.end(file.contents);
     } else
       res.end(
-        '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>',
+        '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>',
       );
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -92,7 +92,7 @@ const { chromium } = require("playwright");
           smartSendingHours: 16,
           recipientMode: "SEND_TIME",
           status: "DRAFT",
-          _count: { messages: 0 },
+          _count: { messages: 26 },
         },
       ],
       campaignTests: [],
@@ -132,6 +132,7 @@ const { chromium } = require("playwright");
       messageCounts: [],
     };
     const writes = [];
+    let reportError = false;
     await page.route("**/api/marketing**", async (route) => {
       const req = route.request();
       const url = new URL(req.url());
@@ -163,10 +164,15 @@ const { chromium } = require("playwright");
           },
         });
       } else if (url.searchParams.get("view") === "campaign-report") {
+        if (reportError) return route.fulfill({ status: 503, json: { error: "Orders temporarily unavailable" } });
         const testRun = data.campaignTests.find((item) => item.id === url.searchParams.get("id"));
+        const orderPage = Number(url.searchParams.get("ordersPage") || 1);
+        const orders = Array.from({ length: 26 }, (_, i) => ({ id: `order-${i}`, orderId: String(40026 - i), label: `#${40026 - i}`, placedAt: "2026-10-18T01:00:00Z", amount: 10, currency: "USD", interaction: "CLICKED", interactedAt: "2026-10-17T21:00:00Z", customer: { id: "customer", name: "Coral Customer", email: "coral.customer@example.com" }, shopifyUrl: `https://corals-anonymous.myshopify.com/admin/orders/${40026 - i}` }));
         await route.fulfill({ json: {
           campaign: testRun || data.campaigns[0],
-          totals: { messages: 1, queued: 1, sent: 0, delivered: 0, opened: 0, clicked: 0, ordered: 0, skipped: 0, failed: 0, needsAttention: 0, revenue: {} },
+          totals: { messages: 26, queued: 0, sent: 26, delivered: 26, opened: 20, clicked: 10, ordered: testRun ? 0 : 26, skipped: 0, failed: 0, needsAttention: 0, revenue: testRun ? {} : { USD: 260 } },
+          orders: testRun ? [] : orders.slice((orderPage - 1) * 25, orderPage * 25),
+          ordersPage: { page: orderPage, pageSize: 25, total: testRun ? 0 : 26, pages: testRun ? 1 : 2 },
           reasons: [],
         } });
       } else if (url.searchParams.get("view") === "analytics")
@@ -217,6 +223,32 @@ const { chromium } = require("playwright");
       else await route.fulfill({ json: data });
     });
     await page.goto("http://127.0.0.1:" + server.address().port);
+    await page.getByRole("button", { name: "View results", exact: true }).click();
+    const ordersPanel = page.getByRole("region", { name: "Attributed orders", exact: true });
+    await ordersPanel.getByRole("link", { name: "Open #40026 in Shopify" }).waitFor();
+    assert.equal(await ordersPanel.getByRole("listitem").count(), 25);
+    assert.equal(await ordersPanel.getByRole("link").first().getAttribute("href"), "https://corals-anonymous.myshopify.com/admin/orders/40026");
+    assert.match(await ordersPanel.textContent(), /Credited after email click/);
+    assert.match(await ordersPanel.textContent(), /All times Pacific/);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      await ordersPanel.getByRole("heading", { name: "Attributed orders (26)", exact: true }).scrollIntoViewIfNeeded();
+      assert.ok(await page.locator(".mk-campaign-report").evaluate(el => el.scrollWidth <= el.clientWidth));
+      await page.screenshot({ path: path.join(output, `campaign-orders-${width}.png`) });
+    }
+    await ordersPanel.getByRole("button", { name: "Next orders" }).click();
+    await ordersPanel.getByText("Page 2 of 2", { exact: true }).waitFor();
+    assert.equal(await ordersPanel.getByRole("listitem").count(), 1);
+    assert.equal(await ordersPanel.getByRole("button", { name: "Next orders" }).isDisabled(), true);
+    reportError = true;
+    await ordersPanel.getByRole("button", { name: "Refresh orders" }).click();
+    await ordersPanel.getByRole("alert").waitFor();
+    assert.equal(await ordersPanel.getByRole("link", { name: "Open #40001 in Shopify" }).count(), 1);
+    reportError = false;
+    await ordersPanel.getByRole("button", { name: "Try again" }).click();
+    await ordersPanel.getByRole("button", { name: "Refresh orders" }).isEnabled();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole("button", { name: "Send test", exact: true }).click();
     await page.getByLabel("Test recipient").fill("preview@example.com");
     await page.getByRole("button", { name: "Send test email", exact: true }).click();
@@ -241,6 +273,7 @@ const { chromium } = require("playwright");
     assert.equal(data.campaigns[0].status, "DRAFT");
     await page.getByRole("button", { name: "View test result" }).click();
     await page.getByText("Test run: Test campaign", { exact: true }).waitFor();
+    await page.getByText("No orders have been attributed to this campaign yet.", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Send test", exact: true }).click();
     await page.getByRole("button", { name: "View email", exact: true }).click();
     await page.getByRole("dialog").waitFor();

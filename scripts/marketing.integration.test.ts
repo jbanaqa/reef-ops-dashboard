@@ -3146,8 +3146,10 @@ test("campaign results and analytics recalculate late engagement and changed att
     { shop, key: "consistent-reports-click", type: "CLICKED", profileId: profile.id, messageId: older.id, occurredAt: at(2) },
     { shop, key: "consistent-reports-test-open", type: "OPENED", profileId: profile.id, messageId: testMessage.id, occurredAt: at(0.75) },
     // One stale saved assignment and one missing assignment: neither is authoritative.
-    { shop, key: "consistent-reports-order-usd", type: "ORDER", profileId: profile.id, messageId: older.id, occurredAt: at(0.5), payload: { currency: "USD", revenue: "42.50" } },
-    { shop, key: "consistent-reports-order-eur", type: "ORDER", profileId: profile.id, occurredAt: at(0.25), payload: { currency: "EUR", revenue: "12" } },
+    { shop, key: "consistent-reports-order-usd", type: "ORDER", profileId: profile.id, messageId: older.id, occurredAt: at(0.5), payload: { orderId: "901", currency: "USD", revenue: "42.50" } },
+    { shop, key: "consistent-reports-order-eur", type: "ORDER", profileId: profile.id, occurredAt: at(0.25), payload: { orderId: "902", orderLabel: "#40902", currency: "EUR", revenue: "12" } },
+    { shop, key: "consistent-reports-source", type: "orders/create", profileId: profile.id, occurredAt: at(0.5), payload: { id: 901, name: "#40901", privateNote: "Do not expose source payload" } },
+    { shop: "other.myshopify.com", key: "consistent-reports-foreign-source", type: "orders/create", occurredAt: at(0.5), payload: { id: 901, name: "Wrong shop order" } },
   ] });
   const setWindows = (openDays: number) => prisma.marketingResource.update({
     where: { id: settings.id }, data: { data: store.json({
@@ -3161,6 +3163,16 @@ test("campaign results and analytics recalculate late engagement and changed att
       const row = analytics.rows.find((row) => row.key === message.campaignId)!;
       const expectedOrders = message.id === winner ? 2 : 0;
       assert.equal(details.totals.ordered, expectedOrders);
+      assert.equal(details.ordersPage.total, expectedOrders);
+      assert.equal(details.orders.length, expectedOrders);
+      if (expectedOrders) {
+        assert.deepEqual(details.orders.map(order => order.label), ["#40902", "#40901"]);
+        assert.deepEqual(details.orders.map(order => order.amount), [12, 42.5]);
+        assert.ok(details.orders.every(order => order.customer?.id === profile.id && order.customer.email === profile.email));
+        assert.equal(details.orders[0].shopifyUrl, `https://${shop}/admin/orders/902`);
+        assert.equal(details.orders[0].interaction, winner === older.id ? "CLICKED" : "OPENED");
+        assert.equal(JSON.stringify(details.orders).includes("Do not expose"), false);
+      }
       assert.equal(row.orders, expectedOrders);
       assert.deepEqual(details.totals.revenue, row.revenue);
       assert.deepEqual(row.revenue, expectedOrders ? { USD: 42.5, EUR: 12 } : {});
@@ -3187,6 +3199,29 @@ test("campaign results and analytics recalculate late engagement and changed att
   } finally {
     await prisma.marketingResource.update({ where: { id: settings.id }, data: { data: settings.data! } });
   }
+});
+
+test("campaign order details paginate newest first and use safe fallbacks without leaking unrelated customers", async () => {
+  const { campaignReport } = await import("../lib/marketing/campaign-report");
+  const profile = await prisma.marketingProfile.create({ data: { shop, email: "order-pages@example.com", name: "Order Pages" } });
+  const sentAt = new Date(Date.now() - 3600000);
+  const campaign = await prisma.marketingCampaign.create({ data: { shop, name: "Order pages", subject: "Order pages", content: defaultContent, audience: {}, status: "COMPLETED" } });
+  const message = await prisma.marketingMessage.create({ data: { shop, key: "order-pages-message", campaignId: campaign.id, profileId: profile.id, channel: "EMAIL", subject: "Order pages", content: defaultContent, status: "SENT", dueAt: sentAt, sentAt } });
+  await prisma.marketingEvent.create({ data: { shop, key: "order-pages-open", type: "OPENED", profileId: profile.id, messageId: message.id, occurredAt: new Date(+sentAt + 1000) } });
+  await prisma.marketingEvent.createMany({ data: Array.from({ length: 27 }, (_, i) => ({ shop, key: `order-pages-${i}`, type: "ORDER", profileId: profile.id, occurredAt: new Date(+sentAt + 60000 + i * 1000), payload: { orderId: i === 26 ? "unsafe/non-order" : String(1000 + i), revenue: "10", currency: "USD" } })) });
+  const first = await campaignReport(campaign.id), second = await campaignReport(campaign.id, 2);
+  assert.equal(first.totals.ordered, 27); assert.deepEqual(first.totals.revenue, { USD: 270 });
+  assert.deepEqual(first.ordersPage, { page: 1, pageSize: 25, total: 27, pages: 2 });
+  assert.equal(first.orders.length, 25); assert.equal(second.orders.length, 2);
+  assert.equal(new Set([...first.orders, ...second.orders].map(order => order.id)).size, 27);
+  assert.equal(first.orders[0].shopifyUrl, null);
+  assert.equal(first.orders[0].label, "Order number unavailable");
+  assert.equal(first.orders[1].label, "Order 1025");
+  assert.ok(first.orders.every(order => order.customer?.id === profile.id));
+  assert.ok(+first.orders[0].placedAt > +second.orders[0].placedAt);
+  assert.equal((await campaignReport(campaign.id, 999)).ordersPage.page, 2);
+  await assert.rejects(campaignReport(campaign.id, -1), /Invalid orders page/);
+  await assert.rejects(campaignReport(campaign.id, 1.5), /Invalid orders page/);
 });
 
 test("email attribution uses the latest qualifying interaction like Klaviyo", async () => {

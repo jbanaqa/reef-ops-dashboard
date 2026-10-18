@@ -572,7 +572,7 @@ export async function GET(request: Request) {
       });
     if (view === "campaign-report")
       return Response.json(
-        await campaignReport(url.searchParams.get("id") || ""),
+        await campaignReport(url.searchParams.get("id") || "", Number(url.searchParams.get("ordersPage") || 1)),
         { headers: { "Cache-Control": "no-store" } },
       );
     if (view === "analytics")

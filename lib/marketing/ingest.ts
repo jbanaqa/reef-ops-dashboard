@@ -473,6 +473,7 @@ export async function ingestShopify(
           payload: {
             orderId: String(p.id),
             revenue: String(p.total_price || "0"),
+            orderLabel: String(p.name || p.id),
             currency: p.currency || "UNKNOWN",
             model: "email-last-touch",
             historical,
