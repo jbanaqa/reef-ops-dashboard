@@ -1,3 +1,4 @@
+import { cartEmailNextAllowed } from "./cart-schedule";
 import { cartTestBlock, type CartConfig } from "./cart-config";
 import { customerMarketingFlows, masterAudienceAllows } from "./master-audience";
 import {
@@ -8,6 +9,11 @@ import {
   cartDependency,
   cartProducts,
   cartCoupon,
+  cartPurchasable,
+  currentCart,
+  cancelCart,
+  cartRunKey,
+  cartSequenceStop,
 } from "./cart";
 import { prisma } from "@/lib/prisma";
 import { saveCampaignContent, resolveCampaignContent, isCampaignContentReference } from "./content-storage";
@@ -712,13 +718,21 @@ export async function runMarketing(onlyMessageId?: string) {
             reason =
               "Legacy cart reminder replaced; a new checkout is required";
           if (cartRun) {
-            const observedAt = cartRun.observedAt
-              ? new Date(cartRun.observedAt)
-              : null;
-            const lastActivity = observedAt || m.triggerAt;
-            if (cartRun.completedAt) reason = "Checkout completed";
-            else if (!lastActivity || !Number.isFinite(+lastActivity) || +lastActivity < Date.now() - 3 * DAY)
-              reason = "Checkout expired";
+            cartRun = await currentCart(tx, m.key, cartRun);
+            const terminal = cartRun.stop || await cartSequenceStop(tx, m.key, m.flowCondition);
+            if (terminal) {
+              await cancelCart(tx, cartRunKey(m.key), terminal);
+              return null;
+            }
+            // Missing consent/audience may arrive later. Explicit opt-outs stay terminal.
+            if (m.channel === "EMAIL" && ["Not eligible for this channel", "Not in 2025 Mailable Subscribers"].includes(reason || "")) {
+              if (consent?.suppressed || consent?.status === "UNSUBSCRIBED") {
+                await cancelCart(tx, cartRunKey(m.key), "Customer opted out or is suppressed");
+                return null;
+              }
+              deferred = "Waiting for marketing consent and audience eligibility";
+              reason = null;
+            }
             if (m.channel !== "EMAIL")
               m.content = JSON.parse(
                 JSON.stringify({ ...await resolveCartContent(tx, shop(), m.content), url: cartRun.url }),
@@ -814,6 +828,10 @@ export async function runMarketing(onlyMessageId?: string) {
         });
         await advanceCart(tx, m);
         return null;
+      }
+      if (cartRun && m.channel === "EMAIL") {
+        const next = cartEmailNextAllowed(cartRun.config.cart!, (m.profile.properties as { timezone?: string }).timezone);
+        if (next) { deferred = "Outside cart email sending hours"; deferredUntil = next; }
       }
       if (m.channel !== "EMAIL") {
         const zone =
@@ -1147,15 +1165,38 @@ export async function runMarketing(onlyMessageId?: string) {
       }
       if (cartRun && message.channel === "EMAIL") {
         try {
+          cartRun = await currentCart(prisma, message.key, cartRun);
+          const checkedAt = cartRun.observedAt;
+          const availableAtPreparation = cartRun.stop ? false : await cartPurchasable(cartRun);
+          cartRun = await currentCart(prisma, message.key, cartRun);
+          const changedAtPreparation = cartRun.observedAt !== checkedAt;
+          const stop = cartRun.stop || (!changedAtPreparation && !availableAtPreparation ? "No purchasable items remain in this checkout" : null);
+          if (stop) {
+            await atomic(async tx => {
+              await cancelCart(tx, cartRunKey(message.key), stop);
+              await tx.marketingMessage.update({ where: { id: message.id }, data: { status: "CANCELLED", error: stop } });
+            });
+            continue;
+          }
+          if (changedAtPreparation) {
+            await prisma.marketingMessage.update({ where: { id: message.id }, data: {
+              status: "PENDING", dueAt: new Date(Date.now() + 60000), error: "Checkout changed during stock check; checking again",
+            } });
+            continue;
+          }
           const c = message.content as Content;
           const readyKey = {
             shop: shop(),
             kind: "CART_READY",
             key: message.id,
           };
-          const ready = await prisma.marketingResource.findUnique({
+          let ready = await prisma.marketingResource.findUnique({
             where: { shop_kind_key: readyKey },
           });
+          if (ready && (ready.data as { checkoutObservedAt?: string }).checkoutObservedAt !== cartRun.observedAt) {
+            await prisma.marketingResource.delete({ where: { id: ready.id } });
+            ready = null;
+          }
           if (ready) message.content = JSON.parse(JSON.stringify(await resolveCartContent(prisma, shop(), ready.data)));
           else {
             const products = await cartProducts(cartRun);
@@ -1172,7 +1213,7 @@ export async function runMarketing(onlyMessageId?: string) {
               data: {
                 ...readyKey,
                 name: "Prepared cart email",
-                data: await saveCartContent(prisma, shop(), message.content),
+                data: json({ ...await saveCartContent(prisma, shop(), message.content) as object, checkoutObservedAt: cartRun.observedAt }),
               },
             });
           }
@@ -1221,8 +1262,29 @@ export async function runMarketing(onlyMessageId?: string) {
             });
             continue;
           }
+          const checkedCart = await currentCart(prisma, message.key, cartRun);
+          const available = checkedCart.stop ? false : await cartPurchasable(checkedCart);
+          // Stock lookups are network calls: a checkout may change while they are running.
+          const beforeSend = await currentCart(prisma, message.key, cartRun);
+          const changedDuringStockCheck = beforeSend.observedAt !== checkedCart.observedAt;
+          const stopNow = beforeSend.stop || (!changedDuringStockCheck && !available ? "No purchasable items remain in this checkout" : null);
+          if (stopNow) {
+            await atomic(async tx => {
+              await cancelCart(tx, cartRunKey(message.key), stopNow);
+              await tx.marketingMessage.update({ where: { id: message.id }, data: { status: "CANCELLED", error: stopNow } });
+            });
+            continue;
+          }
+          const dependency = await cartDependency(prisma, message, beforeSend);
+          const quietUntil = cartEmailNextAllowed(beforeSend.config.cart!, (latest.profile.properties as { timezone?: string }).timezone);
+          if (beforeSend.observedAt !== cartRun.observedAt || dependency || quietUntil) {
+            await prisma.marketingMessage.update({ where: { id: message.id }, data: {
+              status: "PENDING", dueAt: new Date(Math.max(Date.now() + 60000, +(dependency || 0), +(quietUntil || 0))),
+              error: "Waiting for checkout inactivity or cart email sending hours",
+            } });
+            continue;
+          }
           if (
-            (await loadCart(message.key)).completedAt ||
             (refreshedOrder &&
               message.triggerAt &&
               refreshedOrder >= message.triggerAt) ||
@@ -1233,12 +1295,15 @@ export async function runMarketing(onlyMessageId?: string) {
               message.triggerAt &&
               latest.profile.lastOrderAt >= message.triggerAt)
           ) {
-            await prisma.marketingMessage.update({
-              where: { id: message.id },
-              data: {
-                status: "CANCELLED",
+            const emailConsent = latest.profile.consents.find(c => c.channel === "EMAIL");
+            const purchased = [refreshedOrder, latest.profile.lastOrderAt].some(d => d && message.triggerAt && d >= message.triggerAt);
+            const terminal = purchased || emailConsent?.suppressed || emailConsent?.status === "UNSUBSCRIBED";
+            await atomic(async tx => {
+              if (terminal) await cancelCart(tx, cartRunKey(message.key), "Purchase or consent changed during preparation");
+              await tx.marketingMessage.update({ where: { id: message.id }, data: {
+                status: terminal ? "CANCELLED" : "PENDING", dueAt: new Date(Date.now() + 900000),
                 error: "Purchase or consent changed during preparation",
-              },
+              } });
             });
             continue;
           }
@@ -1272,7 +1337,7 @@ export async function runMarketing(onlyMessageId?: string) {
       const provider =
         message.channel === "EMAIL" ? resendProvider : smsProvider;
       if (message.flowKey && customerMarketingFlows.has(message.flowKey) && !(await masterAudienceAllows(prisma, shop(), message.profileId))) {
-        await prisma.marketingMessage.update({ where: { id: message.id }, data: { status: "CANCELLED", error: "Not in 2025 Mailable Subscribers" } });
+        await prisma.marketingMessage.update({ where: { id: message.id }, data: { status: cartRun ? "PENDING" : "CANCELLED", dueAt: new Date(Date.now() + 900000), error: "Not in 2025 Mailable Subscribers" } });
         continue;
       }
       if (message.channel === "EMAIL") lastEmailAttempt = Date.now();

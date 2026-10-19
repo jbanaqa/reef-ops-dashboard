@@ -9,6 +9,7 @@ import { PrismaClient } from "../app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { defaultContent } from "../lib/marketing/rules";
 import { registerWelcomeTests } from "./welcome.integration";
+import { registerCartRecoveryTests } from "./cart-recovery.integration";
 import { registerCartLaunchTests } from "./cart-launch.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
@@ -41,6 +42,7 @@ let klaviyoPages: Record<string, unknown>[] = [];
 const shopifyUnsubscribeUpdates: Record<string, unknown>[] = [];
 let shopifyUnsubscribeUnavailable = false;
 registerCartLaunchTests(() => ({ prisma, store, ingest, worker }));
+registerCartRecoveryTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {
@@ -116,6 +118,7 @@ before(async () => {
       return Response.json({ access_token: "mock" });
     if (url.includes("/graphql.json")) {
       const payload = JSON.parse(String(init?.body));
+      if (payload.query?.includes("CartAvailability")) return Response.json({ data: { nodes: payload.variables.ids.map(() => ({ status: "ACTIVE", onlineStoreUrl: "https://coralsanonymous.com/products/coral", title: "Coral", variants: { nodes: [{ availableForSale: true }] } })) } });
       if (payload.query?.includes("FindCustomerForUnsubscribe")) {
         if (shopifyUnsubscribeUnavailable) return new Response("Unavailable", { status: 503 });
         const address = String(payload.variables.search).match(/email:"(.*)"/)?.[1];
@@ -2284,6 +2287,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
             orders: { nodes: latestOrder ? [{ createdAt: latestOrder }] : [] },
           },
         });
+      if (b.query.includes("CartAvailability")) return Response.json({ data: { nodes: b.variables.ids.map(() => ({ status: "ACTIVE", onlineStoreUrl: "https://coralsanonymous.com/products/coral", title: "Coral", variants: { nodes: [{ availableForSale: true }] } })) } });
       if (b.query.includes("CartProducts"))
         return Response.json({
           data: {
@@ -2342,6 +2346,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
   f.reviewed = true;
   f.steps[0].minutes = 0;
   f.branchMinutes = 1440;
+  f.cart!.sendStartHour = 0; f.cart!.sendEndHour = 24;
   const profiles: string[] = [];
   const make = async (n: string, sms = false) => {
     const p = await store.atomic((tx) =>
@@ -2397,7 +2402,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       await prisma.marketingMessage.count({ where: { profileId: p.id } }),
       2,
     );
-    const initialDue = +messages[0].dueAt;
+    const initialDue = +(await prisma.marketingMessage.findUniqueOrThrow({ where: { id: messages[0].id } })).dueAt;
     f.steps[0].subject = "Updated queued cart subject";
     f.steps[0].minutes = 20;
     f.branchMinutes = 120;
@@ -2466,6 +2471,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       where: { id: final.id },
       data: { dueAt: new Date(Date.now() - 1000) },
     });
+    await prisma.marketingResource.update({ where: { shop_kind_key: { shop, kind: "CART_WAIT", key: final.id } }, data: { data: { dueAt: new Date(Date.now() - 1000).toISOString() } } });
     await worker.runMarketing();
     const last = await prisma.marketingMessage.findUniqueOrThrow({
       where: { id: final.id },
@@ -2515,6 +2521,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       where: { id: final2.id },
       data: { dueAt: new Date(Date.now() - 1000) },
     });
+    await prisma.marketingResource.update({ where: { shop_kind_key: { shop, kind: "CART_WAIT", key: final2.id } }, data: { data: { dueAt: new Date(Date.now() - 1000).toISOString() } } });
     await worker.runMarketing();
     const yes = await prisma.marketingMessage.findUniqueOrThrow({
       where: { id: final2.id },
@@ -2572,6 +2579,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       email: p.email!,
       created_at: new Date(Date.now() - 1000).toISOString(),
       abandoned_checkout_url: "https://coralsanonymous.com/checkouts/second",
+      line_items: [{ product_id: "111" }],
     });
     assert.equal(
       await prisma.marketingMessage.count({ where: { profileId: p.id } }),
@@ -3617,7 +3625,7 @@ test("cart test mode isolates enrollment and sending, including previously queue
   const f = validateFlow("abandoned-cart", cartDraft(row.data as never));
   f.reviewed = true;
   f.steps[0].minutes = 0;
-  f.cart!.productCount = 0;
+  f.cart!.productCount = 0; f.cart!.sendStartHour = 0; f.cart!.sendEndHour = 24;
   const previous = globalThis.fetch;
   const make = async (email: string) =>
     store.atomic(async (tx) => {
@@ -3794,7 +3802,7 @@ test("send this test step now advances only the selected email and keeps deliver
   f.reviewed = true;
   f.steps[0].minutes = 180;
   f.branchMinutes = 1440;
-  f.cart!.productCount = 0;
+  f.cart!.productCount = 0; f.cart!.sendStartHour = 0; f.cart!.sendEndHour = 24;
   f.cart!.testEmail = "early-step@example.com";
   const p = await store.atomic(async (tx) => {
     const p = await store.identify(tx, { email: f.cart!.testEmail });
@@ -3857,6 +3865,7 @@ test("send this test step now advances only the selected email and keeps deliver
     await store.atomic((tx) =>
       enroll(tx, "abandoned-cart", p.id, key, new Date(), {
         url: "https://coralsanonymous.com/checkouts/" + key,
+        lines: [{ product_id: "111", variant_id: "222", quantity: 1 }],
       }),
     );
     return prisma.marketingMessage.findMany({

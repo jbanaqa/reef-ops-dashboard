@@ -17,8 +17,11 @@ export type CartRun = {
   url: string;
   observedAt?: string;
   completedAt?: string;
+  empty?: boolean;
+  stop?: string;
+  lines?: { productId?: string; variantId?: string }[];
 };
-export type CartLine = { product_id?: string | number; quantity?: number };
+export type CartLine = { product_id?: string | number; variant_id?: string | number; quantity?: number };
 export const cartRunKey = (key: string) => key.slice(0, key.lastIndexOf(":"));
 export const cartCheckoutKey = (profileId: string, checkout: string) => "cart-v1:" +
   crypto.createHash("sha256").update(shop() + ":" + profileId + ":" + checkout).digest("hex");
@@ -40,6 +43,30 @@ export async function completeCart(tx: Tx, profileId: string, checkout: string, 
     shop: shop(), profileId, flowKey: "abandoned-cart", status: "PENDING", key: { startsWith: root + ":" },
   }, data: { status: "CANCELLED", error: "Checkout completed" } });
 }
+/** Cancel pending steps while retaining delivery and content history. */
+export async function cancelCart(tx: Tx, runKey: string, reason: string) {
+  await tx.marketingMessage.updateMany({ where: { shop: shop(), flowKey: "abandoned-cart",
+    key: { in: [runKey + ":sms", runKey + ":first", runKey + ":final"] }, status: "PENDING" }, data: { status: "CANCELLED", error: reason } });
+}
+
+/** Read ownership/activity inside the claim and again immediately before sending. */
+export async function currentCart(tx: Tx, key: string, run: CartRun): Promise<CartRun & { stop?: string }> {
+  const row = await tx.marketingResource.findUniqueOrThrow({ where: {
+    shop_kind_key: { shop: shop(), kind: "CART_RUN", key: cartRunKey(key) },
+  } });
+  const latest = { ...run, ...row.data as object, config: run.config } as CartRun;
+  const active = latest.profileId ? await tx.marketingResource.findUnique({ where: {
+    shop_kind_key: { shop: shop(), kind: "CART_ACTIVE", key: latest.profileId },
+  } }) : null;
+  const owner = active?.data as { runKey?: string } | undefined;
+  const at = new Date(latest.observedAt || "");
+  const stop = latest.completedAt ? "Checkout completed" :
+    owner?.runKey && owner.runKey !== cartRunKey(key) ? "Replaced by the customer's newer checkout" :
+    latest.empty ? "Checkout is empty" :
+    !Number.isFinite(+at) || +at < Date.now() - 3 * DAY ? "Checkout expired" : undefined;
+  return { ...latest, ...(stop ? { stop } : {}) };
+}
+
 export async function enrollCart(
   tx: Tx,
   profileId: string,
@@ -61,82 +88,58 @@ export async function enrollCart(
     },
     orderBy: { updatedAt: "desc" },
   });
-  const ids = [
-    ...new Set(
-      (lines || [])
-        .map((l) =>
-          String(l.product_id || "").replace(/^gid:\/\/shopify\/Product\//, ""),
-        )
-        .filter((id) => /^\d+$/.test(id)),
-    ),
-  ].slice(0, 100);
-  // Refresh an active attempt without restarting its timers. Shopify can reuse
-  // a checkout token after a customer returns days later, so stale activity
-  // creates a new attempt and leaves the completed attempt in history.
+  const id = (value: unknown) => {
+    const result = String(value || "").replace(/^gid:\/\/shopify\/(?:Product|ProductVariant)\//, "");
+    return /^\d+$/.test(result) ? result : undefined;
+  };
+  const cartLines = lines?.filter(l => l.quantity === undefined || l.quantity > 0)
+    .map(l => ({ productId: id(l.product_id), variantId: id(l.variant_id) })).slice(0, 100);
+  const ids = [...new Set((cartLines || []).flatMap(l => l.productId ? [l.productId] : []))];
+  const activeWhere = { shop: shop(), kind: "CART_ACTIVE", key: profileId };
+  const active = await tx.marketingResource.findUnique({ where: { shop_kind_key: activeWhere } });
+  const owner = active?.data as { runKey: string; observedAt: string } | undefined;
+  // A delayed webhook must not replace a newer checkout for the same customer.
+  if (owner && owner.runKey !== existing?.key && new Date(owner.observedAt) >= observedAt) return;
+  const activate = async (runKey: string) => {
+    await tx.marketingResource.upsert({ where: { shop_kind_key: activeWhere },
+      create: { ...activeWhere, name: "Current checkout recovery", data: { runKey, observedAt: observedAt.toISOString() } },
+      update: { data: { runKey, observedAt: observedAt.toISOString() } } });
+    await tx.marketingMessage.updateMany({ where: {
+      shop: shop(), profileId, flowKey: "abandoned-cart", status: "PENDING",
+      NOT: { key: { startsWith: runKey + ":" } },
+    }, data: { status: "CANCELLED", error: "Replaced by the customer's newer checkout" } });
+  };
   if (existing) {
-    const saved = existing.data as unknown as CartRun;
+    const saved = existing.data as unknown as CartRun & { configRef?: string };
     if (saved.completedAt) return;
-    const newer = !saved.observedAt || observedAt > new Date(saved.observedAt);
-    const stale =
-      !saved.observedAt ||
-      observedAt.getTime() - new Date(saved.observedAt).getTime() > 3 * DAY;
-    const pending = await tx.marketingMessage.findMany({
-      where: { key: { startsWith: existing.key + ":" }, status: "PENDING" },
-      select: { dueAt: true },
-    });
-    const overdue = pending.some(
-      (message) => message.dueAt.getTime() < observedAt.getTime() - 3 * DAY,
-    );
-    if (!newer) return;
-    if (lines && !lines.length) {
-      await tx.marketingResource.update({
-        where: { id: existing.id },
-        data: {
-          data: json({
-            ...saved,
-            url,
-            ...(lines !== undefined ? { productIds: ids } : {}),
-            observedAt: observedAt.toISOString(),
-          }),
-        },
-      });
-      await tx.marketingMessage.updateMany({
-        where: {
-          key: { startsWith: existing.key + ":" },
-          status: "PENDING",
-        },
-        data: { status: "CANCELLED", error: "Checkout is empty" },
-      });
+    if (saved.observedAt && observedAt <= new Date(saved.observedAt)) return;
+    const stale = !saved.observedAt || +observedAt - +new Date(saved.observedAt) > 3 * DAY;
+    const replaced = !!owner && owner.runKey !== existing.key;
+    const refill = saved.empty && cartLines && cartLines.length > 0;
+    const refreshed = { ...saved, url, observedAt: observedAt.toISOString(),
+      ...(cartLines !== undefined ? { productIds: ids, lines: cartLines, empty: cartLines.length === 0 } : {}) };
+    if (!stale && !replaced && !refill) {
+      await tx.marketingResource.update({ where: { id: existing.id }, data: { data: json(refreshed) } });
+      await activate(existing.key);
+      if (refreshed.empty) await cancelCart(tx, existing.key, "Checkout is empty");
+      else {
+        const entered = saved.configRef ? await resolveCartConfig(tx, shop(), saved.configRef) : saved.config || config;
+        const dueAt = new Date(+observedAt + entered.steps[0].minutes * 60000);
+        await tx.marketingMessage.updateMany({ where: { shop: shop(), key: { startsWith: existing.key + ":" },
+          channel: "EMAIL", status: "PENDING", dueAt: { lt: dueAt } }, data: { dueAt, error: "Waiting for checkout inactivity" } });
+      }
       return;
     }
-    if (!stale && !overdue) {
-      await tx.marketingResource.update({
-        where: { id: existing.id },
-        data: {
-          data: json({
-            ...saved,
-            url,
-            ...(lines !== undefined ? { productIds: ids } : {}),
-            observedAt: observedAt.toISOString(),
-          }),
-        },
-      });
-      return;
-    }
-    await tx.marketingMessage.updateMany({
-      where: {
-        key: { startsWith: existing.key + ":" },
-        status: "PENDING",
-      },
-      data: {
-        status: "CANCELLED",
-        error: "Superseded by new checkout activity",
-      },
-    });
+    await cancelCart(tx, existing.key, "Superseded by new checkout activity");
     base = rootBase + ":attempt-" + observedAt.getTime();
     triggerAt = observedAt;
   }
-  if (lines && !lines.length) return;
+  if (cartLines && !cartLines.length) {
+    await tx.marketingResource.create({ data: { shop: shop(), kind: "CART_RUN", key: base,
+      name: "Empty checkout", data: { profileId, url, productIds: [], lines: [], empty: true, observedAt: observedAt.toISOString() } } });
+    await activate(base);
+    return;
+  }
   const smsConsent = await tx.marketingConsent.findUnique({
     where: { profileId_channel: { profileId, channel: "SMS_MARKETING" } },
   });
@@ -158,6 +161,7 @@ export async function enrollCart(
     url,
     observedAt: observedAt.toISOString(),
     productIds: ids,
+    ...(cartLines !== undefined ? { lines: cartLines } : {}),
   };
   await tx.marketingResource.create({
     data: {
@@ -168,6 +172,7 @@ export async function enrollCart(
       data: json(run),
     },
   });
+  await activate(base);
   const rows = [
     ...(sms
       ? [
@@ -209,7 +214,7 @@ export async function enrollCart(
       subject: row.subject,
       content: await saveCartContent(tx, shop(), { ...row.c, url, products: [], couponCode: undefined }),
       triggerAt,
-      dueAt: new Date(+triggerAt + row.minutes * 60000),
+      dueAt: new Date(+observedAt + row.minutes * 60000),
     };
     if (config.cart?.testEmail) {
       await tx.marketingMessage.upsert({
@@ -305,36 +310,62 @@ export async function cartDependency(
   m: { key: string; flowCondition: string | null; triggerAt: Date | null },
   run: CartRun,
 ): Promise<Date | null> {
-  const current = await tx.marketingMessage.findUnique({
-    where: { key: m.key },
-    select: { id: true },
-  });
-  if (
-    current &&
-    (await tx.marketingResource.findUnique({
-      where: {
-        shop_kind_key: { shop: shop(), kind: "CART_WAIT", key: current.id },
-      },
-    }))
-  )
-    return null;
+  const current = await tx.marketingMessage.findUnique({ where: { key: m.key }, select: { id: true } });
+  const wait = current ? await tx.marketingResource.findUnique({ where: {
+    shop_kind_key: { shop: shop(), kind: "CART_WAIT", key: current.id },
+  } }) : null;
   const stage = m.flowCondition?.split(":")[1];
-  if (stage === "sms") return null;
-  const previous = await tx.marketingMessage.findUnique({
+  const previous = stage === "sms" ? null : await tx.marketingMessage.findUnique({
     where: { key: cartRunKey(m.key) + (stage === "first" ? ":sms" : ":first") },
   });
-  if (!previous)
-    return stage === "first" ? null : new Date(Date.now() + 900000);
-  if (["PENDING", "SENDING", "UNKNOWN"].includes(previous.status))
+  if (previous && ["PENDING", "SENDING", "UNKNOWN"].includes(previous.status))
     return new Date(Math.max(Date.now() + 60000, +previous.dueAt));
-  const minutes =
-    stage === "first"
-      ? run.config.steps[0].minutes
-      : (run.config.branchMinutes ?? 1440);
-  const due = new Date(
-    +(previous.sentAt || previous.updatedAt) + minutes * 60000,
-  );
-  return due > new Date() ? due : null;
+  const savedWait = wait?.data as { dueAt?: string; testAdvance?: boolean } | undefined;
+  if (run.testEmail && savedWait?.testAdvance) return null;
+  const inactivity = new Date(+new Date(run.observedAt!) + (stage === "sms" ? run.config.smsMinutes ?? 30 : run.config.steps[0].minutes) * 60000);
+  let due = +inactivity;
+  if (previous && !savedWait?.dueAt) {
+    const minutes = stage === "first" ? run.config.steps[0].minutes : (run.config.branchMinutes ?? 1440);
+    due = Math.max(due, +(previous.sentAt || previous.updatedAt) + minutes * 60000);
+  }
+  if (savedWait?.dueAt) due = Math.max(due, +new Date(savedWait.dueAt));
+  return due > Date.now() ? new Date(due) : null;
+}
+
+/** A cancelled or failed first email can never become a final offer. */
+export async function cartSequenceStop(tx: Tx, key: string, condition: string | null) {
+  if (!condition?.startsWith("cart-v1:final")) return null;
+  const first = await tx.marketingMessage.findUnique({ where: { key: cartRunKey(key) + ":first" } });
+  return !first || ["CANCELLED", "FAILED"].includes(first.status) || (first.status === "SENT" && !first.sentAt) ? "First reminder was not sent" : null;
+}
+
+/** Check checkout variants, independently of optional recommendation cards. */
+export async function cartPurchasable(run: CartRun): Promise<boolean> {
+  const lines: NonNullable<CartRun["lines"]> = run.lines ?? run.productIds.map(productId => ({ productId }));
+  if (!lines.length) throw new Error("Waiting for checkout line items");
+  const ids = [...new Set(lines.flatMap(line => line.variantId
+    ? ["gid://shopify/ProductVariant/" + line.variantId]
+    : line.productId ? ["gid://shopify/Product/" + line.productId] : []))];
+  if (!ids.length) throw new Error("Checkout items could not be identified");
+  type SaleProduct = { status: string; onlineStoreUrl: string | null; title: string };
+  type SaleNode = SaleProduct & { availableForSale?: boolean; product?: SaleProduct; variants?: { nodes: { availableForSale: boolean }[] } };
+  // Bound the nested legacy-product connection cost below Shopify's per-query limit.
+  for (let offset = 0; offset < ids.length; offset += 8) {
+    const batch = ids.slice(offset, offset + 8);
+    const response = await shopifyGraphql<{ data?: { nodes?: (SaleNode | null)[] } }>(
+      `query CartAvailability($ids: [ID!]!) { nodes(ids: $ids) { ... on ProductVariant { availableForSale product { status onlineStoreUrl title } } ... on Product { status onlineStoreUrl title variants(first: 100) { nodes { availableForSale } } } } }`, { ids: batch });
+    if (!response.data?.nodes || response.data.nodes.length !== batch.length)
+      throw new Error("Checkout availability could not be checked");
+    if (response.data.nodes.some(node => {
+      if (!node) return false;
+      const product = node.product || node;
+      return product.status === "ACTIVE" && !!product.onlineStoreUrl &&
+        !/\bshipping[\s-]+(?:protection|box(?:es)?)\b/i.test(product.title) &&
+        (node.product ? node.availableForSale === true : node.variants?.nodes.some(v => v.availableForSale));
+    })) return true;
+  }
+  if (lines.some(line => !line.variantId && !line.productId)) throw new Error("Some checkout items could not be identified");
+  return false;
 }
 
 type Product = {
@@ -502,6 +533,15 @@ export async function advanceCart(
   if (!message.flowCondition?.startsWith("cart-v1:")) return;
   const stage = message.flowCondition.split(":")[1];
   if (stage !== "sms" && stage !== "first") return;
+  if (stage === "first") {
+    const first = await tx.marketingMessage.findUnique({ where: { key: message.key } });
+    if (first?.status !== "SENT" || !first.sentAt) {
+      if (first && ["CANCELLED", "FAILED"].includes(first.status))
+        await cancelCart(tx, cartRunKey(message.key), "First reminder was not sent");
+      return;
+    }
+    completedAt = first.sentAt;
+  }
   const next = await tx.marketingMessage.findUnique({
     where: {
       key: cartRunKey(message.key) + (stage === "sms" ? ":first" : ":final"),

@@ -121,7 +121,7 @@ export async function messageTestState(
       where: { key: cartRunKey(m.key) + ":first" },
       select: { status: true },
     });
-    if (!previous || !["SENT", "CANCELLED"].includes(previous.status))
+    if (!previous || previous.status !== "SENT")
       reason = "Finish the previous email step before testing this one.";
   }
   if (context.kind === "welcome") {

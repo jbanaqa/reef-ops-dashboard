@@ -13,7 +13,7 @@ let enrollCart: typeof import("../lib/marketing/cart")["enrollCart"],
   cartReport: typeof import("../lib/marketing/cart-report")["cartReport"],
   marketingAnalytics: typeof import("../lib/marketing/analytics")["marketingAnalytics"];
 
-type Context = {
+export type Context = {
   prisma: PrismaClient;
   store: typeof import("../lib/marketing/store");
   ingest: typeof import("../lib/marketing/ingest");
@@ -23,7 +23,7 @@ type Harness = Context & {
   shop: string; f: FlowConfig; flowId: string; orders: Map<string, string>; emails: Record<string, unknown>[];
   make: (email: string, sms?: boolean) => Promise<{ id: string; email: string | null }>;
 };
-async function isolated(context: Context, name: string, work: (h: Harness) => Promise<void>) {
+export async function isolated(context: Context, name: string, work: (h: Harness) => Promise<void>) {
   ({ enrollCart, loadCart, cartRunKey } = await import("../lib/marketing/cart"));
   ({ resolveCartContent } = await import("../lib/marketing/cart-storage"));
   ({ clearPausedCartMessages, compactCartStorage } = await import("../lib/marketing/cart-maintenance"));
@@ -40,6 +40,10 @@ async function isolated(context: Context, name: string, work: (h: Harness) => Pr
     if (url.includes("/oauth/access_token")) return Response.json({ access_token: "mock" });
     if (url.includes("/graphql.json")) {
       const b = JSON.parse(String(init?.body));
+      if (b.query.includes("CartAvailability")) return Response.json({ data: { nodes: b.variables.ids.map(() => ({
+        status: "ACTIVE", onlineStoreUrl: "https://store.example/products/coral", title: "Coral", variants: { nodes: [{ availableForSale: true }] },
+        availableForSale: true, product: { status: "ACTIVE", onlineStoreUrl: "https://store.example/products/coral", title: "Coral" },
+      })) } });
       if (b.query.includes("CartOrderCheck")) {
         const email = String(b.variables.query).match(/email:"([^"]+)"/)?.[1] || "";
         return Response.json({ data: { orders: { nodes: orders.has(email) ? [{ createdAt: orders.get(email) }] : [] } } });
@@ -55,7 +59,7 @@ async function isolated(context: Context, name: string, work: (h: Harness) => Pr
     await context.store.seed();
     const row = await context.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop, kind: "FLOW", key: "abandoned-cart" } } });
     const f = validateFlow("abandoned-cart", cartDraft(row.data as unknown as FlowConfig));
-    f.reviewed = true; f.steps[0].minutes = 0; f.cart!.productCount = 0;
+    f.reviewed = true; f.steps[0].minutes = 0; f.cart!.productCount = 0; f.cart!.sendStartHour = 0; f.cart!.sendEndHour = 24;
     await context.prisma.marketingResource.update({ where: { id: row.id }, data: { enabled: true, data: context.store.json(f) } });
     const make: Harness["make"] = async (email, sms) => {
       const p = await context.store.atomic(tx => context.store.identify(tx, { email, ...(sms ? { phone: "+16575550123" } : {}) }));

@@ -519,6 +519,24 @@ function FlowEditorState({
           )}
         </div>
       )}
+      {flow.cart && (
+        <details className="mk-cart-feed-note">
+          <summary>Email sending hours</summary>
+          <div className="mk-two">
+            {(["sendStartHour", "sendEndHour"] as const).map((field, index) => (
+              <label key={field}>{index === 0 ? "From" : "Until"}
+                <select value={flow.cart![field] ?? (index === 0 ? 9 : 20)}
+                  onChange={e => setFlow(f => ({ ...f, cart: { ...f.cart!, [field]: Number(e.target.value) } }))}>
+                  {Array.from({ length: 25 }, (_, hour) => (
+                    <option key={hour} value={hour}>{hour === 24 ? "Midnight (end of day)" : new Date(2000, 0, 1, hour).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+          <p>Uses the customer’s timezone when known, otherwise Pacific time. Overnight reminders wait until the next opening.</p>
+        </details>
+      )}
       {flow.cart && <CartTools flow={flow as FlowConfig} />}
       {resource.key === "low-stock" && (
         <div className="mk-two">
@@ -555,8 +573,8 @@ function FlowEditorState({
           Email and text consent are checked before sending. Existing Klaviyo
           automations should be paused before this flow goes live to avoid
           duplicate reminders. Saved email edits apply when waiting messages are
-          prepared. A wait already in progress keeps its timing; later waits use
-          the settings saved when they begin.
+          prepared. The first email waits for checkout inactivity. The final
+          email waits until the first has sent, then starts its follow-up delay.
         </p>
       )}
       <p>{draftStatus}</p>

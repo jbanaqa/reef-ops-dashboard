@@ -4,6 +4,8 @@ import type { FlowConfig } from "./flow-config";
 export type CartConfig = {
   version: 1;
   productCount: number;
+  sendStartHour?: number;
+  sendEndHour?: number;
   testEmail?: string;
   bypassRecentEmailSuppression?: boolean;
 };
@@ -18,9 +20,15 @@ export function validateCart(value: unknown): CartConfig {
     c.productCount > 12
   )
     throw new Error("Choose 0–12 products for cart emails.");
+  const sendStartHour = c.sendStartHour ?? 9, sendEndHour = c.sendEndHour ?? 20;
+  if (!Number.isInteger(sendStartHour) || !Number.isInteger(sendEndHour) ||
+    sendStartHour < 0 || sendEndHour > 24 || sendStartHour >= sendEndHour)
+    throw new Error("Choose a cart email window with an end later than its start.");
   return {
     version: 1,
     productCount: c.productCount,
+    sendStartHour,
+    sendEndHour,
     ...(c.testEmail !== undefined ? { testEmail: email(c.testEmail) } : {}),
     ...(c.bypassRecentEmailSuppression === true
       ? {
