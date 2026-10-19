@@ -9,6 +9,7 @@ import { json, shop, Tx } from "./store";
 import { setup } from "./delivery";
 import { saveCartConfig, resolveCartConfig, saveCartContent } from "./cart-storage";
 import { CART_EXPIRY_MINUTES, CART_UNAVAILABLE_REASON } from "./cart-config";
+import { cartMerchandiseBlock, isCartServiceLine, isCartMerchandiseBlock, type CartMerchandise } from "./cart-merchandise";
 
 export type CartRun = {
   config: FlowConfig;
@@ -20,10 +21,17 @@ export type CartRun = {
   completedAt?: string;
   empty?: boolean;
   stockStoppedAt?: string;
+  merchandise?: CartMerchandise;
+  eligibilityStopped?: string;
   stop?: string;
   lines?: { productId?: string; variantId?: string }[];
 };
-export type CartLine = { product_id?: string | number; variant_id?: string | number; quantity?: number };
+export type CartLine = {
+  product_id?: string | number;
+  variant_id?: string | number;
+  quantity?: number;
+  [key: string]: unknown;
+};
 export const cartRunKey = (key: string) => key.slice(0, key.lastIndexOf(":"));
 export const cartCheckoutKey = (profileId: string, checkout: string) => "cart-v1:" +
   crypto.createHash("sha256").update(shop() + ":" + profileId + ":" + checkout).digest("hex");
@@ -47,12 +55,13 @@ export async function completeCart(tx: Tx, profileId: string, checkout: string, 
 }
 /** Cancel pending steps while retaining delivery and content history. */
 export async function cancelCart(tx: Tx, runKey: string, reason: string) {
-  if (reason === CART_UNAVAILABLE_REASON) {
+  if (reason === CART_UNAVAILABLE_REASON || isCartMerchandiseBlock(reason)) {
     const run = await tx.marketingResource.findUnique({ where: {
       shop_kind_key: { shop: shop(), kind: "CART_RUN", key: runKey },
     } });
     if (run) await tx.marketingResource.update({ where: { id: run.id }, data: {
-      data: json({ ...run.data as object, stockStoppedAt: new Date().toISOString() }),
+      data: json({ ...run.data as object, ...(reason === CART_UNAVAILABLE_REASON
+        ? { stockStoppedAt: new Date().toISOString() } : { eligibilityStopped: reason }) }),
     } });
   }
   await tx.marketingMessage.updateMany({ where: { shop: shop(), flowKey: "abandoned-cart",
@@ -70,9 +79,11 @@ export async function currentCart(tx: Tx, key: string, run: CartRun): Promise<Ca
   } }) : null;
   const owner = active?.data as { runKey?: string } | undefined;
   const at = new Date(latest.observedAt || "");
+  const minimum = cartMerchandiseBlock(latest.merchandise, Math.round((run.config.cart?.minimumSubtotal ?? 100) * 100));
   const stop = latest.completedAt ? "Checkout completed" :
     owner?.runKey && owner.runKey !== cartRunKey(key) ? "Replaced by the customer's newer checkout" :
     latest.empty ? "Checkout is empty" :
+    minimum ? minimum :
     latest.stockStoppedAt ? CART_UNAVAILABLE_REASON :
     !Number.isFinite(+at) || +at < Date.now() - CART_EXPIRY_MINUTES * 60000 ? "Checkout expired" : undefined;
   return { ...latest, ...(stop ? { stop } : {}) };
@@ -87,6 +98,7 @@ export async function enrollCart(
   url: string,
   lines?: CartLine[],
   observedAt = at,
+  merchandise?: CartMerchandise,
 ) {
   const rootBase = cartCheckoutKey(profileId, checkout);
   let base = rootBase;
@@ -103,7 +115,7 @@ export async function enrollCart(
     const result = String(value || "").replace(/^gid:\/\/shopify\/(?:Product|ProductVariant)\//, "");
     return /^\d+$/.test(result) ? result : undefined;
   };
-  let cartLines: CartRun["lines"] = lines?.filter(l => l.quantity === undefined || l.quantity > 0)
+  let cartLines: CartRun["lines"] = lines?.filter(l => (l.quantity === undefined || l.quantity > 0) && !isCartServiceLine(l))
     .map(l => ({ productId: id(l.product_id), variantId: id(l.variant_id) })).slice(0, 100);
   let ids = [...new Set((cartLines || []).flatMap(l => l.productId ? [l.productId] : []))];
   const activeWhere = { shop: shop(), kind: "CART_ACTIVE", key: profileId };
@@ -131,14 +143,20 @@ export async function enrollCart(
       shop: shop(), key: { in: [existing.key + ":first", existing.key + ":final"] },
       status: "CANCELLED", error: CART_UNAVAILABLE_REASON,
     }, select: { id: true } });
-    const refill = (saved.empty && cartLines && cartLines.length > 0) ||
+    // Only a genuinely newer, eligible observation may restart a stopped attempt.
+    if (merchandise === undefined && lines === undefined) merchandise = saved.merchandise;
+    const eligibility = cartMerchandiseBlock(merchandise, Math.round((config.cart?.minimumSubtotal ?? 100) * 100));
+    const refill = (!eligibility && saved.eligibilityStopped) || (saved.empty && cartLines && cartLines.length > 0) ||
       (stockStopped && (cartLines === undefined || cartLines.length > 0));
     const refreshed = { ...saved, url, observedAt: observedAt.toISOString(),
+      merchandise: merchandise ?? { blocked: "Checkout merchandise total is unavailable" },
+      ...(eligibility ? { eligibilityStopped: eligibility } : {}),
       ...(cartLines !== undefined ? { productIds: ids, lines: cartLines, empty: cartLines.length === 0 } : {}) };
     if (!stale && !replaced && !refill) {
       await tx.marketingResource.update({ where: { id: existing.id }, data: { data: json(refreshed) } });
       await activate(existing.key);
-      if (refreshed.empty) await cancelCart(tx, existing.key, "Checkout is empty");
+      if (eligibility) await cancelCart(tx, existing.key, eligibility);
+      else if (refreshed.empty) await cancelCart(tx, existing.key, "Checkout is empty");
       else {
         const entered = saved.configRef ? await resolveCartConfig(tx, shop(), saved.configRef) : saved.config || config;
         const dueAt = new Date(+observedAt + entered.steps[0].minutes * 60000);
@@ -151,6 +169,16 @@ export async function enrollCart(
     if (cartLines === undefined) { cartLines = saved.lines; ids = saved.productIds || []; }
     base = rootBase + ":attempt-" + observedAt.getTime();
     triggerAt = observedAt;
+  }
+  const eligibility = cartMerchandiseBlock(merchandise, Math.round((config.cart?.minimumSubtotal ?? 100) * 100));
+  if (eligibility) {
+    await tx.marketingResource.create({ data: { shop: shop(), kind: "CART_RUN", key: base,
+      name: "Checkout excluded from recovery", data: json({ profileId, url, productIds: ids,
+        ...(cartLines !== undefined ? { lines: cartLines } : {}),
+        merchandise: merchandise ?? { blocked: "Checkout merchandise total is unavailable" },
+        eligibilityStopped: eligibility, observedAt: observedAt.toISOString() }) } });
+    await activate(base);
+    return;
   }
   if (cartLines && !cartLines.length) {
     await tx.marketingResource.create({ data: { shop: shop(), kind: "CART_RUN", key: base,
@@ -178,6 +206,7 @@ export async function enrollCart(
     profileId,
     url,
     observedAt: observedAt.toISOString(),
+    merchandise,
     productIds: ids,
     ...(cartLines !== undefined ? { lines: cartLines } : {}),
   };
@@ -378,7 +407,7 @@ export async function cartPurchasable(run: CartRun): Promise<boolean> {
       if (!node) return false;
       const product = node.product || node;
       return product.status === "ACTIVE" && !!product.onlineStoreUrl &&
-        !/\bshipping[\s-]+(?:protection|box(?:es)?)\b/i.test(product.title) &&
+        !isCartServiceLine({ title: product.title }) &&
         (node.product ? node.availableForSale === true : node.variants?.nodes.some(v => v.availableForSale));
     })) return true;
   }
@@ -463,7 +492,7 @@ export async function cartProducts(
           (p): p is Product =>
             !!p &&
             p.status === "ACTIVE" &&
-            !/\bshipping[\s-]+(?:protection|box(?:es)?)\b/i.test(p.title) &&
+            !isCartServiceLine(p) &&
             !!p.onlineStoreUrl &&
             p.variants.nodes.some((variant) => variant.availableForSale) &&
             (!p.tracksInventory || p.totalInventory > 0),

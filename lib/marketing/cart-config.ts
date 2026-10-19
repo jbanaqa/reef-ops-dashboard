@@ -7,12 +7,13 @@ export const CART_UNAVAILABLE_REASON = "No purchasable items remain in this chec
 export type CartConfig = {
   version: 1;
   productCount: number;
+  minimumSubtotal?: number;
   sendStartHour?: number;
   sendEndHour?: number;
   testEmail?: string;
   bypassRecentEmailSuppression?: boolean;
 };
-export const defaultCartConfig: CartConfig = { version: 1, productCount: 6 };
+export const defaultCartConfig: CartConfig = { version: 1, productCount: 6, minimumSubtotal: 100 };
 export function validateCart(value: unknown): CartConfig {
   const c = value as CartConfig;
   if (
@@ -24,12 +25,18 @@ export function validateCart(value: unknown): CartConfig {
   )
     throw new Error("Choose 0–12 products for cart emails.");
   const sendStartHour = c.sendStartHour ?? 9, sendEndHour = c.sendEndHour ?? 20;
+  const minimumSubtotal = c.minimumSubtotal ?? 100;
+  if (typeof minimumSubtotal !== "number" || !Number.isFinite(minimumSubtotal) ||
+    minimumSubtotal < 0 || minimumSubtotal > 1000000 ||
+    Math.abs(minimumSubtotal * 100 - Math.round(minimumSubtotal * 100)) > 0.000001)
+    throw new Error("Enter a minimum merchandise subtotal from $0 to $1,000,000, with up to two decimals.");
   if (!Number.isInteger(sendStartHour) || !Number.isInteger(sendEndHour) ||
     sendStartHour < 0 || sendEndHour > 24 || sendStartHour >= sendEndHour)
     throw new Error("Choose a cart email window with an end later than its start.");
   return {
     version: 1,
     productCount: c.productCount,
+    minimumSubtotal,
     sendStartHour,
     sendEndHour,
     ...(c.testEmail !== undefined ? { testEmail: email(c.testEmail) } : {}),

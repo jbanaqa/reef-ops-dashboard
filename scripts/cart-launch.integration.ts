@@ -4,14 +4,22 @@ import type { PrismaClient } from "../app/generated/prisma/client";
 import { cartDraft } from "../lib/marketing/cart-config";
 import { validateFlow, type FlowConfig } from "../lib/marketing/flow-config";
 import { defaultContent, DAY } from "../lib/marketing/rules";
-let enrollCart: typeof import("../lib/marketing/cart")["enrollCart"],
-  loadCart: typeof import("../lib/marketing/cart")["loadCart"],
+let loadCart: typeof import("../lib/marketing/cart")["loadCart"],
   cartRunKey: typeof import("../lib/marketing/cart")["cartRunKey"],
   resolveCartContent: typeof import("../lib/marketing/cart-storage")["resolveCartContent"],
   clearPausedCartMessages: typeof import("../lib/marketing/cart-maintenance")["clearPausedCartMessages"],
   compactCartStorage: typeof import("../lib/marketing/cart-maintenance")["compactCartStorage"],
   cartReport: typeof import("../lib/marketing/cart-report")["cartReport"],
   marketingAnalytics: typeof import("../lib/marketing/analytics")["marketingAnalytics"];
+
+/** Existing lifecycle fixtures explicitly represent a verified $150 merchandise cart. */
+export async function enrollCartFixture(...args: Parameters<typeof import("../lib/marketing/cart")["enrollCart"]>) {
+  const { enrollCart } = await import("../lib/marketing/cart");
+  const [tx, profileId, checkout, at, config, url, lines, observedAt, merchandise] = args;
+  return enrollCart(tx, profileId, checkout, at, config, url, lines, observedAt,
+    merchandise ?? { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 });
+}
+const enrollCart = enrollCartFixture;
 
 export type Context = {
   prisma: PrismaClient;
@@ -24,7 +32,7 @@ type Harness = Context & {
   make: (email: string, sms?: boolean) => Promise<{ id: string; email: string | null }>;
 };
 export async function isolated(context: Context, name: string, work: (h: Harness) => Promise<void>) {
-  ({ enrollCart, loadCart, cartRunKey } = await import("../lib/marketing/cart"));
+  ({ loadCart, cartRunKey } = await import("../lib/marketing/cart"));
   ({ resolveCartContent } = await import("../lib/marketing/cart-storage"));
   ({ clearPausedCartMessages, compactCartStorage } = await import("../lib/marketing/cart-maintenance"));
   ({ cartReport } = await import("../lib/marketing/cart-report"));
@@ -102,7 +110,8 @@ export function registerCartLaunchTests(context: () => Context) {
     const p = await h.make("cart-time@example.com");
     const start = new Date(Date.now() - 3600000), update = new Date(Date.now() - 60000);
     const checkout = { token: "time", email: p.email!, created_at: start.toISOString(), updated_at: update.toISOString(),
-      abandoned_checkout_url: "https://store.example/checkouts/time", line_items: [{ product_id: 1 }] };
+      currency: "USD", subtotal_price: "150.00", abandoned_checkout_url: "https://store.example/checkouts/time",
+      line_items: [{ product_id: 1, title: "Coral", quantity: 1, price: "150.00", discount_allocations: [] }] };
     await h.ingest.ingestShopify("checkouts/update", "time-1", checkout);
     let messages = await h.prisma.marketingMessage.findMany({ where: { shop: h.shop, profileId: p.id } });
     assert.equal(messages.length, 2);

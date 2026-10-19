@@ -13,6 +13,8 @@ import { registerCartHandoffTests } from "./cart-handoff.integration";
 import { registerCartRecoveryTests } from "./cart-recovery.integration";
 import { registerCartLaunchTests } from "./cart-launch.integration";
 import { registerFlowReportTests } from "./flow-report.integration";
+import { registerCartMinimumTests } from "./cart-minimum.integration";
+import { registerCartMerchandiseTests } from "./cart-merchandise.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -47,6 +49,8 @@ registerCartLaunchTests(() => ({ prisma, store, ingest, worker }));
 registerCartRecoveryTests(() => ({ prisma, store, ingest, worker }));
 registerCartHandoffTests(() => ({ prisma, store, ingest, worker }));
 registerFlowReportTests(() => ({ prisma, store, ingest, worker }));
+registerCartMinimumTests(() => ({ prisma, store, ingest, worker }));
+registerCartMerchandiseTests();
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {
@@ -2381,7 +2385,8 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       email: n + "@example.com",
       created_at: created,
       abandoned_checkout_url: "https://coralsanonymous.com/checkouts/" + n,
-      line_items: [{ product_id: "111", quantity: 1 }],
+      currency: "USD", subtotal_price: "150.00",
+      line_items: [{ product_id: "111", title: "Coral", quantity: 1, price: "150.00", discount_allocations: [] }],
     });
     return p;
   };
@@ -2583,7 +2588,8 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       email: p.email!,
       created_at: new Date(Date.now() - 1000).toISOString(),
       abandoned_checkout_url: "https://coralsanonymous.com/checkouts/second",
-      line_items: [{ product_id: "111" }],
+      currency: "USD", subtotal_price: "150.00",
+      line_items: [{ product_id: "111", title: "Coral", quantity: 1, price: "150.00", discount_allocations: [] }],
     });
     assert.equal(
       await prisma.marketingMessage.count({ where: { profileId: p.id } }),
@@ -2680,6 +2686,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
         "https://coralsanonymous.com/checkouts/revived-token",
         [{ product_id: "1", quantity: 1 }],
         checkoutCreatedAt,
+        { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 },
       ),
     );
     await prisma.marketingMessage.updateMany({
@@ -2694,7 +2701,8 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       updated_at: checkoutUpdatedAt.toISOString(),
       abandoned_checkout_url:
         "https://coralsanonymous.com/checkouts/revived-token",
-      line_items: [{ product_id: "1", quantity: 1 }],
+      currency: "USD", subtotal_price: "150.00",
+      line_items: [{ product_id: "1", title: "Coral", quantity: 1, price: "150.00", discount_allocations: [] }],
     });
     const revivedMessages = await prisma.marketingMessage.findMany({
       where: {
@@ -2740,7 +2748,8 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
         updated_at: checkoutUpdatedAt.toISOString(),
         abandoned_checkout_url:
           "https://coralsanonymous.com/checkouts/revived-token",
-        line_items: [{ product_id: "1", quantity: 1 }],
+        currency: "USD", subtotal_price: "150.00",
+        line_items: [{ product_id: "1", title: "Coral", quantity: 1, price: "150.00", discount_allocations: [] }],
       },
     );
     assert.equal(
@@ -3656,6 +3665,7 @@ test("cart test mode isolates enrollment and sending, including previously queue
       enroll(tx, "abandoned-cart", id, key, new Date(Date.now() - 1000), {
         url: "https://coralsanonymous.com/checkouts/" + key,
         lines: [{ product_id: "111", quantity: 1 }],
+        merchandise: { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 },
       }),
     );
   const save = () =>
@@ -3870,6 +3880,7 @@ test("send this test step now advances only the selected email and keeps deliver
       enroll(tx, "abandoned-cart", p.id, key, new Date(), {
         url: "https://coralsanonymous.com/checkouts/" + key,
         lines: [{ product_id: "111", variant_id: "222", quantity: 1 }],
+        merchandise: { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 },
       }),
     );
     return prisma.marketingMessage.findMany({

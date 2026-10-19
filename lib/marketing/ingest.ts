@@ -4,6 +4,7 @@ import { atomic, consent, identify, IdentityConflictError, json, record, shop, t
 import { date } from "./rules";
 import { enroll } from "./flows";
 import { completeCart } from "./cart";
+import { cartMerchandise } from "./cart-merchandise";
 import {
   deliveryDateFromTags,
   deliveryUpsellDueAt,
@@ -42,6 +43,9 @@ type Payload = Customer & {
   completed_at?: string | null;
   total_price?: string;
   currency?: string;
+  presentment_currency?: string;
+  subtotal_price?: string;
+  taxes_included?: boolean;
   test?: boolean;
   order_id?: string | number;
   expected_delivery_at?: string;
@@ -555,7 +559,9 @@ export async function ingestShopify(
         profile.id,
         String(p.token || p.id),
         date(p.created_at || at.toISOString()),
-        { url: p.abandoned_checkout_url, lines: p.line_items, observedAt: at },
+        { url: p.abandoned_checkout_url, lines: p.line_items, observedAt: at,
+          merchandise: p.line_items === undefined && p.subtotal_price === undefined && p.currency === undefined
+            ? undefined : cartMerchandise(p) },
       );
     }
     if (topic === "delivery/scheduled" && !historical && p.expected_delivery_at)

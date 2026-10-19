@@ -16,6 +16,7 @@ export async function enroll(
     stockText?: string;
     lines?: CartLine[];
     observedAt?: Date;
+    merchandise?: import("./cart-merchandise").CartMerchandise;
   } = {},
 ) {
   const resource = await tx.marketingResource.findUnique({
@@ -89,6 +90,7 @@ export async function enroll(
       context.url,
       context.lines,
       context.observedAt,
+      context.merchandise,
     );
     return;
   }

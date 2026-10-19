@@ -524,6 +524,10 @@
 .mk-cart-tools .mk-flow-node {
   flex: 1;
 }
+.marketing .mk-cart-minimum label {
+  max-width: 320px;
+}
+
 .mk-cart-feed-note {
   margin: 18px 0;
   padding: 16px;

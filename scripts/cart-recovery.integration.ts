@@ -1,13 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isolated, type Context } from "./cart-launch.integration";
+import { isolated, enrollCartFixture as enrollCart, type Context } from "./cart-launch.integration";
 import { cartEmailNextAllowed } from "../lib/marketing/cart-schedule";
 import { validateCart } from "../lib/marketing/cart-config";
 import { DAY } from "../lib/marketing/rules";
 
 export function registerCartRecoveryTests(context: () => Context) {
   test("cart recovery: latest checkout wins, including late events and replacement during preparation", async () => isolated(context(), "ownership", async h => {
-    const { enrollCart } = await import("../lib/marketing/cart");
     const p = await h.make("overlap@example.com"), start = new Date(Date.now() - 60000);
     const enroll = (token: string, at: Date) => h.store.atomic(tx => enrollCart(tx, p.id, token, at, h.f, "https://store.example/checkouts/" + token, [{ product_id: 1 }]));
     await enroll("older", start);
@@ -30,7 +29,7 @@ export function registerCartRecoveryTests(context: () => Context) {
   }));
 
   test("cart recovery: empty then refill starts a fresh attempt; an older worker cannot cancel it", async () => isolated(context(), "refill", async h => {
-    const { enrollCart, cartRunKey } = await import("../lib/marketing/cart");
+    const { cartRunKey } = await import("../lib/marketing/cart");
     const p = await h.make("refill@example.com"), start = new Date(Date.now() - 60000);
     const enroll = (lines: { product_id: number; quantity?: number }[], at: Date) => h.store.atomic(tx => enrollCart(tx, p.id, "same", start, h.f, "https://store.example/checkouts/refill", lines, at));
     await enroll([{ product_id: 1 }], start);
@@ -49,7 +48,6 @@ export function registerCartRecoveryTests(context: () => Context) {
   }));
 
   test("cart recovery: actual sold-out variants block sends with zero recommendations; partial stock can send", async () => isolated(context(), "stock", async h => {
-    const { enrollCart } = await import("../lib/marketing/cart");
     const p = await h.make("soldout@example.com"), start = new Date(Date.now() - 60000);
     await h.store.atomic(tx => enrollCart(tx, p.id, "soldout", start, h.f, "https://store.example/checkouts/soldout", [{ product_id: 1, variant_id: 11 }]));
     const fetchBefore = globalThis.fetch; let available = false;
@@ -73,7 +71,6 @@ export function registerCartRecoveryTests(context: () => Context) {
   }));
 
   test("cart recovery: consent arriving late preserves first-before-final; opt-outs and failed first emails stop offers", async () => isolated(context(), "late-consent", async h => {
-    const { enrollCart } = await import("../lib/marketing/cart");
     const p = await h.store.atomic(tx => h.store.identify(tx, { email: "late-consent@example.com" }));
     await h.store.atomic(tx => enrollCart(tx, p.id, "late-consent", new Date(Date.now() - 60000), h.f, "https://store.example/checkouts/late", [{ product_id: 1 }]));
     const messages = await h.prisma.marketingMessage.findMany({ where: { profileId: p.id } });
@@ -107,7 +104,6 @@ export function registerCartRecoveryTests(context: () => Context) {
   }));
 
   test("cart recovery: newer activity restarts inactivity, never the original purchase boundary", async () => isolated(context(), "inactivity", async h => {
-    const { enrollCart } = await import("../lib/marketing/cart");
     h.f.steps[0].minutes = 180;
     const p = await h.make("active-checkout@example.com"), created = new Date(Date.now() - 4 * 3600000), activity = new Date(Date.now() - 60000);
     const enroll = (at: Date) => h.store.atomic(tx => enrollCart(tx, p.id, "active", created, h.f, "https://store.example/checkouts/active", [{ product_id: 1 }], at));
@@ -139,7 +135,6 @@ export function registerCartRecoveryTests(context: () => Context) {
   });
 
   test("cart recovery: stock errors defer, and changed checkout items cannot be cancelled by an outdated lookup", async () => isolated(context(), "stock-refresh", async h => {
-    const { enrollCart } = await import("../lib/marketing/cart");
     const p = await h.make("changed-stock@example.com"), created = new Date(Date.now() - 60000);
     await h.store.atomic(tx => enrollCart(tx, p.id, "refresh", created, h.f, "https://store.example/checkouts/old-link", [{ variant_id: 11 }]));
     const first = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
@@ -170,7 +165,6 @@ export function registerCartRecoveryTests(context: () => Context) {
   }));
 
   test("cart recovery: overnight deferral is rechecked for purchases before the next send", async () => isolated(context(), "overnight", async h => {
-    const { enrollCart } = await import("../lib/marketing/cart");
     h.f.cart!.sendStartHour = 9; h.f.cart!.sendEndHour = 20;
     await h.prisma.marketingResource.update({ where: { id: h.flowId }, data: { data: h.store.json(h.f) } });
     const zones = ["UTC", "America/Los_Angeles", "Asia/Tokyo", "Pacific/Auckland"];

@@ -24,6 +24,7 @@
     "marketing:test": "node scripts/verify-marketing.cjs test",
     "build:check": "node scripts/verify-marketing.cjs build",
     "marketing:browser:test": "node scripts/marketing.browser.test.cjs",
+    "marketing:cart-minimum:browser:test": "node scripts/flows.browser.test.cjs --cart-minimum-only",
     "marketing:flow-results:browser:test": "node scripts/flow-results.browser.test.cjs"
   },
   "dependencies": {

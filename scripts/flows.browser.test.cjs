@@ -71,6 +71,36 @@ const { chromium } = require("playwright");
 
     await page.goto("http://127.0.0.1:" + server.address().port);
     await page.getByText("5 of 5 workflows", { exact: true }).waitFor();
+    if (process.argv.includes("--cart-minimum-only")) {
+      await page.getByRole("button", { name: "Open Abandoned Cart", exact: true }).click();
+      const minimum = page.getByLabel("Minimum merchandise subtotal (USD)", { exact: true });
+      assert.equal(await minimum.inputValue(), "100", "Legacy flows use the $100 minimum");
+      await minimum.fill("150.50");
+      await page.getByLabel("I reviewed this flow's timing, consent rules, and purchase checks.", { exact: true }).check();
+      await page.getByRole("button", { name: "Save flow", exact: true }).click();
+      await page.getByText("Flow saved, including copy and artwork.", { exact: true }).waitFor();
+      assert.equal(
+        await page.evaluate(() => JSON.parse(localStorage.getItem("savedFlow")).data.cart.minimumSubtotal),
+        150.5,
+        "The editable threshold is saved with the flow",
+      );
+      await page.getByRole("button", { name: "← All flows", exact: true }).click();
+      await page.getByRole("button", { name: "Open Abandoned Cart", exact: true }).click();
+      assert.equal(await minimum.inputValue(), "150.5", "Reopening retains the saved threshold");
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await minimum.scrollIntoViewIfNeeded();
+        assert.ok(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          "Cart minimum settings fit at " + width,
+        );
+        await page.locator(".mk-cart-minimum").screenshot({ path: path.join(output, "cart-minimum-" + width + ".png") });
+      }
+      assert.deepEqual(errors, []);
+      console.log("PASS: cart minimum defaults to $100, saves and reloads decimal changes, fits desktop/390/320");
+      console.log("Screenshots: " + output);
+      return;
+    }
     await page.screenshot({ path: path.join(output, "flows-desktop.png") });
     assert.equal(await page.locator(".fw-row").count(), 5);
     assert.equal(
@@ -474,6 +504,9 @@ const { chromium } = require("playwright");
       .getByRole("button", { name: "Open Abandoned Cart", exact: true })
       .click();
     await page.locator(".mk-cart-map").waitFor();
+    const minimumSubtotal = page.getByLabel("Minimum merchandise subtotal (USD)", { exact: true });
+    assert.equal(await minimumSubtotal.inputValue(), "100");
+    await minimumSubtotal.fill("150.50");
     assert.equal(
       await page.getByLabel("Enable this flow", { exact: true }).isChecked(),
       false,
@@ -559,6 +592,13 @@ const { chromium } = require("playwright");
           JSON.parse(localStorage.getItem("savedFlow")).data.cart.productCount,
       ),
       3,
+    );
+    assert.equal(
+      await page.evaluate(
+        () => JSON.parse(localStorage.getItem("savedFlow")).data.cart.minimumSubtotal,
+      ),
+      150.5,
+      "The editable cart threshold is persisted with the saved flow",
     );
     for (const width of [390, 320]) {
       await page.setViewportSize({ width, height: 900 });

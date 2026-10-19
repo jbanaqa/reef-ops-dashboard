@@ -483,6 +483,29 @@ function FlowEditorState({
         onNodeClick={(n) => setSelected({ node: n, target: n.target })}
       />
       {flow.cart && (
+        <div className="mk-cart-feed-note mk-cart-minimum">
+          <label>
+            Minimum merchandise subtotal (USD)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={flow.cart.minimumSubtotal ?? 100}
+              aria-describedby="cart-minimum-help"
+              onChange={(e) =>
+                setFlow((f) => ({
+                  ...f,
+                  cart: { ...f.cart!, minimumSubtotal: Number(e.target.value) },
+                }))
+              }
+            />
+          </label>
+          <p id="cart-minimum-help">
+            After discounts. Shipping boxes, protection, shipping, and tax do not count.
+          </p>
+        </div>
+      )}
+      {flow.cart && (
         <div className="mk-cart-feed-note">
           <button type="button" disabled={checking} onClick={checkSetup}>
             {checking ? "Checking…" : "Check Shopify connection"}

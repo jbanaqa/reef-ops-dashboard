@@ -1,14 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Resolver } from "node:dns/promises";
-import { isolated, type Context } from "./cart-launch.integration";
+import { isolated, enrollCartFixture as enrollCart, type Context } from "./cart-launch.integration";
 import { validateFlow } from "../lib/marketing/flow-config";
 import { defaultContent } from "../lib/marketing/rules";
 
 export function registerCartHandoffTests(context: () => Context) {
   for (const action of ["unsubscribe", "suppression", "missing-consent", "flow-pause", "global-pause", "purchase", "quiet-hours", "claim-lost", "claim-replaced"] as const) {
     test(`cart handoff: ${action} during the final stock lookup blocks provider delivery`, async () => isolated(context(), `handoff-${action}`, async h => {
-      const { enrollCart } = await import("../lib/marketing/cart");
       const p = await h.make(`${action}@example.com`), start = new Date(Date.now() - 60000);
       await h.store.atomic(tx => enrollCart(tx, p.id, action, start, h.f, `https://store.example/checkouts/${action}`, [{ variant_id: 11 }]));
       const first = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
@@ -54,7 +53,6 @@ export function registerCartHandoffTests(context: () => Context) {
   }
 
   test("cart handoff: authorization database errors are known non-sends and can safely retry", async () => isolated(context(), "handoff-outage", async h => {
-    const { enrollCart } = await import("../lib/marketing/cart");
     const p = await h.make("authorization-outage@example.com");
     await h.store.atomic(tx => enrollCart(tx, p.id, "outage", new Date(Date.now() - 60000), h.f, "https://store.example/checkouts/outage", [{ variant_id: 11 }]));
     const first = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
@@ -81,7 +79,7 @@ export function registerCartHandoffTests(context: () => Context) {
   }));
 
   for (const kind of ["cart", "campaign"] as const) test(`delivery handoff: ${kind} unsubscribe during DNS checks blocks delivery`, async () => isolated(context(), `dns-${kind}`, async h => {
-    const { enrollCart, loadCart } = await import("../lib/marketing/cart");
+    const { loadCart } = await import("../lib/marketing/cart");
     const { authorizeDelivery } = await import("../lib/marketing/send-guard");
     const { resendProvider, DeliveryStopped } = await import("../lib/marketing/delivery");
     const p = await h.make(`late-dns@${kind}-dns-check.example`);
@@ -111,7 +109,7 @@ export function registerCartHandoffTests(context: () => Context) {
   }));
 
   test("cart recovery: replacing sold-out items restarts recovery and preserves the cancelled attempt", async () => isolated(context(), "stock-reentry", async h => {
-    const { enrollCart, cartRunKey } = await import("../lib/marketing/cart");
+    const { cartRunKey } = await import("../lib/marketing/cart");
     const p = await h.make("stock-reentry@example.com"), start = new Date(Date.now() - 60000);
     await h.store.atomic(tx => enrollCart(tx, p.id, "stock-reentry", start, h.f, "https://store.example/checkouts/stock-old", [{ variant_id: 11 }]));
     const old = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
@@ -131,7 +129,7 @@ export function registerCartHandoffTests(context: () => Context) {
   }));
 
   for (const optedOut of [false, true]) test(`cart recovery: legacy stock stop, omitted item data and opt-out=${optedOut}`, async () => isolated(context(), `legacy-stock-${optedOut}`, async h => {
-    const { enrollCart, cartRunKey } = await import("../lib/marketing/cart");
+    const { cartRunKey } = await import("../lib/marketing/cart");
     const p = await h.make(`legacy-stock-${optedOut}@example.com`), start = new Date(Date.now() - 60000);
     await h.store.atomic(tx => enrollCart(tx, p.id, "legacy-stock", start, h.f, "https://store.example/checkouts/legacy", [{ variant_id: 11 }]));
     const old = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
