@@ -760,7 +760,9 @@ function FlowEditorState({
               <>
                 <p className="mk-modal-explanation">
                   {flow.cart
-                    ? "Minutes after the previous step. Quiet hours can move the text and following emails later."
+                    ? selected.target.timing === "branchMinutes"
+                      ? "Minutes after the first email sends. Recovery stops after 72 hours without checkout activity."
+                      : "Minutes of checkout inactivity. Recovery stops after 72 hours without checkout activity."
                     : "Minutes after the triggering event, not after the previous step."}
                 </p>
                 <label>
@@ -768,6 +770,7 @@ function FlowEditorState({
                   <input
                     type="number"
                     min="0"
+                    max={flow.cart ? 4319 : 525600}
                     value={waitValue}
                     onChange={(e) => setWait(Number(e.target.value))}
                   />

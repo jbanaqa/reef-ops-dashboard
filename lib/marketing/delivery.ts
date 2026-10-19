@@ -24,6 +24,8 @@ export type Delivery = {
   address?: string;
   organizationName?: string;
   branding?: import("./rules").EmailBranding;
+  /** Invoked after asynchronous preparation, immediately before contacting the provider. */
+  beforeSend?: () => Promise<void>;
 };
 export function emailBody(
   m: Delivery,
@@ -159,6 +161,8 @@ export class DeliveryError extends Error {
     super(message);
   }
 }
+/** The worker has already persisted a stop/deferral; no provider request was made. */
+export class DeliveryStopped extends Error {}
 export async function checkEmailBeforeSending(address: string) {
   const result = await screenEmail(address);
   if (result.status !== "allowed")
@@ -175,6 +179,19 @@ export const resendProvider: DeliveryProvider = {
       throw new DeliveryError(
         "Email sender and postal address are not configured.",
       );
+    const body = JSON.stringify({
+      from,
+      to: [m.to],
+      subject: personalize(m.subject, m.profileName),
+      ...emailBody(m, address, organizationName),
+      headers: m.internalPreview ? undefined : {
+        "List-Unsubscribe": `<${m.unsubscribe}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
+      tags: [{ name: "marketing_message", value: m.id }],
+    });
+    // Keep this outside the network-error catch: stopping here is a known non-send.
+    await m.beforeSend?.();
     let response: Response;
     try {
       response = await fetch("https://api.resend.com/emails", {
@@ -185,19 +202,7 @@ export const resendProvider: DeliveryProvider = {
           "Content-Type": "application/json",
           "Idempotency-Key": `marketing-${m.id}`,
         },
-        body: JSON.stringify({
-          from,
-          to: [m.to],
-          subject: personalize(m.subject, m.profileName),
-          ...emailBody(m, address, organizationName),
-          headers: m.internalPreview
-            ? undefined
-            : {
-                "List-Unsubscribe": `<${m.unsubscribe}>`,
-                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-              },
-          tags: [{ name: "marketing_message", value: m.id }],
-        }),
+        body,
       });
     } catch {
       throw new DeliveryError(
@@ -235,6 +240,11 @@ export const smsProvider: DeliveryProvider = {
       key = process.env.MARKETING_SMS_GATEWAY_KEY;
     if (!endpoint || !key || !endpoint.startsWith("https://"))
       throw new DeliveryError("SMS gateway is not configured.");
+    const body = JSON.stringify({
+      id: m.id, to: m.to, channel: m.channel,
+      text: `Corals Anonymous: ${textBody(m.content, m.profileName)} ${m.content.url}${m.channel === "SMS_MARKETING" ? " Reply STOP to opt out." : ""}`,
+    });
+    await m.beforeSend?.();
     let response: Response;
     try {
       response = await fetch(endpoint, {
@@ -245,12 +255,7 @@ export const smsProvider: DeliveryProvider = {
           "Content-Type": "application/json",
           "Idempotency-Key": m.id,
         },
-        body: JSON.stringify({
-          id: m.id,
-          to: m.to,
-          channel: m.channel,
-          text: `Corals Anonymous: ${textBody(m.content, m.profileName)} ${m.content.url}${m.channel === "SMS_MARKETING" ? " Reply STOP to opt out." : ""}`,
-        }),
+        body,
       });
     } catch {
       throw new DeliveryError(

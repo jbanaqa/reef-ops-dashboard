@@ -1,4 +1,5 @@
 import { cartEmailNextAllowed } from "./cart-schedule";
+import { authorizeDelivery } from "./send-guard";
 import { cartTestBlock, type CartConfig } from "./cart-config";
 import { customerMarketingFlows, masterAudienceAllows } from "./master-audience";
 import {
@@ -26,7 +27,7 @@ import {
   eligible,
   marketingSettings,
 } from "./rules";
-import { DeliveryError, checkEmailBeforeSending, resendProvider, setup, smsProvider } from "./delivery";
+import { DeliveryError, DeliveryStopped, checkEmailBeforeSending, resendProvider, setup, smsProvider } from "./delivery";
 import { lowStock, stockStateKey } from "./stock";
 import {
   validateStock,
@@ -1014,11 +1015,12 @@ export async function runMarketing(onlyMessageId?: string) {
         });
         return null;
       }
+      const attemptedAt = new Date();
       const result = await tx.marketingMessage.updateMany({
         where: { id: m.id, status: "PENDING" },
         data: {
           status: "SENDING",
-          attemptedAt: new Date(),
+          attemptedAt,
           attempts: { increment: 1 },
           error: null,
           subject: m.subject,
@@ -1030,7 +1032,7 @@ export async function runMarketing(onlyMessageId?: string) {
             : cartRun ? await saveCartContent(tx, shop(), m.content) : json(m.content),
         },
       });
-      return result.count ? { message: m, settings } : null;
+      return result.count ? { message: { ...m, attemptedAt }, settings } : null;
     });
     if (claimed && "stop" in claimed) break;
     if (!claimed) continue;
@@ -1355,6 +1357,17 @@ export async function runMarketing(onlyMessageId?: string) {
         organizationName: settings.organizationName,
         branding: settings.branding,
         unsubscribe: unsubscribeUrl(message.token),
+        beforeSend: async () => {
+          try {
+            const allowed = await authorizeDelivery({ id: message.id, attemptedAt: message.attemptedAt,
+              recipient: message.channel === "EMAIL" ? message.profile.email! : message.profile.phone!, cartRun });
+            if (!allowed) throw new DeliveryStopped("Delivery stopped before provider handoff");
+          } catch (error) {
+            if (error instanceof DeliveryStopped) throw error;
+            // A failed authorization lookup is a known non-send, safe to retry later.
+            throw new DeliveryError("Final delivery checks unavailable; waiting to retry", false, true);
+          }
+        },
       });
       await atomic(async (tx) => {
         await tx.marketingMessage.update({
@@ -1372,6 +1385,7 @@ export async function runMarketing(onlyMessageId?: string) {
       });
       sent++;
     } catch (error) {
+      if (error instanceof DeliveryStopped) continue;
       const e =
         error instanceof DeliveryError
           ? error

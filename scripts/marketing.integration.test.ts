@@ -9,6 +9,7 @@ import { PrismaClient } from "../app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { defaultContent } from "../lib/marketing/rules";
 import { registerWelcomeTests } from "./welcome.integration";
+import { registerCartHandoffTests } from "./cart-handoff.integration";
 import { registerCartRecoveryTests } from "./cart-recovery.integration";
 import { registerCartLaunchTests } from "./cart-launch.integration";
 
@@ -43,6 +44,7 @@ const shopifyUnsubscribeUpdates: Record<string, unknown>[] = [];
 let shopifyUnsubscribeUnavailable = false;
 registerCartLaunchTests(() => ({ prisma, store, ingest, worker }));
 registerCartRecoveryTests(() => ({ prisma, store, ingest, worker }));
+registerCartHandoffTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {

@@ -8,6 +8,7 @@ import { FlowConfig, validateFlow } from "./flow-config";
 import { json, shop, Tx } from "./store";
 import { setup } from "./delivery";
 import { saveCartConfig, resolveCartConfig, saveCartContent } from "./cart-storage";
+import { CART_EXPIRY_MINUTES, CART_UNAVAILABLE_REASON } from "./cart-config";
 
 export type CartRun = {
   config: FlowConfig;
@@ -18,6 +19,7 @@ export type CartRun = {
   observedAt?: string;
   completedAt?: string;
   empty?: boolean;
+  stockStoppedAt?: string;
   stop?: string;
   lines?: { productId?: string; variantId?: string }[];
 };
@@ -45,6 +47,14 @@ export async function completeCart(tx: Tx, profileId: string, checkout: string, 
 }
 /** Cancel pending steps while retaining delivery and content history. */
 export async function cancelCart(tx: Tx, runKey: string, reason: string) {
+  if (reason === CART_UNAVAILABLE_REASON) {
+    const run = await tx.marketingResource.findUnique({ where: {
+      shop_kind_key: { shop: shop(), kind: "CART_RUN", key: runKey },
+    } });
+    if (run) await tx.marketingResource.update({ where: { id: run.id }, data: {
+      data: json({ ...run.data as object, stockStoppedAt: new Date().toISOString() }),
+    } });
+  }
   await tx.marketingMessage.updateMany({ where: { shop: shop(), flowKey: "abandoned-cart",
     key: { in: [runKey + ":sms", runKey + ":first", runKey + ":final"] }, status: "PENDING" }, data: { status: "CANCELLED", error: reason } });
 }
@@ -63,7 +73,8 @@ export async function currentCart(tx: Tx, key: string, run: CartRun): Promise<Ca
   const stop = latest.completedAt ? "Checkout completed" :
     owner?.runKey && owner.runKey !== cartRunKey(key) ? "Replaced by the customer's newer checkout" :
     latest.empty ? "Checkout is empty" :
-    !Number.isFinite(+at) || +at < Date.now() - 3 * DAY ? "Checkout expired" : undefined;
+    latest.stockStoppedAt ? CART_UNAVAILABLE_REASON :
+    !Number.isFinite(+at) || +at < Date.now() - CART_EXPIRY_MINUTES * 60000 ? "Checkout expired" : undefined;
   return { ...latest, ...(stop ? { stop } : {}) };
 }
 
@@ -92,9 +103,9 @@ export async function enrollCart(
     const result = String(value || "").replace(/^gid:\/\/shopify\/(?:Product|ProductVariant)\//, "");
     return /^\d+$/.test(result) ? result : undefined;
   };
-  const cartLines = lines?.filter(l => l.quantity === undefined || l.quantity > 0)
+  let cartLines: CartRun["lines"] = lines?.filter(l => l.quantity === undefined || l.quantity > 0)
     .map(l => ({ productId: id(l.product_id), variantId: id(l.variant_id) })).slice(0, 100);
-  const ids = [...new Set((cartLines || []).flatMap(l => l.productId ? [l.productId] : []))];
+  let ids = [...new Set((cartLines || []).flatMap(l => l.productId ? [l.productId] : []))];
   const activeWhere = { shop: shop(), kind: "CART_ACTIVE", key: profileId };
   const active = await tx.marketingResource.findUnique({ where: { shop_kind_key: activeWhere } });
   const owner = active?.data as { runKey: string; observedAt: string } | undefined;
@@ -115,7 +126,13 @@ export async function enrollCart(
     if (saved.observedAt && observedAt <= new Date(saved.observedAt)) return;
     const stale = !saved.observedAt || +observedAt - +new Date(saved.observedAt) > 3 * DAY;
     const replaced = !!owner && owner.runKey !== existing.key;
-    const refill = saved.empty && cartLines && cartLines.length > 0;
+    // Recognize stock stops from the previous release as well as the durable marker.
+    const stockStopped = saved.stockStoppedAt || await tx.marketingMessage.findFirst({ where: {
+      shop: shop(), key: { in: [existing.key + ":first", existing.key + ":final"] },
+      status: "CANCELLED", error: CART_UNAVAILABLE_REASON,
+    }, select: { id: true } });
+    const refill = (saved.empty && cartLines && cartLines.length > 0) ||
+      (stockStopped && (cartLines === undefined || cartLines.length > 0));
     const refreshed = { ...saved, url, observedAt: observedAt.toISOString(),
       ...(cartLines !== undefined ? { productIds: ids, lines: cartLines, empty: cartLines.length === 0 } : {}) };
     if (!stale && !replaced && !refill) {
@@ -131,6 +148,7 @@ export async function enrollCart(
       return;
     }
     await cancelCart(tx, existing.key, "Superseded by new checkout activity");
+    if (cartLines === undefined) { cartLines = saved.lines; ids = saved.productIds || []; }
     base = rootBase + ":attempt-" + observedAt.getTime();
     triggerAt = observedAt;
   }

@@ -1,6 +1,9 @@
 import { Content, defaultContent, email } from "./rules";
 import type { FlowConfig } from "./flow-config";
 
+export const CART_EXPIRY_MINUTES = 3 * 24 * 60;
+export const CART_UNAVAILABLE_REASON = "No purchasable items remain in this checkout";
+
 export type CartConfig = {
   version: 1;
   productCount: number;

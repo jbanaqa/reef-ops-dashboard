@@ -1,4 +1,4 @@
-import { CartConfig, validateCart } from "./cart-config";
+import { CartConfig, validateCart, CART_EXPIRY_MINUTES } from "./cart-config";
 import { StockConfig, validateStock } from "./stock-config";
 import { defaultContent } from "./rules";
 import { validateWelcome, type WelcomeConfig } from "./welcome-config";
@@ -147,6 +147,8 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     if (!b) throw new Error("Both legacy branch objects are required.");
     return { subject: subject(b.subject), content: content(b.content) };
   };
+  if (f.cart && steps[0].minutes + minutes(f.smsMinutes, 30) + minutes(f.branchMinutes, 1440) >= CART_EXPIRY_MINUTES)
+    throw new Error("Cart recovery stops after 72 hours without checkout activity. Keep the total waits below 72 hours.");
   if (
     f.internalProfileIds &&
     (!Array.isArray(f.internalProfileIds) ||
