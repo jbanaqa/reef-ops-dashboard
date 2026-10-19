@@ -23,7 +23,8 @@
     "scheduled:all": "tsx scripts/run-scheduled-jobs.ts",
     "marketing:test": "node scripts/verify-marketing.cjs test",
     "build:check": "node scripts/verify-marketing.cjs build",
-    "marketing:browser:test": "node scripts/marketing.browser.test.cjs"
+    "marketing:browser:test": "node scripts/marketing.browser.test.cjs",
+    "marketing:flow-results:browser:test": "node scripts/flow-results.browser.test.cjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

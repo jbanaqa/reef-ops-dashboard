@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { shop } from "./store";
 import { attributedOrders, attributionConfiguration } from "./attribution";
 import { Prisma } from "@/app/generated/prisma/client";
+import { orderValue } from "./order-evidence";
 
 export async function campaignReport(id: string, requestedPage = 1) {
   if (!Number.isSafeInteger(requestedPage) || requestedPage < 1)
@@ -86,14 +87,12 @@ export async function campaignReport(id: string, requestedPage = 1) {
       if (!match || !sentMessageIds.has(match.messageId)) continue;
       totals.ordered++;
       const payload = order.payload as { currency?: string; revenue?: string | number; orderId?: string; orderLabel?: string };
-      const amount = Number(payload.revenue);
-      if (payload.currency && Number.isFinite(amount))
-        totals.revenue[payload.currency] = (totals.revenue[payload.currency] || 0) + amount;
+      const { amount, currency } = orderValue(payload);
+      if (currency && amount !== null) totals.revenue[currency] = (totals.revenue[currency] || 0) + amount;
       const orderId = String(payload.orderId || "").replace(/^gid:\/\/shopify\/Order\//, "");
       orders.push({ id: order.id, orderId: /^\d+$/.test(orderId) ? orderId : null,
         label: payload.orderLabel || null, profileId: order.profileId, placedAt: order.occurredAt,
-        amount: payload.revenue != null && Number.isFinite(amount) ? amount : null,
-        currency: payload.currency || null, interaction: match.interaction, interactedAt: match.interactedAt });
+        amount, currency, interaction: match.interaction, interactedAt: match.interactedAt });
     }
   }
   orders.sort((a, b) => +b.placedAt - +a.placedAt || b.id.localeCompare(a.id));

@@ -10,6 +10,7 @@ import {
 } from "./delivery-upsell-config";
 import { validateFlow } from "./flow-config";
 import { findEmailAttribution } from "./attribution";
+import { compactOrderEvidence, type OrderEvidence } from "./order-evidence";
 import { deliveryReviewConfig, orderUpdateSkipReason } from "./order-update-review";
 
 type Customer = {
@@ -46,7 +47,8 @@ type Payload = Customer & {
   expected_delivery_at?: string;
   abandoned_checkout_url?: string;
   financial_status?: string;
-  checkout_token?: string;
+  checkout_token?: string | null;
+  discount_codes?: { code?: string }[] | null;
   token?: string;
   shopify_current_tags?: string[];
 };
@@ -480,6 +482,7 @@ export async function ingestShopify(
             currency: p.currency || "UNKNOWN",
             model: "email-last-touch",
             historical,
+            ...compactOrderEvidence(profile.id, p),
           },
         });
         if (!profile.lastOrderAt || profile.lastOrderAt < orderAt)
@@ -495,6 +498,23 @@ export async function ingestShopify(
             triggerAt: { lte: orderAt },
           },
           data: { status: "CANCELLED", error: "Order placed" },
+        });
+      }
+    }
+    if (["orders/create", "orders/updated"].includes(topic) && !p.test && p.id) {
+      const order = await tx.marketingEvent.findUnique({
+        where: { shop_key: { shop: shop(), key: `order:${p.id}` } },
+        select: { id: true, payload: true, profileId: true },
+      });
+      if (order?.profileId === profile.id) {
+        const saved = order.payload as OrderEvidence;
+        const evidence = compactOrderEvidence(profile.id, p);
+        const missing = {
+          ...(saved.checkoutKey === undefined && evidence.checkoutKey !== undefined ? { checkoutKey: evidence.checkoutKey } : {}),
+          ...(saved.discountCodes === undefined && evidence.discountCodes !== undefined ? { discountCodes: evidence.discountCodes } : {}),
+        };
+        if (Object.keys(missing).length) await tx.marketingEvent.update({
+          where: { id: order.id }, data: { payload: json({ ...order.payload as object, ...missing }) },
         });
       }
     }

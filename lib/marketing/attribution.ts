@@ -29,16 +29,19 @@ export async function* attributedOrders(
   options: {
     since: Date;
     campaignId?: string;
+    flowKey?: string;
+    until?: Date;
     configuration: Awaited<ReturnType<typeof attributionConfiguration>>;
   },
 ) {
   let cursor: string | undefined;
+  const seenOrders = new Set<string>();
   for (;;) {
     const page = await client.marketingEvent.findMany({
       where: {
         shop: shop(),
         type: "ORDER",
-        occurredAt: { gte: options.since },
+        occurredAt: { gte: options.since, lte: options.until || new Date() },
         ...(options.campaignId
           ? {
               profile: {
@@ -50,6 +53,9 @@ export async function* attributedOrders(
               },
             }
           : {}),
+        ...(options.flowKey ? { profile: { is: { messages: {
+          some: { shop: shop(), flowKey: options.flowKey, sentAt: { not: null } },
+        } } } } : {}),
         ...(cursor ? { id: { gt: cursor } } : {}),
       },
       orderBy: { id: "asc" },
@@ -63,8 +69,14 @@ export async function* attributedOrders(
           ? findEmailAttribution(client, order.profileId, order.occurredAt, options.configuration)
           : null),
       );
-      for (let offset = 0; offset < batch.length; offset++)
+      for (let offset = 0; offset < batch.length; offset++) {
+        const id = String((batch[offset].payload as { orderId?: unknown }).orderId || "")
+          .replace(/^gid:\/\/shopify\/Order\//, "");
+        const identity = /^\d+$/.test(id) ? "order:" + id : "event:" + batch[offset].id;
+        if (seenOrders.has(identity)) continue;
+        seenOrders.add(identity);
         yield { order: batch[offset], match: matches[offset] };
+      }
     }
     if (page.length < 500) break;
     cursor = page[page.length - 1].id;
@@ -99,7 +111,7 @@ export async function findEmailAttribution(
         { campaign: { is: { testOfCampaignId: null } } },
       ],
     },
-    select: { id: true, key: true, flowKey: true, sentAt: true },
+    select: { id: true, key: true, flowKey: true, profileId: true, sentAt: true },
   });
   const messages = await customerCartMessages(client, shop(), candidates);
   if (!messages.length) return null;

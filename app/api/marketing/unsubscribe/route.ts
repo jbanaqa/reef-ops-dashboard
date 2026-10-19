@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { atomic, consent, shop } from "@/lib/marketing/store";
+import { atomic, consent, record, shop } from "@/lib/marketing/store";
 import { queueShopifyEmailUnsubscribe, syncShopifyEmailUnsubscribes } from "@/lib/marketing/unsubscribe";
 export const dynamic = "force-dynamic";
 const headers = {
@@ -49,6 +49,14 @@ export async function POST(request: Request) {
       "unsubscribe-link",
       at,
     );
+    await record(tx, {
+      key: `unsubscribe-link:${message.id}`,
+      type: "UNSUBSCRIBED",
+      profileId: message.profileId,
+      messageId: message.id,
+      occurredAt: at,
+      payload: { source: "unsubscribe-link" },
+    });
     if (message.channel === "EMAIL")
       await queueShopifyEmailUnsubscribe(tx, message.profileId, at);
   });

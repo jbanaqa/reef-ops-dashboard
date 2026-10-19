@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { FlowConfig } from "@/lib/marketing/flow-config";
 import type { Content } from "@/lib/marketing/rules";
-import type { CartReport } from "@/lib/marketing/cart-report";
 import FlowDialog from "./FlowDialog";
+import FlowResults from "./FlowResults";
 type History = {
   missingMetrics?: string[];
   configured: boolean;
@@ -15,17 +15,13 @@ type History = {
   error?: string;
   completedAt?: string;
 };
-const date = (value: string | Date) => new Date(value).toLocaleString("en-US", {
-  timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-});
 export default function CartTools({ flow }: { flow: FlowConfig }) {
-  const [panel, setPanel] = useState<"products" | "history" | "results" | null>(
+  const [panel, setPanel] = useState<"products" | "history" | null>(
     null,
   );
   const [address, setAddress] = useState("");
   const [products, setProducts] = useState<Content["products"] | null>(null);
   const [history, setHistory] = useState<History | null>(null);
-  const [report, setReport] = useState<CartReport | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const stop = useRef(false),
@@ -50,7 +46,6 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
   async function open(next: NonNullable<typeof panel>) {
     const own = ++generation.current;
     setHistory(null);
-    setReport(null);
     setProducts(null);
     setPanel(next);
     setError("");
@@ -59,14 +54,12 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
     try {
       if (next !== "products") {
         const r = await fetch(
-          "/api/marketing?view=" +
-            (next === "history" ? "cart-history" : "cart-report"),
+          "/api/marketing?view=cart-history",
         );
         const d = await r.json();
         if (own !== generation.current) return;
         if (!r.ok) throw new Error(d.error || "Could not load data.");
-        if (next === "history") setHistory(d);
-        else setReport(d);
+        setHistory(d);
       }
     } catch (e) {
       if (own === generation.current)
@@ -109,18 +102,14 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
         <button type="button" onClick={() => open("history")}>
           Bring over Klaviyo history
         </button>
-        <button type="button" onClick={() => open("results")}>
-          View flow results
-        </button>
+        <FlowResults flowKey="abandoned-cart" />
       </div>
       {panel && (
         <FlowDialog
           title={
             panel === "products"
               ? "Preview customer products"
-              : panel === "history"
-                ? "Klaviyo history"
-                : "Flow results · last 30 days"
+              : "Klaviyo history"
           }
           close={close}
         >
@@ -290,102 +279,6 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
                 then refresh history here so recent Klaviyo emails count toward
                 the 16-hour spacing window.
               </p>
-            </>
-          )}
-          {panel === "results" && (
-            <>
-              {busy && <p>Loading results…</p>}
-              {report && (
-                <div className="mk-campaign-report mk-cart-report">
-                  <p>
-                    Sends from the last 30 days, plus recent waiting and stopped messages.
-                    Restricted test runs are excluded.
-                    Opens and clicks count each message once; privacy features can inflate opens.
-                  </p>
-                  <button type="button" disabled={busy} onClick={() => open("results")}>Refresh results</button>
-                  <div className="mk-cart-results">
-                    {report.rows.map((r) => (
-                      <section key={r.key}>
-                        <h4>{r.label}</h4>
-                        <dl>
-                          {[
-                            ["Waiting", r.waiting],
-                            ["Sent", r.sent],
-                            ["Delivered", r.delivered],
-                            ["Opened", r.opened],
-                            ["Clicked", r.clicked],
-                            ["Bounced", r.bounced],
-                            ["Spam complaints", r.complained],
-                            ["Orders", r.orders],
-                            ["Stopped / skipped", r.stopped],
-                            ["Needs attention", r.needsAttention],
-                          ].map(([label, value]) => (
-                            <div key={label}>
-                              <dt>{label}</dt>
-                              <dd>{value}</dd>
-                            </div>
-                          ))}
-                        </dl>
-                        {r.sent > 0 && (
-                          <p>
-                            Of sent: opened {Math.round((100 * r.opened) / r.sent)}% ·
-                            clicked {Math.round((100 * r.clicked) / r.sent)}%
-                          </p>
-                        )}
-                        {Object.entries(r.revenue).map(([currency, amount]) => (
-                          <p key={currency}>
-                            Attributed sales: {currency} {amount.toFixed(2)}
-                          </p>
-                        ))}
-                      </section>
-                    ))}
-                  </div>
-                  <section className="mk-attributed-orders" aria-label="Cart attributed orders">
-                    <h4>Attributed orders · latest 25</h4>
-                    {!report.orders.length ? <p>No orders attributed to this flow yet.</p> : <ol className="mk-order-list">
-                      {report.orders.map(order => <li key={order.id}>
-                        <div className="mk-order-summary">
-                          {order.url ? <a href={order.url} target="_blank" rel="noopener noreferrer">{order.label} ↗</a> : <strong>{order.label}</strong>}
-                          <time dateTime={order.at}>{date(order.at)}</time>
-                          <small>{order.step} · {order.interaction} {date(order.interactedAt)}</small>
-                        </div>
-                        <div className="mk-order-customer"><span>Customer</span><strong>{order.email}</strong></div>
-                        <div className="mk-order-amount"><span>Revenue</span><strong>{Number.isFinite(order.amount) && order.currency ? `${order.currency} ${order.amount.toFixed(2)}` : "Amount unavailable"}</strong></div>
-                      </li>)}
-                    </ol>}
-                  </section>
-                  <details>
-                    <summary>Recent messages · latest 25</summary>
-                    {!report.activity.length ? <p>No cart messages yet.</p> : <ol className="mk-order-list">
-                      {report.activity.map(message => <li key={message.id}>
-                        <div className="mk-order-summary"><strong>{message.subject}</strong>
-                          <small>Checkout {message.triggerAt ? date(message.triggerAt) : "time unavailable"}</small>
-                          <small>{message.sentAt ? "Sent " + date(message.sentAt) : message.status === "PENDING" ? "Next check " + date(message.dueAt) : message.status.toLowerCase()}</small>
-                        </div>
-                        <div className="mk-order-customer"><span>Customer</span><strong>{message.email}</strong></div>
-                        <div className="mk-order-amount"><strong>{message.status === "UNKNOWN" ? "Needs review" : message.status.toLowerCase()}</strong>{message.error && <small>{message.error}</small>}</div>
-                      </li>)}
-                    </ol>}
-                  </details>
-                  {!!report.reasons.length && (
-                    <details>
-                      <summary>Why messages are waiting or stopped</summary>
-                      <ul>
-                        {report.reasons.map((r) => (
-                          <li key={r.reason}>
-                            {r.reason} ({r.count})
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                  <p>
-                    All times Pacific. Sales use the same current attribution settings as Analytics
-                    ({report.attribution.emailClickDays}-day clicks / {report.attribution.emailOpenDays}-day opens).
-                    Revenue is recorded order value before refunds; attribution does not prove the email caused a purchase.
-                  </p>
-                </div>
-              )}
             </>
           )}
         </FlowDialog>

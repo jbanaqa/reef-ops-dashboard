@@ -4,6 +4,7 @@ import {
   syncAudienceBackfill,
 } from "@/lib/marketing/audience-backfill";
 import { cartReport } from "@/lib/marketing/cart-report";
+import { flowReport, type ReportedFlow } from "@/lib/marketing/flow-report";
 import { campaignReport } from "@/lib/marketing/campaign-report";
 import { marketingAnalytics } from "@/lib/marketing/analytics";
 import {
@@ -570,6 +571,10 @@ export async function GET(request: Request) {
       return Response.json(await cartReport(), {
         headers: { "Cache-Control": "no-store" },
       });
+    if (view === "flow-report")
+      return Response.json(await flowReport(url.searchParams.get("key") as ReportedFlow,
+        Number(url.searchParams.get("days") || 30), Number(url.searchParams.get("ordersPage") || 1)),
+      { headers: { "Cache-Control": "no-store" } });
     if (view === "campaign-report")
       return Response.json(
         await campaignReport(url.searchParams.get("id") || "", Number(url.searchParams.get("ordersPage") || 1)),

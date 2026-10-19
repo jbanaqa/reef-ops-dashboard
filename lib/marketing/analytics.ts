@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { DAY } from "./rules";
 import { shop } from "./store";
 import { customerCartMessages } from "./cart-report-scope";
+import { orderValue } from "./order-evidence";
 import {
   attributionConfiguration,
   attributedOrders,
@@ -15,10 +16,12 @@ type Row = {
   name: string;
   messages: number;
   sent: number;
+  recipients: number;
   delivered: number;
   opened: number;
   clicked: number;
   orders: number;
+  convertedRecipients: number;
   revenue: Record<string, number>;
 };
 
@@ -28,23 +31,23 @@ const emptyRow = (key: string, kind: Row["kind"], name: string): Row => ({
   name,
   messages: 0,
   sent: 0,
+  recipients: 0,
   delivered: 0,
   opened: 0,
   clicked: 0,
   orders: 0,
+  convertedRecipients: 0,
   revenue: {},
 });
 
 function money(target: Record<string, number>, payload: unknown) {
-  const value = payload as { currency?: string; revenue?: string | number };
-  const amount = Number(value.revenue);
-  if (value.currency && Number.isFinite(amount))
-    target[value.currency] = (target[value.currency] || 0) + amount;
+  const { amount, currency } = orderValue(payload);
+  if (currency && amount !== null) target[currency] = (target[currency] || 0) + amount;
 }
 
 export async function marketingAnalytics(requestedDays = 30) {
   const days = periods.has(requestedDays) ? requestedDays : 30;
-  const since = new Date(Date.now() - days * DAY);
+  const now = new Date(), since = new Date(+now - days * DAY);
   const attribution = await attributionConfiguration(prisma);
   const flows = await prisma.marketingResource.findMany({
     where: { shop: shop(), kind: "FLOW" },
@@ -61,18 +64,21 @@ export async function marketingAnalytics(requestedDays = 30) {
     string,
     {
       id: string;
+      profileId: string;
+      sentAt: Date | null;
       flowKey: string | null;
       campaignId: string | null;
       campaign: { name: string } | null;
     }
   >();
-  const engagementEvents: { messageId: string | null; type: string }[] = [];
+  const engagementEvents: { messageId: string | null; type: string; occurredAt: Date }[] = [];
   let cursor: string | undefined;
   for (;;) {
     const page = await prisma.marketingMessage.findMany({
       where: {
         shop: shop(),
-        sentAt: { gte: since },
+        channel: "EMAIL",
+        sentAt: { gte: since, lte: now },
         OR: [
           { flowKey: { not: null } },
           { campaign: { is: { testOfCampaignId: null } } },
@@ -83,6 +89,8 @@ export async function marketingAnalytics(requestedDays = 30) {
       take: 500,
       select: {
         id: true,
+        profileId: true,
+        sentAt: true,
         key: true,
         flowKey: true,
         campaignId: true,
@@ -97,9 +105,11 @@ export async function marketingAnalytics(requestedDays = 30) {
             shop: shop(),
             type: { in: ["DELIVERED", "OPENED", "CLICKED"] },
             messageId: { in: page.map((message) => message.id) },
+            occurredAt: { lte: now },
           },
           distinct: ["messageId", "type"],
-          select: { messageId: true, type: true },
+          orderBy: { occurredAt: "desc" },
+          select: { messageId: true, type: true, occurredAt: true },
         })),
       );
     if (page.length < 500) break;
@@ -107,6 +117,8 @@ export async function marketingAnalytics(requestedDays = 30) {
   }
 
   const rowFor = new Map<string, Row>();
+  const recipients = new Map<Row, Set<string>>(), buyers = new Map<Row, Set<string>>();
+  const allRecipients = new Set<string>(), allBuyers = new Set<string>();
   for (const message of messages.values()) {
     const kind = message.campaignId ? "CAMPAIGN" : "FLOW";
     const key = message.campaignId || message.flowKey!;
@@ -122,12 +134,15 @@ export async function marketingAnalytics(requestedDays = 30) {
       );
     rows.set(mapKey, row);
     row.messages++;
+    if (!recipients.has(row)) { recipients.set(row, new Set()); buyers.set(row, new Set()); }
+    recipients.get(row)!.add(message.profileId); allRecipients.add(message.profileId);
     rowFor.set(message.id, row);
   }
   for (const message of messages.values()) rowFor.get(message.id)!.sent++;
   for (const event of engagementEvents) {
     const row = event.messageId ? rowFor.get(event.messageId) : undefined;
-    if (!row) continue;
+    const message = event.messageId ? messages.get(event.messageId) : undefined;
+    if (!row || !message?.sentAt || event.occurredAt < message.sentAt) continue;
     if (event.type === "DELIVERED") row.delivered++;
     if (event.type === "OPENED") row.opened++;
     if (event.type === "CLICKED") row.clicked++;
@@ -137,16 +152,21 @@ export async function marketingAnalytics(requestedDays = 30) {
   const attributedRevenue: Record<string, number> = {};
   let trackedOrders = 0;
   for await (const { order, match } of attributedOrders(prisma, {
-    since, configuration: attribution,
+    since, until: now, configuration: attribution,
   })) {
     trackedOrders++;
     money(storeRevenue, order.payload);
     const row = match ? rowFor.get(match.messageId) : undefined;
     if (row) {
       row.orders++;
+      if (order.profileId) { buyers.get(row)!.add(order.profileId); allBuyers.add(order.profileId); }
       money(row.revenue, order.payload);
       money(attributedRevenue, order.payload);
     }
+  }
+  for (const row of rows.values()) {
+    row.recipients = recipients.get(row)?.size || 0;
+    row.convertedRecipients = buyers.get(row)?.size || 0;
   }
   const reportRows = [...rows.values()].sort(
     (a, b) =>
@@ -162,6 +182,8 @@ export async function marketingAnalytics(requestedDays = 30) {
     totals: {
       messages: reportRows.reduce((sum, row) => sum + row.messages, 0),
       sent: reportRows.reduce((sum, row) => sum + row.sent, 0),
+      recipients: allRecipients.size,
+      convertedRecipients: allBuyers.size,
       delivered: reportRows.reduce((sum, row) => sum + row.delivered, 0),
       opened: reportRows.reduce((sum, row) => sum + row.opened, 0),
       clicked: reportRows.reduce((sum, row) => sum + row.clicked, 0),

@@ -12,6 +12,7 @@ import { registerWelcomeTests } from "./welcome.integration";
 import { registerCartHandoffTests } from "./cart-handoff.integration";
 import { registerCartRecoveryTests } from "./cart-recovery.integration";
 import { registerCartLaunchTests } from "./cart-launch.integration";
+import { registerFlowReportTests } from "./flow-report.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -45,6 +46,7 @@ let shopifyUnsubscribeUnavailable = false;
 registerCartLaunchTests(() => ({ prisma, store, ingest, worker }));
 registerCartRecoveryTests(() => ({ prisma, store, ingest, worker }));
 registerCartHandoffTests(() => ({ prisma, store, ingest, worker }));
+registerFlowReportTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {

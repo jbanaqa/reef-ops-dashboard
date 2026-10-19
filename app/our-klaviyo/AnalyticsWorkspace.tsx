@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import FlowResults from "./FlowResults";
 
 type AnalyticsRow = {
   key: string;
@@ -8,6 +9,8 @@ type AnalyticsRow = {
   name: string;
   messages: number;
   sent: number;
+  recipients: number;
+  convertedRecipients: number;
   delivered: number;
   opened: number;
   clicked: number;
@@ -24,6 +27,8 @@ type AnalyticsReport = {
   totals: {
     messages: number;
     sent: number;
+    recipients: number;
+    convertedRecipients: number;
     delivered: number;
     opened: number;
     clicked: number;
@@ -55,9 +60,11 @@ const money = (values: Record<string, number>) => {
 function PerformanceTable({
   heading,
   rows,
+  viewFlow,
 }: {
   heading: string;
   rows: AnalyticsRow[];
+  viewFlow?: (key: "welcome" | "abandoned-cart") => void;
 }) {
   return (
     <section className="mk-analytics-table mk-panel">
@@ -78,6 +85,7 @@ function PerformanceTable({
                 <th>Open rate</th>
                 <th>Click rate</th>
                 <th>Orders</th>
+                <th>Customer conversion</th>
                 <th>Revenue</th>
               </tr>
             </thead>
@@ -87,14 +95,18 @@ function PerformanceTable({
                   <td>
                     <strong>{row.name}</strong>
                     <small>{row.messages.toLocaleString()} messages sent in period</small>
+                    {viewFlow && (row.key === "welcome" || row.key === "abandoned-cart") && <button
+                      type="button" className="mk-flow-row-results" onClick={() => viewFlow(row.key as "welcome" | "abandoned-cart")}>
+                      View results
+                    </button>}
                   </td>
                   <td>{row.sent.toLocaleString()}</td>
-                  <td>{rate(row.opened, row.delivered || row.sent)}</td>
-                  <td>{rate(row.clicked, row.delivered || row.sent)}</td>
+                  <td>{rate(row.opened, row.sent)}</td>
+                  <td>{row.clicked ? rate(row.clicked, row.sent) : "No recorded clicks"}</td>
                   <td>
                     <strong>{row.orders.toLocaleString()}</strong>
-                    <small>{rate(row.orders, row.sent)} of sent</small>
                   </td>
+                  <td>{rate(row.convertedRecipients, row.recipients)}<small>{row.convertedRecipients.toLocaleString()} buyers / {row.recipients.toLocaleString()} recipients</small></td>
                   <td>{money(row.revenue)}</td>
                 </tr>
               ))}
@@ -114,6 +126,7 @@ export default function AnalyticsWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [resultsFlow, setResultsFlow] = useState<"welcome" | "abandoned-cart" | null>(null);
   const [attributionDraft, setAttributionDraft] = useState<{
     emailClickDays: number;
     emailOpenDays: number;
@@ -245,12 +258,12 @@ export default function AnalyticsWorkspace() {
               <small>{report.totals.delivered.toLocaleString()} confirmed delivered</small>
             </article>
             <article>
-              <span>Order rate</span>
-              <strong>{rate(report.totals.orders, report.totals.sent)}</strong>
-              <small>Attributed orders divided by sent messages</small>
+              <span>Customer conversion</span>
+              <strong>{rate(report.totals.convertedRecipients, report.totals.recipients)}</strong>
+              <small>{report.totals.convertedRecipients.toLocaleString()} buyers / {report.totals.recipients.toLocaleString()} recipients</small>
             </article>
           </div>
-          <PerformanceTable heading="Automated flows" rows={flows} />
+          <PerformanceTable heading="Automated flows" rows={flows} viewFlow={setResultsFlow} />
           <PerformanceTable heading="Campaigns" rows={campaigns} />
           <section className="mk-panel mk-attribution-settings">
             <div>
@@ -343,6 +356,7 @@ export default function AnalyticsWorkspace() {
         </>
       )}
       {!report && loading && <p role="status">Loading marketing results…</p>}
+      {resultsFlow && <FlowResults key={resultsFlow} flowKey={resultsFlow} autoOpen initialDays={days} onClose={() => setResultsFlow(null)} />}
     </div>
   );
 }

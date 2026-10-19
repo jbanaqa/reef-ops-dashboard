@@ -5,6 +5,7 @@ import EmailDesigner from "./EmailDesigner";
 import { flowEmailTemplates } from "@/lib/marketing/flow-email-templates";
 import FlowsWorkspace from "./FlowsWorkspace";
 import "./flows.css";
+import "./flow-results.css";
 import "./stock.css";
 import AudienceWorkspace from "./AudienceWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";

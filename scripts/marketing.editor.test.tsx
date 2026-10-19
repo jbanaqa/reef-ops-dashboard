@@ -248,21 +248,31 @@ test("cart results show delivery failures, credited orders, timestamped messages
   cleanup = testing.cleanup;
   const original = globalThis.fetch;
   let requests = 0;
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (input) => {
     requests++;
-    return Response.json({ attribution: { emailClickDays: 5, emailOpenDays: 5 },
-      rows: [{ key: "first", label: "Email #1 · Soft push", waiting: 1, sent: 2, delivered: 1, opened: 1, clicked: 0, bounced: 1, complained: 0, orders: 1, revenue: { USD: 100 }, stopped: 0, needsAttention: 0 }], reasons: [],
-      orders: [{ id: "order1", label: "#123", url: "https://audit.myshopify.com/admin/orders/123", email: "buyer@example.com", at: "2026-10-18T20:00:00Z", step: "Email #1 · Soft push", currency: "USD", amount: 100, interaction: "Open", interactedAt: "2026-10-18T19:00:00Z" }],
-      activity: [{ id: "message1", subject: "Your cart", status: "PENDING", email: "pending@example.com", triggerAt: "2026-10-18T18:00:00Z", dueAt: "2026-10-18T21:00:00Z", sentAt: null, error: "Waiting for 16-hour email spacing" }],
+    assert.match(String(input), /view=flow-report&key=abandoned-cart&days=30&ordersPage=1/);
+    const totals = { waiting: 1, sent: 2, recipients: 2, delivered: 1, opened: 1, clicked: 0, bounced: 1,
+      complained: 0, unsubscribed: 0, orders: 1, convertedRecipients: 1, revenue: { USD: 100 }, stopped: 0, needsAttention: 0 };
+    return Response.json({ flowKey: "abandoned-cart", name: "Abandoned Cart", days: 30,
+      since: "2026-09-18T20:00:00Z", generatedAt: "2026-10-18T20:00:00Z", attribution: { emailClickDays: 5, emailOpenDays: 5 },
+      totals, steps: [{ key: "first", label: "Email #1 · Soft push", ...totals }], reasons: [],
+      orders: [{ id: "order1", label: "#123", shopifyUrl: "https://audit.myshopify.com/admin/orders/123", profileId: "buyer1", email: "buyer@example.com", placedAt: "2026-10-18T20:00:00Z", sentAt: "2026-10-18T18:00:00Z", subject: "Your cart", step: "Email #1 · Soft push", currency: "USD", amount: 100, interaction: "OPENED", interactedAt: "2026-10-18T19:00:00Z", checkoutMatch: true, discountCodes: [] }],
+      ordersPage: { page: 1, pageSize: 25, pages: 1, total: 1 },
+      evidence: { matchingCheckoutOrders: 1, discountOrders: 0, missingCheckoutDetails: 0 },
+      activity: [{ id: "message1", profileId: "pending1", step: "Email #1 · Soft push", subject: "Your cart", status: "PENDING", email: "pending@example.com", triggerAt: "2026-10-18T18:00:00Z", dueAt: "2026-10-18T21:00:00Z", sentAt: null, error: "Waiting for 16-hour email spacing" }],
     });
   };
   try {
     const view = testing.render(<CartTools flow={{ reviewed: true, steps: [] }} />);
     testing.fireEvent.click(view.getByRole("button", { name: "View flow results" }));
-    assert.ok(await view.findByText("Bounced"));
-    assert.ok(view.getByText("Spam complaints"));
+    assert.ok(await view.findByText("Buyer conversion"));
+    const delivery = testing.within(view.container.querySelector(".mk-fr-delivery") as HTMLElement);
+    assert.ok(delivery.getByText("Bounced"));
+    assert.ok(delivery.getByText("Spam complaints"));
     assert.equal(view.getByRole("link", { name: /#123/ }).getAttribute("href"), "https://audit.myshopify.com/admin/orders/123");
     assert.ok(view.getByText("buyer@example.com"));
+    assert.ok(view.getByText("50.0%"));
+    assert.ok(view.getByText("Same checkout"));
     testing.fireEvent.click(view.getByText("Recent messages · latest 25"));
     assert.ok(view.getByText("pending@example.com"));
     assert.ok(view.getByText("Waiting for 16-hour email spacing"));

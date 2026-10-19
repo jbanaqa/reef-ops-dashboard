@@ -16,6 +16,7 @@ import { FlowMap, Node } from "./FlowMap";
 import EmailDesigner from "./EmailDesigner";
 import FlowDialog from "./FlowDialog";
 import CartTools from "./CartTools";
+import FlowResults from "./FlowResults";
 import WelcomeSettings from "./WelcomeSettings";
 import DeliveryUpsellSettings from "./DeliveryUpsellSettings";
 import {
@@ -538,6 +539,7 @@ function FlowEditorState({
         </details>
       )}
       {flow.cart && <CartTools flow={flow as FlowConfig} />}
+      {resource.key === "welcome" && <div className="mk-cart-tool-actions"><FlowResults flowKey="welcome" /></div>}
       {resource.key === "low-stock" && (
         <div className="mk-two">
           <label>

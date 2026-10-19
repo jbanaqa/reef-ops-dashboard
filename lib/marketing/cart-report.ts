@@ -3,6 +3,7 @@ import { shop } from "./store";
 import { DAY } from "./rules";
 import { attributionConfiguration, attributedOrders } from "./attribution";
 import { customerCartMessages } from "./cart-report-scope";
+import { orderValue } from "./order-evidence";
 const names: Record<string, string> = {
   sms: "Text message",
   first: "Email #1 · Soft push",
@@ -91,18 +92,18 @@ export async function cartReport() {
     cursor = page[page.length - 1].id;
   }
   const orders: { id: string; label: string; url: string | null; email: string; at: string; step: string;
-    currency: string; amount: number; interaction: string; interactedAt: string }[] = [];
+    currency: string; amount: number | null; interaction: string; interactedAt: string }[] = [];
   for await (const { order, match } of attributedOrders(prisma, { since, configuration: attribution })) {
     const row = match ? rowFor.get(match.messageId) : undefined;
     if (!row || !match) continue;
     const p = order.payload as { currency?: string; revenue?: string; orderId?: string; orderLabel?: string };
     row.orders++;
-    const amount = Number(p.revenue);
-    if (p.currency && Number.isFinite(amount)) row.revenue[p.currency] = (row.revenue[p.currency] || 0) + amount;
+    const { amount, currency } = orderValue(p);
+    if (currency && amount !== null) row.revenue[currency] = (row.revenue[currency] || 0) + amount;
     const id = String(p.orderId || "").replace(/^gid:\/\/shopify\/Order\//, "");
     orders.push({ id: order.id, label: p.orderLabel || (id ? "Order " + id : "Order"),
       url: /^\d+$/.test(id) ? `https://${shop()}/admin/orders/${id}` : null,
-      email: "", at: order.occurredAt.toISOString(), step: row.label, currency: p.currency || "", amount,
+      email: "", at: order.occurredAt.toISOString(), step: row.label, currency: currency || "", amount,
       interaction: match.interaction === "CLICKED" ? "Click" : "Open", interactedAt: match.interactedAt.toISOString() });
     orders.sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id));
     if (orders.length > 25) orders.pop();
