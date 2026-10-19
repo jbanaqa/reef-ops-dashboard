@@ -3,9 +3,11 @@ import crypto from "node:crypto";
 import { uniqueDiscount } from "./discounts";
 import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
-import { Content, content, DAY, eligible } from "./rules";
+import { Content, DAY, eligible } from "./rules";
 import { FlowConfig, validateFlow } from "./flow-config";
 import { json, shop, Tx } from "./store";
+import { setup } from "./delivery";
+import { saveCartConfig, resolveCartConfig, saveCartContent } from "./cart-storage";
 
 export type CartRun = {
   config: FlowConfig;
@@ -14,9 +16,30 @@ export type CartRun = {
   productIds: string[];
   url: string;
   observedAt?: string;
+  completedAt?: string;
 };
 export type CartLine = { product_id?: string | number; quantity?: number };
 export const cartRunKey = (key: string) => key.slice(0, key.lastIndexOf(":"));
+export const cartCheckoutKey = (profileId: string, checkout: string) => "cart-v1:" +
+  crypto.createHash("sha256").update(shop() + ":" + profileId + ":" + checkout).digest("hex");
+
+/** Completion is terminal for this checkout token, including late/out-of-order updates. */
+export async function completeCart(tx: Tx, profileId: string, checkout: string, at: Date) {
+  const root = cartCheckoutKey(profileId, checkout);
+  const runs = await tx.marketingResource.findMany({ where: {
+    shop: shop(), kind: "CART_RUN", OR: [{ key: root }, { key: { startsWith: root + ":attempt-" } }],
+  } });
+  for (const run of runs) await tx.marketingResource.update({ where: { id: run.id }, data: {
+    data: json({ ...(run.data as object), completedAt: at.toISOString() }),
+  } });
+  if (!runs.length) await tx.marketingResource.create({ data: {
+    shop: shop(), kind: "CART_RUN", key: root, name: "Completed checkout",
+    data: { profileId, completedAt: at.toISOString() },
+  } });
+  await tx.marketingMessage.updateMany({ where: {
+    shop: shop(), profileId, flowKey: "abandoned-cart", status: "PENDING", key: { startsWith: root + ":" },
+  }, data: { status: "CANCELLED", error: "Checkout completed" } });
+}
 export async function enrollCart(
   tx: Tx,
   profileId: string,
@@ -27,12 +50,7 @@ export async function enrollCart(
   lines?: CartLine[],
   observedAt = at,
 ) {
-  const rootBase =
-    "cart-v1:" +
-    crypto
-      .createHash("sha256")
-      .update(shop() + ":" + profileId + ":" + checkout)
-      .digest("hex");
+  const rootBase = cartCheckoutKey(profileId, checkout);
   let base = rootBase;
   let triggerAt = at;
   const existing = await tx.marketingResource.findFirst({
@@ -57,6 +75,7 @@ export async function enrollCart(
   // creates a new attempt and leaves the completed attempt in history.
   if (existing) {
     const saved = existing.data as unknown as CartRun;
+    if (saved.completedAt) return;
     const newer = !saved.observedAt || observedAt > new Date(saved.observedAt);
     const stale =
       !saved.observedAt ||
@@ -131,9 +150,9 @@ export async function enrollCart(
   )
     return;
   const sms =
-    !config.cart?.testEmail && !!profile.phone && eligible(smsConsent);
-  const run: CartRun = {
-    config,
+    setup().smsReady && !config.cart?.testEmail && !!profile.phone && eligible(smsConsent);
+  const run = {
+    configRef: await saveCartConfig(tx, shop(), config),
     ...(config.cart?.testEmail ? { testEmail: config.cart.testEmail } : {}),
     profileId,
     url,
@@ -188,9 +207,7 @@ export async function enrollCart(
       flowCondition: "cart-v1:" + row.id,
       channel: row.channel,
       subject: row.subject,
-      content: json(
-        content({ ...row.c, url, products: [], couponCode: undefined }),
-      ),
+      content: await saveCartContent(tx, shop(), { ...row.c, url, products: [], couponCode: undefined }),
       triggerAt,
       dueAt: new Date(+triggerAt + row.minutes * 60000),
     };
@@ -218,7 +235,13 @@ export async function loadCart(key: string): Promise<CartRun> {
       shop_kind_key: { shop: shop(), kind: "CART_RUN", key: cartRunKey(key) },
     },
   });
-  const run = row.data as unknown as CartRun;
+  const stored = row.data as unknown as CartRun & { configRef?: string };
+  const { configRef, ...values } = stored;
+  const run: CartRun = {
+    ...values,
+    config: configRef ? await resolveCartConfig(prisma, shop(), configRef) : stored.config,
+  };
+  if (!run.config) throw new Error("Checkout has no active recovery run");
   if (!run.profileId) {
     const message = await prisma.marketingMessage.findUnique({
       where: { key },

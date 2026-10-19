@@ -15,6 +15,7 @@ import {
 import FlowEditor from "../app/our-klaviyo/FlowEditor";
 import SettingsWorkspace from "../app/our-klaviyo/SettingsWorkspace";
 import CampaignEmailFields from "../app/our-klaviyo/CampaignEmailFields";
+import CartTools from "../app/our-klaviyo/CartTools";
 import {
   defaultDeliveryUpsell,
   deliveryUpsellContent,
@@ -242,6 +243,34 @@ test("settings presents the resumable Klaviyo audience backfill", async () => {
   }
 });
 afterEach(() => cleanup?.());
+test("cart results show delivery failures, credited orders, timestamped messages and refreshed data", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  const original = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    return Response.json({ attribution: { emailClickDays: 5, emailOpenDays: 5 },
+      rows: [{ key: "first", label: "Email #1 · Soft push", waiting: 1, sent: 2, delivered: 1, opened: 1, clicked: 0, bounced: 1, complained: 0, orders: 1, revenue: { USD: 100 }, stopped: 0, needsAttention: 0 }], reasons: [],
+      orders: [{ id: "order1", label: "#123", url: "https://audit.myshopify.com/admin/orders/123", email: "buyer@example.com", at: "2026-10-18T20:00:00Z", step: "Email #1 · Soft push", currency: "USD", amount: 100, interaction: "Open", interactedAt: "2026-10-18T19:00:00Z" }],
+      activity: [{ id: "message1", subject: "Your cart", status: "PENDING", email: "pending@example.com", triggerAt: "2026-10-18T18:00:00Z", dueAt: "2026-10-18T21:00:00Z", sentAt: null, error: "Waiting for 16-hour email spacing" }],
+    });
+  };
+  try {
+    const view = testing.render(<CartTools flow={{ reviewed: true, steps: [] }} />);
+    testing.fireEvent.click(view.getByRole("button", { name: "View flow results" }));
+    assert.ok(await view.findByText("Bounced"));
+    assert.ok(view.getByText("Spam complaints"));
+    assert.equal(view.getByRole("link", { name: /#123/ }).getAttribute("href"), "https://audit.myshopify.com/admin/orders/123");
+    assert.ok(view.getByText("buyer@example.com"));
+    testing.fireEvent.click(view.getByText("Recent messages · latest 25"));
+    assert.ok(view.getByText("pending@example.com"));
+    assert.ok(view.getByText("Waiting for 16-hour email spacing"));
+    assert.ok(view.getByText(/All times Pacific/));
+    testing.fireEvent.click(view.getByRole("button", { name: "Refresh results" }));
+    await testing.waitFor(() => assert.equal(requests, 2));
+  } finally { globalThis.fetch = original; }
+});
 test.beforeEach(() => {
   Object.assign(globalThis, { indexedDB: new IDBFactory() });
 });

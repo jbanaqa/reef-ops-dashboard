@@ -53,7 +53,7 @@ export const cartEmail = (
         : "Aloha Friend,",
     body:
       kind === "first"
-        ? "Looks like you left some corals in your cart!\n\nWe’re holding them, but they won’t stay forever..."
+        ? "Looks like you left some corals in your cart!"
         : kind === "yes"
           ? "Your corals are still waiting!\n\nGrab them now before they swim away..."
           : "Grab them now and enjoy 10% OFF\n\n— but hurry, they’re going fast!",

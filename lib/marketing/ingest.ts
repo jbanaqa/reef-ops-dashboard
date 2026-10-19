@@ -3,6 +3,7 @@ import { shopifyGraphql } from "@/lib/shopify";
 import { atomic, consent, identify, IdentityConflictError, json, record, shop, type Tx } from "./store";
 import { date } from "./rules";
 import { enroll } from "./flows";
+import { completeCart } from "./cart";
 import {
   deliveryDateFromTags,
   deliveryUpsellDueAt,
@@ -37,6 +38,7 @@ type Payload = Customer & {
   email_address?: string;
   occurredAt?: string;
   created_at?: string;
+  completed_at?: string | null;
   total_price?: string;
   currency?: string;
   test?: boolean;
@@ -455,6 +457,7 @@ export async function ingestShopify(
       await enroll(tx, "b2b-welcome", profile.id, key, at);
     }
     if (topic === "orders/create" && !p.test) {
+      if (p.checkout_token) await completeCart(tx, profile.id, p.checkout_token, date(p.created_at || at.toISOString()));
       const orderKey = `order:${p.id}`;
       if (
         !(await tx.marketingEvent.findUnique({
@@ -510,10 +513,14 @@ export async function ingestShopify(
       );
     if (
       ["checkouts/create", "checkouts/update"].includes(topic) &&
-      !historical &&
-      p.abandoned_checkout_url
+      !historical
     ) {
       const checkout = String(p.token || p.id || "");
+      if (p.completed_at) {
+        if (checkout) await completeCart(tx, profile.id, checkout, date(p.completed_at));
+        return { profileId: profile.id, completed: true };
+      }
+      if (!p.abandoned_checkout_url || !checkout) return { profileId: profile.id };
       if (checkout)
         await record(tx, {
           key: "checkout-start:" + profile.id + ":" + checkout,
@@ -527,7 +534,7 @@ export async function ingestShopify(
         "abandoned-cart",
         profile.id,
         String(p.token || p.id),
-        at,
+        date(p.created_at || at.toISOString()),
         { url: p.abandoned_checkout_url, lines: p.line_items, observedAt: at },
       );
     }

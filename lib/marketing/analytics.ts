@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { DAY } from "./rules";
 import { shop } from "./store";
+import { customerCartMessages } from "./cart-report-scope";
 import {
   attributionConfiguration,
   attributedOrders,
@@ -82,12 +83,13 @@ export async function marketingAnalytics(requestedDays = 30) {
       take: 500,
       select: {
         id: true,
+        key: true,
         flowKey: true,
         campaignId: true,
         campaign: { select: { name: true } },
       },
     });
-    for (const message of page) messages.set(message.id, message);
+    for (const message of await customerCartMessages(prisma, shop(), page)) messages.set(message.id, message);
     if (page.length)
       engagementEvents.push(
         ...(await prisma.marketingEvent.findMany({

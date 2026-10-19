@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FlowConfig } from "@/lib/marketing/flow-config";
 import type { Content } from "@/lib/marketing/rules";
+import type { CartReport } from "@/lib/marketing/cart-report";
 import FlowDialog from "./FlowDialog";
 type History = {
   missingMetrics?: string[];
@@ -14,22 +15,9 @@ type History = {
   error?: string;
   completedAt?: string;
 };
-type Report = {
-  rows: {
-    key: string;
-    label: string;
-    waiting: number;
-    sent: number;
-    delivered: number;
-    opened: number;
-    clicked: number;
-    orders: number;
-    revenue: Record<string, number>;
-    stopped: number;
-    needsAttention: number;
-  }[];
-  reasons: { reason: string; count: number }[];
-};
+const date = (value: string | Date) => new Date(value).toLocaleString("en-US", {
+  timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+});
 export default function CartTools({ flow }: { flow: FlowConfig }) {
   const [panel, setPanel] = useState<"products" | "history" | "results" | null>(
     null,
@@ -37,7 +25,7 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
   const [address, setAddress] = useState("");
   const [products, setProducts] = useState<Content["products"] | null>(null);
   const [history, setHistory] = useState<History | null>(null);
-  const [report, setReport] = useState<Report | null>(null);
+  const [report, setReport] = useState<CartReport | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const stop = useRef(false),
@@ -308,12 +296,13 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
             <>
               {busy && <p>Loading results…</p>}
               {report && (
-                <>
+                <div className="mk-campaign-report mk-cart-report">
                   <p>
-                    Messages created in the last 30 days. Opens and clicks count
-                    each message once; email privacy features can affect open
-                    counts.
+                    Sends from the last 30 days, plus recent waiting and stopped messages.
+                    Restricted test runs are excluded.
+                    Opens and clicks count each message once; privacy features can inflate opens.
                   </p>
+                  <button type="button" disabled={busy} onClick={() => open("results")}>Refresh results</button>
                   <div className="mk-cart-results">
                     {report.rows.map((r) => (
                       <section key={r.key}>
@@ -325,6 +314,8 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
                             ["Delivered", r.delivered],
                             ["Opened", r.opened],
                             ["Clicked", r.clicked],
+                            ["Bounced", r.bounced],
+                            ["Spam complaints", r.complained],
                             ["Orders", r.orders],
                             ["Stopped / skipped", r.stopped],
                             ["Needs attention", r.needsAttention],
@@ -337,8 +328,8 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
                         </dl>
                         {r.sent > 0 && (
                           <p>
-                            Open rate {Math.round((100 * r.opened) / r.sent)}% ·
-                            Click rate {Math.round((100 * r.clicked) / r.sent)}%
+                            Of sent: opened {Math.round((100 * r.opened) / r.sent)}% ·
+                            clicked {Math.round((100 * r.clicked) / r.sent)}%
                           </p>
                         )}
                         {Object.entries(r.revenue).map(([currency, amount]) => (
@@ -349,6 +340,33 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
                       </section>
                     ))}
                   </div>
+                  <section className="mk-attributed-orders" aria-label="Cart attributed orders">
+                    <h4>Attributed orders · latest 25</h4>
+                    {!report.orders.length ? <p>No orders attributed to this flow yet.</p> : <ol className="mk-order-list">
+                      {report.orders.map(order => <li key={order.id}>
+                        <div className="mk-order-summary">
+                          {order.url ? <a href={order.url} target="_blank" rel="noopener noreferrer">{order.label} ↗</a> : <strong>{order.label}</strong>}
+                          <time dateTime={order.at}>{date(order.at)}</time>
+                          <small>{order.step} · {order.interaction} {date(order.interactedAt)}</small>
+                        </div>
+                        <div className="mk-order-customer"><span>Customer</span><strong>{order.email}</strong></div>
+                        <div className="mk-order-amount"><span>Revenue</span><strong>{Number.isFinite(order.amount) && order.currency ? `${order.currency} ${order.amount.toFixed(2)}` : "Amount unavailable"}</strong></div>
+                      </li>)}
+                    </ol>}
+                  </section>
+                  <details>
+                    <summary>Recent messages · latest 25</summary>
+                    {!report.activity.length ? <p>No cart messages yet.</p> : <ol className="mk-order-list">
+                      {report.activity.map(message => <li key={message.id}>
+                        <div className="mk-order-summary"><strong>{message.subject}</strong>
+                          <small>Checkout {message.triggerAt ? date(message.triggerAt) : "time unavailable"}</small>
+                          <small>{message.sentAt ? "Sent " + date(message.sentAt) : message.status === "PENDING" ? "Next check " + date(message.dueAt) : message.status.toLowerCase()}</small>
+                        </div>
+                        <div className="mk-order-customer"><span>Customer</span><strong>{message.email}</strong></div>
+                        <div className="mk-order-amount"><strong>{message.status === "UNKNOWN" ? "Needs review" : message.status.toLowerCase()}</strong>{message.error && <small>{message.error}</small>}</div>
+                      </li>)}
+                    </ol>}
+                  </details>
                   {!!report.reasons.length && (
                     <details>
                       <summary>Why messages are waiting or stopped</summary>
@@ -362,10 +380,11 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
                     </details>
                   )}
                   <p>
-                    Sales use Reef Ops’ last-click / last-open attribution and
-                    may differ from Klaviyo’s reports.
+                    All times Pacific. Sales use the same current attribution settings as Analytics
+                    ({report.attribution.emailClickDays}-day clicks / {report.attribution.emailOpenDays}-day opens).
+                    Revenue is recorded order value before refunds; attribution does not prove the email caused a purchase.
                   </p>
-                </>
+                </div>
               )}
             </>
           )}

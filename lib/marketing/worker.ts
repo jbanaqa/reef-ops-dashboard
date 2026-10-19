@@ -11,6 +11,7 @@ import {
 } from "./cart";
 import { prisma } from "@/lib/prisma";
 import { saveCampaignContent, resolveCampaignContent, isCampaignContentReference } from "./content-storage";
+import { resolveCartContent, saveCartContent } from "./cart-storage";
 import { atomic, json, record, shop } from "./store";
 import {
   Content,
@@ -714,40 +715,13 @@ export async function runMarketing(onlyMessageId?: string) {
             const observedAt = cartRun.observedAt
               ? new Date(cartRun.observedAt)
               : null;
-            const staleDue =
-              observedAt &&
-              m.dueAt.getTime() < observedAt.getTime() - 3 * DAY &&
-              m.triggerAt &&
-              observedAt > m.triggerAt;
-            if (staleDue) {
-              const smsMinutes = cartRun.config.cart?.testEmail
-                ? 0
-                : (cartRun.config.smsMinutes ?? 30);
-              const firstMinutes = smsMinutes + cartRun.config.steps[0].minutes;
-              const minutes =
-                m.flowCondition === "cart-v1:sms"
-                  ? smsMinutes
-                  : m.flowCondition === "cart-v1:first"
-                    ? firstMinutes
-                    : firstMinutes + (cartRun.config.branchMinutes ?? 1440);
-              await tx.marketingMessage.update({
-                where: { id: m.id },
-                data: {
-                  status: "PENDING",
-                  triggerAt: observedAt,
-                  dueAt: new Date(+observedAt + minutes * 60000),
-                  attemptedAt: null,
-                  sentAt: null,
-                  providerId: null,
-                  attempts: 0,
-                  error: null,
-                },
-              });
-              return null;
-            }
+            const lastActivity = observedAt || m.triggerAt;
+            if (cartRun.completedAt) reason = "Checkout completed";
+            else if (!lastActivity || !Number.isFinite(+lastActivity) || +lastActivity < Date.now() - 3 * DAY)
+              reason = "Checkout expired";
             if (m.channel !== "EMAIL")
               m.content = JSON.parse(
-                JSON.stringify({ ...(m.content as Content), url: cartRun.url }),
+                JSON.stringify({ ...await resolveCartContent(tx, shop(), m.content), url: cartRun.url }),
               );
             if (m.flowCondition === "cart-v1:first" && m.attempts === 0) {
               m.subject = cartRun.config.steps[0].subject;
@@ -825,7 +799,15 @@ export async function runMarketing(onlyMessageId?: string) {
           }
         }
       }
+      if (!reason && cartRun && m.channel !== "EMAIL" && !config.smsReady)
+        reason = "SMS unavailable; continuing by email";
       if (reason) {
+        if (cartRun && ["Checkout completed", "Checkout expired", "Customer purchased after checkout"].includes(reason)) {
+          await tx.marketingMessage.updateMany({ where: {
+            shop: shop(), flowKey: "abandoned-cart", key: { startsWith: m.key.slice(0, m.key.lastIndexOf(":")) + ":" }, status: "PENDING",
+          }, data: { status: "CANCELLED", error: reason } });
+          return null;
+        }
         await tx.marketingMessage.update({
           where: { id: m.id },
           data: { status: "CANCELLED", error: reason },
@@ -1001,7 +983,7 @@ export async function runMarketing(onlyMessageId?: string) {
       try {
         m.content = JSON.parse(JSON.stringify(m.campaignId
           ? await resolveCampaignContent(tx, shop(), m.content)
-          : content(m.content)));
+          : cartRun ? await resolveCartContent(tx, shop(), m.content) : content(m.content)));
       } catch (e) {
         await tx.marketingMessage.update({
           where: { id: m.id },
@@ -1027,7 +1009,7 @@ export async function runMarketing(onlyMessageId?: string) {
             ? isCampaignContentReference(storedMessageContent)
               ? json(storedMessageContent)
               : await saveCampaignContent(tx, shop(), m.content)
-            : json(m.content),
+            : cartRun ? await saveCartContent(tx, shop(), m.content) : json(m.content),
         },
       });
       return result.count ? { message: m, settings } : null;
@@ -1174,7 +1156,7 @@ export async function runMarketing(onlyMessageId?: string) {
           const ready = await prisma.marketingResource.findUnique({
             where: { shop_kind_key: readyKey },
           });
-          if (ready) message.content = ready.data;
+          if (ready) message.content = JSON.parse(JSON.stringify(await resolveCartContent(prisma, shop(), ready.data)));
           else {
             const products = await cartProducts(cartRun);
             const couponCode =
@@ -1190,13 +1172,13 @@ export async function runMarketing(onlyMessageId?: string) {
               data: {
                 ...readyKey,
                 name: "Prepared cart email",
-                data: json(message.content),
+                data: await saveCartContent(prisma, shop(), message.content),
               },
             });
           }
           await prisma.marketingMessage.update({
             where: { id: message.id },
-            data: { content: json(message.content) },
+            data: { content: await saveCartContent(prisma, shop(), message.content) },
           });
           // Recheck local stop switches after product/discount API calls.
           const latest = await prisma.marketingMessage.findUniqueOrThrow({
@@ -1240,6 +1222,7 @@ export async function runMarketing(onlyMessageId?: string) {
             continue;
           }
           if (
+            (await loadCart(message.key)).completedAt ||
             (refreshedOrder &&
               message.triggerAt &&
               refreshedOrder >= message.triggerAt) ||

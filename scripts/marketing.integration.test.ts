@@ -9,6 +9,7 @@ import { PrismaClient } from "../app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { defaultContent } from "../lib/marketing/rules";
 import { registerWelcomeTests } from "./welcome.integration";
+import { registerCartLaunchTests } from "./cart-launch.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -39,6 +40,7 @@ const originalFetch = globalThis.fetch;
 let klaviyoPages: Record<string, unknown>[] = [];
 const shopifyUnsubscribeUpdates: Record<string, unknown>[] = [];
 let shopifyUnsubscribeUnavailable = false;
+registerCartLaunchTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {
@@ -2257,6 +2259,7 @@ test("stock checks require login, previews never enroll, and Shopify failures do
 });
 
 test("cart v1 uses sequential waits, both purchase-history branches, real coupons and duplicate protection", async () => {
+  const { resolveCartContent } = await import("../lib/marketing/cart-storage");
   const { cartDraft } = await import("../lib/marketing/cart-config");
   const { validateFlow } = await import("../lib/marketing/flow-config");
   const {
@@ -2434,7 +2437,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       ).dueAt,
       +waiting.dueAt,
     );
-    assert.equal((first.content as { products: unknown[] }).products.length, 1);
+    assert.equal((await resolveCartContent(prisma, shop, first.content)).products!.length, 1);
     const { contactDetails } = await import("../lib/marketing/audiences");
     const detail = await contactDetails(p.id);
     const progress = detail!.flowProgress.find(
@@ -2470,13 +2473,13 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
     assert.equal(last.status, "SENT");
     assert.equal(last.flowCondition, "cart-v1:final-no");
     assert.match(
-      (last.content as { couponCode: string }).couponCode,
+      (await resolveCartContent(prisma, shop, last.content)).couponCode!,
       /^AC300-[A-Z2-9]{8}$/,
     );
     assert.equal(couponCreates, 1);
     assert.equal(
       await cartCoupon(last.id),
-      (last.content as { couponCode: string }).couponCode,
+      (await resolveCartContent(prisma, shop, last.content)).couponCode,
     );
     assert.equal(couponCreates, 1, "retry reuses discount");
     assert.deepEqual(couponInputs[0].context, { all: "ALL" });
@@ -2519,13 +2522,17 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
     assert.equal(yes.status, "SENT");
     assert.equal(yes.flowCondition, "cart-v1:final-yes");
     assert.equal(
-      (yes.content as { couponCode?: string }).couponCode,
+      (await resolveCartContent(prisma, shop, yes.content)).couponCode,
       undefined,
     );
     assert.equal(couponCreates, 1);
 
     latestOrder = null;
+    Object.assign(process.env, { MARKETING_SMS_GATEWAY_URL: "https://sms.example", MARKETING_SMS_GATEWAY_KEY: "test", MARKETING_SMS_WEBHOOK_SECRET: "test" });
     const p3 = await make("cart1003", true);
+    delete process.env.MARKETING_SMS_GATEWAY_URL;
+    delete process.env.MARKETING_SMS_GATEWAY_KEY;
+    delete process.env.MARKETING_SMS_WEBHOOK_SECRET;
     const sms = await prisma.marketingMessage.findFirstOrThrow({
       where: { profileId: p3.id, channel: "SMS_MARKETING" },
     });
@@ -2982,6 +2989,7 @@ test("cart reports count unique engagement and keep revenue currencies separate"
       flowCondition: "cart-v1:first",
       channel: "EMAIL",
       status: "SENT",
+      sentAt: new Date(Date.now() - 10000),
       subject: "Report",
       content: defaultContent,
       dueAt: new Date(),
@@ -3001,6 +3009,7 @@ test("cart reports count unique engagement and keep revenue currencies separate"
       store.record(tx, {
         key: "report-event-" + i,
         type,
+        occurredAt: type === "DELIVERED" ? new Date(+m.sentAt! + 1) : new Date(),
         profileId: p.id,
         messageId: m.id,
         payload:

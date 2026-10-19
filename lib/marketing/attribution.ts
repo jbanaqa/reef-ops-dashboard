@@ -1,5 +1,6 @@
 import { DAY, marketingSettings } from "./rules";
 import { shop, type Tx } from "./store";
+import { customerCartMessages } from "./cart-report-scope";
 
 type AttributionClient = Pick<
   Tx,
@@ -82,7 +83,7 @@ export async function findEmailAttribution(
 ): Promise<AttributionMatch | null> {
   const settings = configuration || (await attributionConfiguration(client));
   const maxDays = Math.max(settings.emailClickDays, settings.emailOpenDays);
-  const messages = await client.marketingMessage.findMany({
+  const candidates = await client.marketingMessage.findMany({
     where: {
       shop: shop(),
       profileId,
@@ -98,8 +99,9 @@ export async function findEmailAttribution(
         { campaign: { is: { testOfCampaignId: null } } },
       ],
     },
-    select: { id: true, sentAt: true },
+    select: { id: true, key: true, flowKey: true, sentAt: true },
   });
+  const messages = await customerCartMessages(client, shop(), candidates);
   if (!messages.length) return null;
   const deliveryEvents = await client.marketingEvent.findMany({
     where: {
