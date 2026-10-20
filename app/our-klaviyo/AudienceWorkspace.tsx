@@ -308,8 +308,10 @@ function eventLabel(e: Activity) {
     WELCOME_ENTERED: "Entered the welcome series",
     PROFILE_LIST_REMOVED: "Removed from a Reef Ops audience list",
     FORM_EMAIL_SUBMITTED: "Email signup submitted",
-    "checkouts/create": "Checkout started",
-    "checkouts/update": "Checkout updated",
+    "checkouts/create": "Shopify checkout notification",
+    "checkouts/update": "Shopify checkout update",
+    CART_ABANDONMENT_CONFIRMED: "Abandoned checkout confirmed",
+    CART_ABANDONMENT_IGNORED: "Checkout not eligible for recovery",
   };
   return labels[e.type] || "Customer activity recorded";
 }
@@ -973,6 +975,9 @@ function ContactPanel({
           {section === "activity" && (
             <section className="aw-detail-section">
               <h3>Recent activity</h3>
+              {contact.events.some((event) => event.type.startsWith("checkouts/") || event.type.startsWith("CART_ABANDONMENT_")) && (
+                <p>A checkout update does not confirm a customer visit.</p>
+              )}
               {contact.events.length ? (
                 <ol className="aw-timeline">
                   {contact.events.map((e) => (

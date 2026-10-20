@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Resolver } from "node:dns/promises";
-import { isolated, enrollCartFixture as enrollCart, type Context } from "./cart-launch.integration";
+import { isolated, enrollCartFixture as enrollCart, cartAbandonmentFixture, type Context } from "./cart-launch.integration";
 import { validateFlow } from "../lib/marketing/flow-config";
 import { defaultContent } from "../lib/marketing/rules";
 
@@ -108,7 +108,7 @@ export function registerCartHandoffTests(context: () => Context) {
     } finally { Resolver.prototype.resolveMx = resolveMx; }
   }));
 
-  test("cart recovery: replacing sold-out items restarts recovery and preserves the cancelled attempt", async () => isolated(context(), "stock-reentry", async h => {
+  test("cart recovery: replacing sold-out items needs a new abandonment and preserves the cancelled attempt", async () => isolated(context(), "stock-reentry", async h => {
     const { cartRunKey } = await import("../lib/marketing/cart");
     const p = await h.make("stock-reentry@example.com"), start = new Date(Date.now() - 60000);
     await h.store.atomic(tx => enrollCart(tx, p.id, "stock-reentry", start, h.f, "https://store.example/checkouts/stock-old", [{ variant_id: 11 }]));
@@ -121,6 +121,10 @@ export function registerCartHandoffTests(context: () => Context) {
     const stockRun = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: h.shop, kind: "CART_RUN", key: cartRunKey(old.key) } } });
     assert.ok((stockRun.data as { stockStoppedAt?: string }).stockStoppedAt);
     await h.store.atomic(tx => enrollCart(tx, p.id, "stock-reentry", start, h.f, "https://store.example/checkouts/stock-new", [{ variant_id: 22 }], new Date()));
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0);
+    await h.store.atomic(tx => enrollCart(tx, p.id, "stock-reentry", start, h.f,
+      "https://store.example/checkouts/stock-new", [{ variant_id: 22 }], new Date(), undefined,
+      cartAbandonmentFixture(new Date(Date.now() - 1000), "2")));
     const fresh = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first", status: "PENDING" } });
     assert.notEqual(cartRunKey(fresh.key), cartRunKey(old.key));
     await h.worker.runMarketing(fresh.id);
@@ -136,6 +140,11 @@ export function registerCartHandoffTests(context: () => Context) {
     await h.prisma.marketingMessage.updateMany({ where: { profileId: p.id }, data: { status: "CANCELLED", error: "No purchasable items remain in this checkout" } });
     if (optedOut) await h.store.atomic(tx => h.store.consent(tx, p.id, "EMAIL", "UNSUBSCRIBED", "unsubscribe", new Date()));
     await h.store.atomic(tx => enrollCart(tx, p.id, "legacy-stock", start, h.f, "https://store.example/checkouts/restocked", undefined, new Date()));
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0,
+      "restocking metadata alone cannot restart a stopped abandonment");
+    await h.store.atomic(tx => enrollCart(tx, p.id, "legacy-stock", start, h.f,
+      "https://store.example/checkouts/restocked", undefined, new Date(), undefined,
+      cartAbandonmentFixture(new Date(Date.now() - 1000), "2")));
     const fresh = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first", status: "PENDING" } });
     assert.notEqual(cartRunKey(old.key), cartRunKey(fresh.key));
     await h.worker.runMarketing(fresh.id);

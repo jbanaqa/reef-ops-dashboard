@@ -79,6 +79,7 @@ type CampaignForm = {
 type Data = {
   health?: {
     unresolved: number;
+    cartAbandonment?: { cutoverAt: string | null; checkedAt: string | null; pending: number; error?: string };
     skippedOrderUpdates: number;
     lastProcessed: { processedAt: string; topic: string } | null;
     inbox: {

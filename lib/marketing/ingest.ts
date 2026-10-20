@@ -545,12 +545,15 @@ export async function ingestShopify(
         return { profileId: profile.id, completed: true };
       }
       if (!p.abandoned_checkout_url || !checkout) return { profileId: profile.id };
-      if (checkout)
+      const createdAt = new Date(p.created_at || "");
+      if (!Number.isFinite(+createdAt) || +createdAt > Date.now())
+        return { profileId: profile.id, skipped: "Checkout creation time is unavailable" };
+      if (topic === "checkouts/create")
         await record(tx, {
           key: "checkout-start:" + profile.id + ":" + checkout,
           type: "CHECKOUT_STARTED_TRUSTED",
           profileId: profile.id,
-          occurredAt: date(p.created_at || at.toISOString()),
+          occurredAt: createdAt,
           payload: { checkoutId: checkout },
         });
       await enroll(
@@ -558,7 +561,7 @@ export async function ingestShopify(
         "abandoned-cart",
         profile.id,
         String(p.token || p.id),
-        date(p.created_at || at.toISOString()),
+        createdAt,
         { url: p.abandoned_checkout_url, lines: p.line_items, observedAt: at,
           merchandise: p.line_items === undefined && p.subtotal_price === undefined && p.currency === undefined
             ? undefined : cartMerchandise(p) },

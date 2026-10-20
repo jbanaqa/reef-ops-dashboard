@@ -5,11 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { shopifyGraphql } from "@/lib/shopify";
 import { Content, DAY, eligible } from "./rules";
 import { FlowConfig, validateFlow } from "./flow-config";
-import { json, shop, Tx } from "./store";
+import { atomic, json, record, shop, Tx } from "./store";
 import { setup } from "./delivery";
 import { saveCartConfig, resolveCartConfig, saveCartContent } from "./cart-storage";
 import { CART_EXPIRY_MINUTES, CART_UNAVAILABLE_REASON } from "./cart-config";
 import { cartMerchandiseBlock, isCartServiceLine, isCartMerchandiseBlock, type CartMerchandise } from "./cart-merchandise";
+import { stageCartAbandonment, verifyCartAbandonmentAccess, type CartAbandonment } from "./cart-abandonment";
 
 export type CartRun = {
   config: FlowConfig;
@@ -18,6 +19,8 @@ export type CartRun = {
   productIds: string[];
   url: string;
   observedAt?: string;
+  abandonment?: CartAbandonment;
+  checkoutCreatedAt?: string;
   completedAt?: string;
   empty?: boolean;
   stockStoppedAt?: string;
@@ -35,10 +38,38 @@ export type CartLine = {
 export const cartRunKey = (key: string) => key.slice(0, key.lastIndexOf(":"));
 export const cartCheckoutKey = (profileId: string, checkout: string) => "cart-v1:" +
   crypto.createHash("sha256").update(shop() + ":" + profileId + ":" + checkout).digest("hex");
+export const CART_UNVERIFIED = "Checkout needs a verified Shopify abandonment";
+function verifiedAbandonment(proof?: CartAbandonment): proof is CartAbandonment {
+  return !!proof && /^gid:\/\/shopify\/Abandonment\/.+/.test(proof.id) &&
+    /^gid:\/\/shopify\/AbandonedCheckout\/.+/.test(proof.checkoutId) &&
+    Number.isFinite(+new Date(proof.abandonedAt));
+}
+
+/** Retire the old update-driven queue in bounded pages, retaining all history. */
+export async function reconcileUnverifiedCartMessages() {
+  const where = { shop: shop(), kind: "SYSTEM", key: "cart-abandonment-cleanup:v1" };
+  const state = await prisma.marketingResource.findUnique({ where: { shop_kind_key: where } });
+  const saved = state?.data as { cursor?: string; done?: boolean } | undefined;
+  if (saved?.done) return;
+  const messages = await prisma.marketingMessage.findMany({ where: { shop: shop(), flowKey: "abandoned-cart",
+    flowCondition: { startsWith: "cart-v1:" }, status: "PENDING", ...(saved?.cursor ? { id: { gt: saved.cursor } } : {}) },
+    select: { id: true, key: true }, orderBy: { id: "asc" }, take: 500 });
+  const roots = [...new Set(messages.map(m => cartRunKey(m.key)))];
+  const runs = await prisma.marketingResource.findMany({ where: { shop: shop(), kind: "CART_RUN", key: { in: roots } }, select: { key: true, data: true } });
+  const verified = new Set(runs.filter(r => verifiedAbandonment((r.data as unknown as CartRun).abandonment)).map(r => r.key));
+  await atomic(async tx => {
+    const keys = roots.filter(root => !verified.has(root)).flatMap(root => [root + ":sms", root + ":first", root + ":final"]);
+    await tx.marketingMessage.updateMany({ where: { shop: shop(), flowKey: "abandoned-cart", status: "PENDING", key: { in: keys } },
+      data: { status: "CANCELLED", error: CART_UNVERIFIED } });
+    const data = { ...(messages.length ? { cursor: messages[messages.length - 1].id } : {}), done: messages.length < 500, checkedAt: new Date().toISOString() };
+    await tx.marketingResource.upsert({ where: { shop_kind_key: where }, create: { ...where, name: "Retired unverified cart reminders", data }, update: { data } });
+  });
+}
 
 /** Completion is terminal for this checkout token, including late/out-of-order updates. */
 export async function completeCart(tx: Tx, profileId: string, checkout: string, at: Date) {
   const root = cartCheckoutKey(profileId, checkout);
+  await tx.marketingResource.updateMany({ where: { shop: shop(), kind: "CART_CANDIDATE", key: root }, data: { enabled: false } });
   const runs = await tx.marketingResource.findMany({ where: {
     shop: shop(), kind: "CART_RUN", OR: [{ key: root }, { key: { startsWith: root + ":attempt-" } }],
   } });
@@ -78,14 +109,16 @@ export async function currentCart(tx: Tx, key: string, run: CartRun): Promise<Ca
     shop_kind_key: { shop: shop(), kind: "CART_ACTIVE", key: latest.profileId },
   } }) : null;
   const owner = active?.data as { runKey?: string } | undefined;
-  const at = new Date(latest.observedAt || "");
+  const at = new Date(latest.abandonment?.abandonedAt || "");
   const minimum = cartMerchandiseBlock(latest.merchandise, Math.round((run.config.cart?.minimumSubtotal ?? 100) * 100));
   const stop = latest.completedAt ? "Checkout completed" :
+    !verifiedAbandonment(latest.abandonment) ? CART_UNVERIFIED :
     owner?.runKey && owner.runKey !== cartRunKey(key) ? "Replaced by the customer's newer checkout" :
     latest.empty ? "Checkout is empty" :
     minimum ? minimum :
     latest.stockStoppedAt ? CART_UNAVAILABLE_REASON :
-    !Number.isFinite(+at) || +at < Date.now() - CART_EXPIRY_MINUTES * 60000 ? "Checkout expired" : undefined;
+    +at > Date.now() ? "Shopify abandonment timestamp is in the future" :
+    +at < Date.now() - CART_EXPIRY_MINUTES * 60000 ? "Checkout expired" : undefined;
   return { ...latest, ...(stop ? { stop } : {}) };
 }
 
@@ -99,105 +132,82 @@ export async function enrollCart(
   lines?: CartLine[],
   observedAt = at,
   merchandise?: CartMerchandise,
+  abandonment?: CartAbandonment,
 ) {
+  if (!Number.isFinite(+at) || !Number.isFinite(+observedAt) || +at > Date.now() || +observedAt > Date.now() + 60000) return false;
   const rootBase = cartCheckoutKey(profileId, checkout);
-  let base = rootBase;
-  let triggerAt = at;
   const existing = await tx.marketingResource.findFirst({
-    where: {
-      shop: shop(),
-      kind: "CART_RUN",
-      OR: [{ key: rootBase }, { key: { startsWith: rootBase + ":attempt-" } }],
-    },
+    where: { shop: shop(), kind: "CART_RUN", OR: [{ key: rootBase }, { key: { startsWith: rootBase + ":attempt-" } }] },
     orderBy: { updatedAt: "desc" },
   });
+  const saved = existing?.data as (CartRun & { configRef?: string }) | undefined;
+  if (saved?.completedAt) return false;
   const id = (value: unknown) => {
     const result = String(value || "").replace(/^gid:\/\/shopify\/(?:Product|ProductVariant)\//, "");
     return /^\d+$/.test(result) ? result : undefined;
   };
   let cartLines: CartRun["lines"] = lines?.filter(l => (l.quantity === undefined || l.quantity > 0) && !isCartServiceLine(l))
     .map(l => ({ productId: id(l.product_id), variantId: id(l.variant_id) })).slice(0, 100);
-  let ids = [...new Set((cartLines || []).flatMap(l => l.productId ? [l.productId] : []))];
-  const activeWhere = { shop: shop(), kind: "CART_ACTIVE", key: profileId };
-  const active = await tx.marketingResource.findUnique({ where: { shop_kind_key: activeWhere } });
-  const owner = active?.data as { runKey: string; observedAt: string } | undefined;
-  // A delayed webhook must not replace a newer checkout for the same customer.
-  if (owner && owner.runKey !== existing?.key && new Date(owner.observedAt) >= observedAt) return;
-  const activate = async (runKey: string) => {
-    await tx.marketingResource.upsert({ where: { shop_kind_key: activeWhere },
-      create: { ...activeWhere, name: "Current checkout recovery", data: { runKey, observedAt: observedAt.toISOString() } },
-      update: { data: { runKey, observedAt: observedAt.toISOString() } } });
-    await tx.marketingMessage.updateMany({ where: {
-      shop: shop(), profileId, flowKey: "abandoned-cart", status: "PENDING",
-      NOT: { key: { startsWith: runKey + ":" } },
-    }, data: { status: "CANCELLED", error: "Replaced by the customer's newer checkout" } });
-  };
-  if (existing) {
-    const saved = existing.data as unknown as CartRun & { configRef?: string };
-    if (saved.completedAt) return;
-    if (saved.observedAt && observedAt <= new Date(saved.observedAt)) return;
-    const stale = !saved.observedAt || +observedAt - +new Date(saved.observedAt) > 3 * DAY;
-    const replaced = !!owner && owner.runKey !== existing.key;
-    // Recognize stock stops from the previous release as well as the durable marker.
-    const stockStopped = saved.stockStoppedAt || await tx.marketingMessage.findFirst({ where: {
-      shop: shop(), key: { in: [existing.key + ":first", existing.key + ":final"] },
-      status: "CANCELLED", error: CART_UNAVAILABLE_REASON,
-    }, select: { id: true } });
-    // Only a genuinely newer, eligible observation may restart a stopped attempt.
-    if (merchandise === undefined && lines === undefined) merchandise = saved.merchandise;
-    const eligibility = cartMerchandiseBlock(merchandise, Math.round((config.cart?.minimumSubtotal ?? 100) * 100));
-    const refill = (!eligibility && saved.eligibilityStopped) || (saved.empty && cartLines && cartLines.length > 0) ||
-      (stockStopped && (cartLines === undefined || cartLines.length > 0));
+  if (merchandise === undefined && lines === undefined) merchandise = saved?.merchandise;
+  const eligibility = cartMerchandiseBlock(merchandise, Math.round((config.cart?.minimumSubtotal ?? 100) * 100));
+  // A webhook is a context revision, never proof that a person returned or abandoned.
+  if (existing && saved && (!saved.observedAt || +observedAt > +new Date(saved.observedAt))) {
     const refreshed = { ...saved, url, observedAt: observedAt.toISOString(),
       merchandise: merchandise ?? { blocked: "Checkout merchandise total is unavailable" },
       ...(eligibility ? { eligibilityStopped: eligibility } : {}),
-      ...(cartLines !== undefined ? { productIds: ids, lines: cartLines, empty: cartLines.length === 0 } : {}) };
-    if (!stale && !replaced && !refill) {
-      await tx.marketingResource.update({ where: { id: existing.id }, data: { data: json(refreshed) } });
-      await activate(existing.key);
-      if (eligibility) await cancelCart(tx, existing.key, eligibility);
-      else if (refreshed.empty) await cancelCart(tx, existing.key, "Checkout is empty");
-      else {
-        const entered = saved.configRef ? await resolveCartConfig(tx, shop(), saved.configRef) : saved.config || config;
-        const dueAt = new Date(+observedAt + entered.steps[0].minutes * 60000);
-        await tx.marketingMessage.updateMany({ where: { shop: shop(), key: { startsWith: existing.key + ":" },
-          channel: "EMAIL", status: "PENDING", dueAt: { lt: dueAt } }, data: { dueAt, error: "Waiting for checkout inactivity" } });
-      }
-      return;
-    }
-    await cancelCart(tx, existing.key, "Superseded by new checkout activity");
-    if (cartLines === undefined) { cartLines = saved.lines; ids = saved.productIds || []; }
-    base = rootBase + ":attempt-" + observedAt.getTime();
-    triggerAt = observedAt;
+      ...(cartLines !== undefined ? { productIds: [...new Set(cartLines.flatMap(l => l.productId ? [l.productId] : []))],
+        lines: cartLines, empty: cartLines.length === 0 } : {}) };
+    await tx.marketingResource.update({ where: { id: existing.id }, data: { data: json(refreshed) } });
+    if (eligibility) await cancelCart(tx, existing.key, eligibility);
+    else if (refreshed.empty) await cancelCart(tx, existing.key, "Checkout is empty");
   }
-  const eligibility = cartMerchandiseBlock(merchandise, Math.round((config.cart?.minimumSubtotal ?? 100) * 100));
-  if (eligibility) {
-    await tx.marketingResource.create({ data: { shop: shop(), kind: "CART_RUN", key: base,
-      name: "Checkout excluded from recovery", data: json({ profileId, url, productIds: ids,
-        ...(cartLines !== undefined ? { lines: cartLines } : {}),
-        merchandise: merchandise ?? { blocked: "Checkout merchandise total is unavailable" },
-        eligibilityStopped: eligibility, observedAt: observedAt.toISOString() }) } });
-    await activate(base);
-    return;
+  if (!abandonment) {
+    await stageCartAbandonment(tx, { profileId, checkout, createdAt: at, url, lines, observedAt, merchandise });
+    return false;
   }
-  if (cartLines && !cartLines.length) {
-    await tx.marketingResource.create({ data: { shop: shop(), kind: "CART_RUN", key: base,
-      name: "Empty checkout", data: { profileId, url, productIds: [], lines: [], empty: true, observedAt: observedAt.toISOString() } } });
-    await activate(base);
-    return;
+  if (!verifiedAbandonment(abandonment)) return false;
+  const abandonedAt = new Date(abandonment.abandonedAt);
+  if (+abandonedAt > Date.now() || +abandonedAt <= Date.now() - CART_EXPIRY_MINUTES * 60000) return false;
+  // A confirmed abandonment can be admitted once, including after stock/consent stops.
+  if (saved?.abandonment && (saved.abandonment.id === abandonment.id ||
+    +new Date(saved.abandonment.abandonedAt) >= +abandonedAt)) return false;
+  const activeWhere = { shop: shop(), kind: "CART_ACTIVE", key: profileId };
+  const active = await tx.marketingResource.findUnique({ where: { shop_kind_key: activeWhere } });
+  const owner = active?.data as { runKey?: string; abandonedAt?: string } | undefined;
+  if (owner?.runKey !== existing?.key && owner?.abandonedAt && +new Date(owner.abandonedAt) >= +abandonedAt) return false;
+  if (eligibility || (cartLines !== undefined && !cartLines.length)) return false;
+  if (existing) await cancelCart(tx, existing.key, "Superseded by a newer Shopify abandonment");
+  const base = existing ? rootBase + ":attempt-" + crypto.createHash("sha256").update(abandonment.id).digest("hex").slice(0, 24) : rootBase;
+  // Context already received while Shopify was classifying the checkout takes precedence.
+  if (saved?.observedAt && +new Date(saved.observedAt) > +observedAt) {
+    observedAt = new Date(saved.observedAt);
+    merchandise = saved.merchandise;
+    cartLines = saved.lines;
+    if (cartMerchandiseBlock(merchandise, Math.round((config.cart?.minimumSubtotal ?? 100) * 100)) || saved.empty) return false;
   }
+  if (cartLines === undefined) cartLines = saved?.lines;
+  const ids = [...new Set((cartLines || []).flatMap(l => l.productId ? [l.productId] : []))];
+  // Preserve the original purchase boundary; only waiting/expiry use abandonment time.
+  const triggerAt = at;
+  const activate = async (runKey: string) => {
+    const data = { runKey, abandonedAt: abandonedAt.toISOString() };
+    await tx.marketingResource.upsert({ where: { shop_kind_key: activeWhere },
+      create: { ...activeWhere, name: "Current checkout recovery", data }, update: { data } });
+    await tx.marketingMessage.updateMany({ where: { shop: shop(), profileId, flowKey: "abandoned-cart", status: "PENDING",
+      NOT: { key: { startsWith: runKey + ":" } } }, data: { status: "CANCELLED", error: "Replaced by the customer's newer checkout" } });
+  };
   const smsConsent = await tx.marketingConsent.findUnique({
     where: { profileId_channel: { profileId, channel: "SMS_MARKETING" } },
   });
   const profile = await tx.marketingProfile.findUniqueOrThrow({
     where: { id: profileId },
   });
-  if (profile.lastOrderAt && profile.lastOrderAt >= triggerAt) return;
+  if (profile.lastOrderAt && profile.lastOrderAt >= triggerAt) return false;
   if (
     config.cart?.testEmail !== undefined &&
     profile.email !== config.cart.testEmail
   )
-    return;
+    return false;
   const sms =
     setup().smsReady && !config.cart?.testEmail && !!profile.phone && eligible(smsConsent);
   const run = {
@@ -206,6 +216,8 @@ export async function enrollCart(
     profileId,
     url,
     observedAt: observedAt.toISOString(),
+    abandonment,
+    checkoutCreatedAt: at.toISOString(),
     merchandise,
     productIds: ids,
     ...(cartLines !== undefined ? { lines: cartLines } : {}),
@@ -220,6 +232,9 @@ export async function enrollCart(
     },
   });
   await activate(base);
+  await record(tx, { key: "cart-abandonment:" + profileId + ":" + abandonment.id,
+    type: "CART_ABANDONMENT_CONFIRMED", profileId, occurredAt: abandonedAt,
+    payload: { abandonmentId: abandonment.id, checkoutId: abandonment.checkoutId } });
   const rows = [
     ...(sms
       ? [
@@ -261,7 +276,7 @@ export async function enrollCart(
       subject: row.subject,
       content: await saveCartContent(tx, shop(), { ...row.c, url, products: [], couponCode: undefined }),
       triggerAt,
-      dueAt: new Date(+observedAt + row.minutes * 60000),
+      dueAt: new Date(+abandonedAt + row.minutes * 60000),
     };
     if (config.cart?.testEmail) {
       await tx.marketingMessage.upsert({
@@ -279,6 +294,7 @@ export async function enrollCart(
       });
     } else await tx.marketingMessage.create({ data });
   }
+  return true;
 }
 
 export async function loadCart(key: string): Promise<CartRun> {
@@ -369,7 +385,7 @@ export async function cartDependency(
     return new Date(Math.max(Date.now() + 60000, +previous.dueAt));
   const savedWait = wait?.data as { dueAt?: string; testAdvance?: boolean } | undefined;
   if (run.testEmail && savedWait?.testAdvance) return null;
-  const inactivity = new Date(+new Date(run.observedAt!) + (stage === "sms" ? run.config.smsMinutes ?? 30 : run.config.steps[0].minutes) * 60000);
+  const inactivity = new Date(+new Date(run.abandonment?.abandonedAt || "") + (stage === "sms" ? run.config.smsMinutes ?? 30 : run.config.steps[0].minutes) * 60000);
   let due = +inactivity;
   if (previous && !savedWait?.dueAt) {
     const minutes = stage === "first" ? run.config.steps[0].minutes : (run.config.branchMinutes ?? 1440);
@@ -523,6 +539,7 @@ export async function cartCoupon(messageId: string) {
   return (await uniqueDiscount(messageId, { kind: "CART_COUPON", name: "Abandon_Cart10", prefix: "AC300-" })).code;
 }
 export async function cartReadiness() {
+  await verifyCartAbandonmentAccess();
   const r = await shopifyGraphql<{
     data?: {
       currentAppInstallation?: { accessScopes: { handle: string }[] };

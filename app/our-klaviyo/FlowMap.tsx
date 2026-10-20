@@ -24,7 +24,7 @@ export function flowNodes(resource: Resource): Node[] {
   const triggers: Record<string, string> = {
     "b2b-welcome": "Shopify B2B tag added",
     welcome: "Joins Mailable Subscribers",
-    "abandoned-cart": "Identified checkout started",
+    "abandoned-cart": "Shopify confirms an abandoned checkout",
     "low-stock": "Inventory crosses threshold",
     "delivery-upsell": "Shopify order has a delivery-date tag",
   };
@@ -364,14 +364,14 @@ function CartMap({
       {node(
         "trigger",
         "trigger",
-        "Checkout started",
-        "New checkouts can re-enter. Duplicate updates do not restart the flow.",
+        "Shopify confirms an abandoned checkout",
+        "Start once per checkout. Updates alone do not restart recovery.",
       )}
       {line}
       {node(
         "entry",
         "condition",
-        "Checkout started within the last 3 days",
+        "Shopify abandonment within last 3 days",
         "Older events end here. A new purchase stops every remaining reminder.",
       )}
       {line}
@@ -415,7 +415,7 @@ function CartMap({
         "email-wait",
         "wait",
         "Wait " + duration(f.steps[0].minutes),
-        "After the text is sent or skipped; immediately begins on the no-text path.",
+        "After Shopify confirms abandonment; updates do not restart the wait.",
         { kind: "wait", index: 0 },
       )}
       {line}
@@ -428,7 +428,7 @@ function CartMap({
         "followup-wait",
         "wait",
         "Wait " + duration(f.branchMinutes ?? 1440),
-        "After the first email is sent or skipped.",
+        "After the first email is sent.",
         { kind: "wait", timing: "branchMinutes" },
       )}
       {line}

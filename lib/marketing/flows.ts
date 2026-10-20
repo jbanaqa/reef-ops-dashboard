@@ -1,6 +1,6 @@
 import { enrollCart, CartLine } from "./cart";
 import { enrollWelcome } from "./welcome";
-import { content, DAY, withCoupon } from "./rules";
+import { content, withCoupon } from "./rules";
 import { flowSequence, validateFlow } from "./flow-config";
 export type { FlowConfig } from "./flow-config";
 import { json, shop, Tx } from "./store";
@@ -51,34 +51,7 @@ export async function enroll(
     });
     if (recipient?.email !== config.delivery.testEmail) return;
   }
-  if (key === "abandoned-cart" && at < new Date(Date.now() - 3 * DAY)) {
-    if (!config.cart) return;
-    const p = await tx.marketingProfile.findUnique({
-      where: { id: profileId },
-      select: { email: true },
-    });
-    const recent = await tx.marketingEvent.findFirst({
-      where: {
-        shop: shop(),
-        type: {
-          in: [
-            "CHECKOUT_STARTED_TRUSTED",
-            "HISTORY_CHECKOUT",
-            "checkouts/create",
-            "checkouts/update",
-          ],
-        },
-        occurredAt: { gte: new Date(Date.now() - 3 * DAY), lte: new Date() },
-        OR: [
-          { profileId },
-          ...(p?.email
-            ? [{ payload: { path: ["email"], equals: p.email } }]
-            : []),
-        ],
-      },
-    });
-    if (!recent) return;
-  }
+  if (key === "abandoned-cart" && !config.cart) return;
   if (key === "abandoned-cart" && config.cart) {
     if (!context.url || !eventKey || eventKey === "undefined") return;
     await enrollCart(

@@ -71,6 +71,35 @@ const { chromium } = require("playwright");
 
     await page.goto("http://127.0.0.1:" + server.address().port);
     await page.getByText("5 of 5 workflows", { exact: true }).waitFor();
+    if (process.argv.includes("--cart-trigger-only")) {
+      const cartRow = page.locator(".fw-row").filter({
+        has: page.getByRole("heading", { name: "Abandoned Cart", exact: true }),
+      });
+      await cartRow.getByText("Starts: Shopify confirms an abandoned checkout", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Open Abandoned Cart", exact: true }).click();
+      const map = page.locator(".mk-cart-map");
+      await map.getByText("Shopify confirms an abandoned checkout", { exact: true }).waitFor();
+      await map.getByText("Shopify abandonment within last 3 days", { exact: true }).waitFor();
+      await map.getByText("Start once per checkout. Updates alone do not restart recovery.", { exact: true }).waitFor();
+      const wait = map.getByRole("button").filter({
+        hasText: "After Shopify confirms abandonment; updates do not restart the wait.",
+      });
+      await wait.click();
+      await page.getByRole("dialog").getByText("Minutes after Shopify confirms abandonment. Updates do not restart the wait. Recovery ends after 72 hours.", { exact: true }).waitFor();
+      await page.getByRole("dialog").getByRole("button", { name: "Close editor", exact: true }).click();
+      await map.getByRole("button").filter({ hasText: "After the first email is sent." }).click();
+      await page.getByRole("dialog").getByText("Minutes after the first email sends. Recovery ends 72 hours after Shopify confirms abandonment.", { exact: true }).waitFor();
+      await page.getByRole("dialog").getByRole("button", { name: "Close editor", exact: true }).click();
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({ width, height: 1000 });
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Cart trigger wording fits at " + width);
+        await map.screenshot({ path: path.join(output, "cart-trigger-" + width + ".png") });
+      }
+      assert.deepEqual(errors, []);
+      console.log("PASS: Shopify-confirmed abandonment trigger, fixed first wait, follow-up dependency and desktop/390/320 layouts");
+      console.log("Screenshots: " + output);
+      return;
+    }
     if (process.argv.includes("--cart-minimum-only")) {
       await page.getByRole("button", { name: "Open Abandoned Cart", exact: true }).click();
       const minimum = page.getByLabel("Minimum merchandise subtotal (USD)", { exact: true });

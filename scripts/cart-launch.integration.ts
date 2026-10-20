@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import type { PrismaClient } from "../app/generated/prisma/client";
 import { cartDraft } from "../lib/marketing/cart-config";
 import { validateFlow, type FlowConfig } from "../lib/marketing/flow-config";
@@ -12,12 +13,37 @@ let loadCart: typeof import("../lib/marketing/cart")["loadCart"],
   cartReport: typeof import("../lib/marketing/cart-report")["cartReport"],
   marketingAnalytics: typeof import("../lib/marketing/analytics")["marketingAnalytics"];
 
-/** Existing lifecycle fixtures explicitly represent a verified $150 merchandise cart. */
+export const cartAbandonmentFixture = (at: Date, id = "1", checkout = id) => ({
+  id: "gid://shopify/Abandonment/" + id,
+  checkoutId: "gid://shopify/AbandonedCheckout/" + BigInt("0x" + crypto.createHash("sha256").update(checkout).digest("hex").slice(0, 12)).toString(),
+  abandonedAt: at.toISOString(),
+});
+
+/** Native checks remain explicit mocked Shopify requests, never live API traffic. */
+export async function cartNativeFixtureResponse(prisma: PrismaClient, query: string, variables: Record<string, unknown>) {
+  if (query.includes("CartAbandonmentCandidates") || query.includes("CartAbandonmentReadiness")) return Response.json({ data: {
+    abandonedCheckouts: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+  } });
+  if (!query.includes("CartAbandonmentCheck")) return;
+  const row = await prisma.marketingResource.findFirst({ where: { shop: process.env.SHOPIFY_SHOP_DOMAIN!, kind: "CART_RUN",
+    data: { path: ["abandonment", "checkoutId"], equals: String(variables.id) },
+  }, orderBy: { updatedAt: "desc" } });
+  const run = row?.data as { profileId?: string; url?: string; abandonment?: { id: string; checkoutId: string; abandonedAt: string } } | undefined;
+  const profile = run?.profileId ? await prisma.marketingProfile.findUnique({ where: { id: run.profileId } }) : null;
+  return Response.json({ data: { abandonmentByAbandonedCheckoutId: run?.abandonment ? {
+    id: run.abandonment.id, createdAt: run.abandonment.abandonedAt, abandonmentType: "CHECKOUT", customerHasNoOrderSinceAbandonment: true,
+    abandonedCheckoutPayload: { id: run.abandonment.checkoutId, createdAt: run.abandonment.abandonedAt, completedAt: null, recoveredAt: null,
+      abandonedCheckoutUrl: run.url, customer: { id: "gid://shopify/Customer/1", defaultEmailAddress: { emailAddress: profile?.email } } },
+  } : null } });
+}
+
+/** Lifecycle fixtures explicitly represent Shopify's confirmed abandonment, not a raw update. */
 export async function enrollCartFixture(...args: Parameters<typeof import("../lib/marketing/cart")["enrollCart"]>) {
   const { enrollCart } = await import("../lib/marketing/cart");
-  const [tx, profileId, checkout, at, config, url, lines, observedAt, merchandise] = args;
+  const [tx, profileId, checkout, at, config, url, lines, observedAt, merchandise, abandonment] = args;
   return enrollCart(tx, profileId, checkout, at, config, url, lines, observedAt,
-    merchandise ?? { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 });
+    merchandise ?? { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 },
+    abandonment ?? cartAbandonmentFixture(at, "1", profileId + ":" + checkout));
 }
 const enrollCart = enrollCartFixture;
 
@@ -48,6 +74,8 @@ export async function isolated(context: Context, name: string, work: (h: Harness
     if (url.includes("/oauth/access_token")) return Response.json({ access_token: "mock" });
     if (url.includes("/graphql.json")) {
       const b = JSON.parse(String(init?.body));
+      const native = await cartNativeFixtureResponse(context.prisma, b.query, b.variables || {});
+      if (native) return native;
       if (b.query.includes("CartAvailability")) return Response.json({ data: { nodes: b.variables.ids.map(() => ({
         status: "ACTIVE", onlineStoreUrl: "https://store.example/products/coral", title: "Coral", variants: { nodes: [{ availableForSale: true }] },
         availableForSale: true, product: { status: "ACTIVE", onlineStoreUrl: "https://store.example/products/coral", title: "Coral" },
@@ -113,6 +141,8 @@ export function registerCartLaunchTests(context: () => Context) {
       currency: "USD", subtotal_price: "150.00", abandoned_checkout_url: "https://store.example/checkouts/time",
       line_items: [{ product_id: 1, title: "Coral", quantity: 1, price: "150.00", discount_allocations: [] }] };
     await h.ingest.ingestShopify("checkouts/update", "time-1", checkout);
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id } }), 0);
+    await h.store.atomic(tx => enrollCart(tx, p.id, "time", start, h.f, checkout.abandoned_checkout_url, [{ product_id: 1 }], update));
     let messages = await h.prisma.marketingMessage.findMany({ where: { shop: h.shop, profileId: p.id } });
     assert.equal(messages.length, 2);
     assert.ok(messages.every(m => +m.triggerAt! === +start));
@@ -129,11 +159,8 @@ export function registerCartLaunchTests(context: () => Context) {
     const originalStart = new Date(Date.now() - 4 * DAY);
     await h.store.atomic(tx => enrollCart(tx, backlog.id, "backlog", originalStart, h.f, "https://store.example/checkouts/backlog", [{ product_id: 1 }], new Date()));
     h.orders.set(backlog.email!, new Date(Date.now() - DAY).toISOString());
-    const backlogged = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: backlog.id, flowCondition: "cart-v1:first" } });
-    await h.worker.runMarketing(backlogged.id);
-    const checked = await h.prisma.marketingMessage.findUniqueOrThrow({ where: { id: backlogged.id } });
-    assert.equal(+checked.triggerAt!, +originalStart, "even overdue waits retain their purchase-check boundary");
-    assert.equal(checked.status, "CANCELLED");
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: backlog.id } }), 0,
+      "a recent metadata update cannot revive an expired native abandonment");
 
     const completed = await h.make("completed-cart@example.com");
     await h.ingest.ingestShopify("checkouts/update", "complete-first", { ...checkout, token: "completed", email: completed.email!, completed_at: update.toISOString() });
@@ -166,8 +193,15 @@ export function registerCartLaunchTests(context: () => Context) {
     assert.equal((await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: smsPending.id, channel: "SMS_MARKETING" } })).error, "SMS unavailable; continuing by email");
     assert.equal(h.emails.length, 2, "an existing unconfigured SMS branch also lets its emails continue");
     const old = await h.make("expired-cart@example.com");
-    await h.store.atomic(tx => enrollCart(tx, old.id, "old", new Date(Date.now() - 10 * DAY), h.f, "https://store.example/checkouts/old", [{ product_id: 1 }]));
+    await h.store.atomic(tx => enrollCart(tx, old.id, "old", new Date(Date.now() - 60000), h.f, "https://store.example/checkouts/old", [{ product_id: 1 }]));
     messages = await h.prisma.marketingMessage.findMany({ where: { profileId: old.id } });
+    const expiredRun = await h.prisma.marketingResource.findUniqueOrThrow({ where: {
+      shop_kind_key: { shop: h.shop, kind: "CART_RUN", key: cartRunKey(messages[0].key) },
+    } });
+    const expiredData = expiredRun.data as { abandonment: { id: string; checkoutId: string; abandonedAt: string } };
+    await h.prisma.marketingResource.update({ where: { id: expiredRun.id }, data: { data: h.store.json({
+      ...expiredRun.data as object, abandonment: { ...expiredData.abandonment, abandonedAt: new Date(Date.now() - 10 * DAY).toISOString() },
+    }) } });
     await h.worker.runMarketing(messages.find(m => m.flowCondition === "cart-v1:first")!.id);
     const expired = await h.prisma.marketingMessage.findMany({ where: { profileId: old.id } });
     assert.ok(expired.every(m => m.status === "CANCELLED" && m.error === "Checkout expired"));

@@ -11,10 +11,11 @@ import { defaultContent } from "../lib/marketing/rules";
 import { registerWelcomeTests } from "./welcome.integration";
 import { registerCartHandoffTests } from "./cart-handoff.integration";
 import { registerCartRecoveryTests } from "./cart-recovery.integration";
-import { registerCartLaunchTests } from "./cart-launch.integration";
+import { registerCartLaunchTests, enrollCartFixture, cartNativeFixtureResponse } from "./cart-launch.integration";
 import { registerFlowReportTests } from "./flow-report.integration";
 import { registerCartMinimumTests } from "./cart-minimum.integration";
 import { registerCartMerchandiseTests } from "./cart-merchandise.integration";
+import { registerCartAbandonmentTests } from "./cart-abandonment.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -51,6 +52,7 @@ registerCartHandoffTests(() => ({ prisma, store, ingest, worker }));
 registerFlowReportTests(() => ({ prisma, store, ingest, worker }));
 registerCartMinimumTests(() => ({ prisma, store, ingest, worker }));
 registerCartMerchandiseTests();
+registerCartAbandonmentTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {
@@ -126,6 +128,8 @@ before(async () => {
       return Response.json({ access_token: "mock" });
     if (url.includes("/graphql.json")) {
       const payload = JSON.parse(String(init?.body));
+      const native = await cartNativeFixtureResponse(prisma, payload.query || "", payload.variables || {});
+      if (native) return native;
       if (payload.query?.includes("CartAvailability")) return Response.json({ data: { nodes: payload.variables.ids.map(() => ({ status: "ACTIVE", onlineStoreUrl: "https://coralsanonymous.com/products/coral", title: "Coral", variants: { nodes: [{ availableForSale: true }] } })) } });
       if (payload.query?.includes("FindCustomerForUnsubscribe")) {
         if (shopifyUnsubscribeUnavailable) return new Response("Unavailable", { status: 503 });
@@ -1101,21 +1105,47 @@ test("ingestion gate rejects signed events and transient rows do not hide flows"
   process.env.DASHBOARD_USERNAME = "staff";
   process.env.DASHBOARD_PASSWORD = "test-password";
   const api = await import("../app/api/marketing/route");
-  const response = await api.GET(
-    new Request("https://app.example/api/marketing", {
-      headers: {
-        authorization:
-          "Basic " + Buffer.from("staff:test-password").toString("base64"),
-      },
-    }),
-  );
-  assert.equal(response.status, 200);
-  const data = await response.json();
-  assert.equal(
-    data.resources.filter((r: { kind: string }) => r.kind === "FLOW").length,
-    5,
-  );
-  assert.ok(!data.resources.some((r: { kind: string }) => r.kind === "RATE"));
+  const { CART_ABANDONMENT_STATE_KEY } = await import("../lib/marketing/cart-abandonment");
+  const stateWhere = { shop, kind: "SYSTEM", key: CART_ABANDONMENT_STATE_KEY };
+  const previousState = await prisma.marketingResource.findUnique({ where: { shop_kind_key: stateWhere } });
+  const previousCandidates = await prisma.marketingResource.count({ where: { shop, kind: "CART_CANDIDATE", enabled: true } });
+  const stateData = {
+    cutoverAt: "2026-10-19T22:00:00Z", checkedAt: "2026-10-19T22:05:00Z",
+    error: "Access denied for abandonmentByAbandonedCheckoutId field.",
+    privateRecoveryUrl: "https://shop.example/private-recovery-token",
+  };
+  await prisma.marketingResource.upsert({ where: { shop_kind_key: stateWhere },
+    create: { ...stateWhere, name: "Abandonment health", data: stateData }, update: { data: stateData } });
+  await prisma.marketingResource.createMany({ data: [
+    { shop, kind: "CART_CANDIDATE", key: "health-pending", name: "Candidate", enabled: true, data: { status: "PENDING", checkout: "private-token" } },
+    { shop, kind: "CART_CANDIDATE", key: "health-done", name: "Candidate", enabled: false, data: { status: "ADMITTED" } },
+    { shop: "other-health.myshopify.com", kind: "CART_CANDIDATE", key: "health-pending", name: "Candidate", enabled: true, data: { status: "PENDING" } },
+  ] });
+  try {
+    const response = await api.GET(
+      new Request("https://app.example/api/marketing", {
+        headers: {
+          authorization:
+            "Basic " + Buffer.from("staff:test-password").toString("base64"),
+        },
+      }),
+    );
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(
+      data.resources.filter((r: { kind: string }) => r.kind === "FLOW").length,
+      5,
+    );
+    assert.ok(!data.resources.some((r: { kind: string }) => r.kind === "RATE"));
+    assert.deepEqual(data.health.cartAbandonment, {
+      cutoverAt: stateData.cutoverAt, checkedAt: stateData.checkedAt,
+      error: stateData.error, pending: previousCandidates + 1,
+    });
+  } finally {
+    await prisma.marketingResource.deleteMany({ where: { kind: "CART_CANDIDATE", key: { in: ["health-pending", "health-done"] }, shop: { in: [shop, "other-health.myshopify.com"] } } });
+    if (previousState) await prisma.marketingResource.update({ where: { id: previousState.id }, data: { data: store.json(previousState.data) } });
+    else await prisma.marketingResource.delete({ where: { shop_kind_key: stateWhere } });
+  }
 });
 
 test("absence snapshots preserve explicit consent and suppression provenance", async () => {
@@ -2276,8 +2306,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
   const {
     cartCoupon,
     cartDependency,
-    cartRunKey,
-    enrollCart,
+    cartCheckoutKey,
     loadCart,
     rankedProducts,
   } = await import("../lib/marketing/cart");
@@ -2388,6 +2417,8 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       currency: "USD", subtotal_price: "150.00",
       line_items: [{ product_id: "111", title: "Coral", quantity: 1, price: "150.00", discount_allocations: [] }],
     });
+    await store.atomic(tx => enrollCartFixture(tx, p.id, n, new Date(created), f,
+      "https://coralsanonymous.com/checkouts/" + n, [{ product_id: "111" }]));
     return p;
   };
   try {
@@ -2591,6 +2622,8 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       currency: "USD", subtotal_price: "150.00",
       line_items: [{ product_id: "111", title: "Coral", quantity: 1, price: "150.00", discount_allocations: [] }],
     });
+    await store.atomic(tx => enrollCartFixture(tx, p.id, "cart-second-checkout", new Date(Date.now() - 1000), f,
+      "https://coralsanonymous.com/checkouts/second", [{ product_id: "111" }]));
     assert.equal(
       await prisma.marketingMessage.count({ where: { profileId: p.id } }),
       4,
@@ -2676,23 +2709,15 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
     });
     profiles.push(revived.id);
     const checkoutCreatedAt = new Date(Date.now() - 60 * 86400000);
-    await store.atomic((tx) =>
-      enrollCart(
-        tx,
-        revived.id,
-        "revived-token",
-        checkoutCreatedAt,
-        f,
-        "https://coralsanonymous.com/checkouts/revived-token",
-        [{ product_id: "1", quantity: 1 }],
-        checkoutCreatedAt,
-        { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 },
-      ),
-    );
-    await prisma.marketingMessage.updateMany({
-      where: { profileId: revived.id, status: "PENDING" },
-      data: { status: "SENT", sentAt: checkoutCreatedAt },
-    });
+    const legacyRoot = cartCheckoutKey(revived.id, "revived-token");
+    await prisma.marketingResource.create({ data: { shop, kind: "CART_RUN", key: legacyRoot, name: "Legacy checkout recovery",
+      data: store.json({ profileId: revived.id, config: f, url: "https://coralsanonymous.com/checkouts/revived-token",
+        observedAt: checkoutCreatedAt.toISOString(), productIds: ["1"], merchandise: { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 } }) } });
+    for (const stage of ["first", "final"]) await prisma.marketingMessage.create({ data: {
+      shop, profileId: revived.id, key: legacyRoot + ":" + stage, flowKey: "abandoned-cart", flowCondition: "cart-v1:" + stage,
+      channel: "EMAIL", subject: "Legacy cart", content: defaultContent, status: "SENT", triggerAt: checkoutCreatedAt,
+      dueAt: checkoutCreatedAt, sentAt: checkoutCreatedAt,
+    } });
     const checkoutUpdatedAt = new Date();
     await ingest.ingestShopify("checkouts/update", "revived-update", {
       token: "revived-token",
@@ -2712,7 +2737,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       },
       orderBy: { dueAt: "asc" },
     });
-    assert.equal(revivedMessages.length, 2);
+    assert.equal(revivedMessages.length, 0, "an old checkout update cannot establish a new abandonment");
     const completedAttempt = await prisma.marketingMessage.findMany({
       where: {
         profileId: revived.id,
@@ -2721,23 +2746,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       },
     });
     assert.equal(completedAttempt.length, 2);
-    assert.notEqual(
-      cartRunKey(completedAttempt[0].key),
-      cartRunKey(revivedMessages[0].key),
-      "a revived checkout preserves the completed run and creates a new attempt",
-    );
-    assert.equal(
-      revivedMessages[0].triggerAt?.toISOString(),
-      checkoutUpdatedAt.toISOString(),
-      "a revived checkout starts a fresh flow at its latest activity",
-    );
-    assert.ok(
-      Math.abs(
-        +revivedMessages[0].dueAt -
-          (+checkoutUpdatedAt + f.steps[0].minutes * 60000),
-      ) < 1000,
-      `a revived checkout must not preserve its original schedule: ${revivedMessages[0].flowCondition} due ${revivedMessages[0].dueAt.toISOString()}, expected ${new Date(+checkoutUpdatedAt + f.steps[0].minutes * 60000).toISOString()}`,
-    );
+    assert.ok(completedAttempt.every(m => +m.triggerAt! === +checkoutCreatedAt), "sent history is retained unchanged");
     await ingest.ingestShopify(
       "checkouts/update",
       "revived-update-duplicate",
@@ -2756,8 +2765,8 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       await prisma.marketingMessage.count({
         where: { profileId: revived.id, key: { startsWith: "cart-v1:" } },
       }),
-      4,
-      "duplicate activity cannot create another checkout attempt",
+      2,
+      "duplicate metadata cannot create another checkout attempt",
     );
   } finally {
     globalThis.fetch = savedFetch;
@@ -3661,13 +3670,15 @@ test("cart test mode isolates enrollment and sending, including previously queue
   const target = await make("restricted@example.com"),
     other = await make("outside-test@example.com");
   const start = async (id: string, key: string) =>
-    store.atomic((tx) =>
-      enroll(tx, "abandoned-cart", id, key, new Date(Date.now() - 1000), {
+    store.atomic(async (tx) => {
+      const at = new Date(Date.now() - 1000);
+      await enroll(tx, "abandoned-cart", id, key, at, {
         url: "https://coralsanonymous.com/checkouts/" + key,
         lines: [{ product_id: "111", quantity: 1 }],
         merchandise: { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 },
-      }),
-    );
+      });
+      await enrollCartFixture(tx, id, key, at, f, "https://coralsanonymous.com/checkouts/" + key, [{ product_id: "111", quantity: 1 }]);
+    });
   const save = () =>
     prisma.marketingResource.update({
       where: { id: row.id },
@@ -3876,13 +3887,16 @@ test("send this test step now advances only the selected email and keeps deliver
       }),
     });
   const enrollTest = async (key: string) => {
-    await store.atomic((tx) =>
-      enroll(tx, "abandoned-cart", p.id, key, new Date(), {
+    await store.atomic(async (tx) => {
+      const at = new Date();
+      await enroll(tx, "abandoned-cart", p.id, key, at, {
         url: "https://coralsanonymous.com/checkouts/" + key,
         lines: [{ product_id: "111", variant_id: "222", quantity: 1 }],
         merchandise: { currency: "USD", subtotalCents: 15000, merchandiseLines: 1 },
-      }),
-    );
+      });
+      await enrollCartFixture(tx, p.id, key, at, f, "https://coralsanonymous.com/checkouts/" + key,
+        [{ product_id: "111", variant_id: "222", quantity: 1 }]);
+    });
     return prisma.marketingMessage.findMany({
       where: { profileId: p.id, status: "PENDING" },
       orderBy: { createdAt: "desc" },

@@ -64,6 +64,7 @@ export type SettingsData = {
   setup: Record<string, unknown>;
   health?: {
     unresolved: number;
+    cartAbandonment?: { cutoverAt: string | null; checkedAt: string | null; pending: number; error?: string };
     skippedOrderUpdates: number;
     skippedOrderReviews?: { id: string; label: string; reason: string; createdAt: string }[];
     inbox: InboxRow[];
@@ -548,6 +549,22 @@ export default function SettingsWorkspace({
             </section>
             <section className="sw-card">
               <h3>Delivery health</h3>
+              {data.health?.cartAbandonment?.error && (
+                <p className="sw-warning" role="alert">
+                  <strong>Abandoned Cart verification needs attention.</strong>{" "}
+                  {data.health.cartAbandonment.error}
+                </p>
+              )}
+              {data.health?.cartAbandonment && (
+                <div className="sw-hint">
+                  {!!data.health.cartAbandonment.pending && <p>
+                    {data.health.cartAbandonment.pending} {data.health.cartAbandonment.pending === 1 ? "checkout is" : "checkouts are"} waiting for Shopify to confirm abandonment.
+                  </p>}
+                  {data.health.cartAbandonment.checkedAt && <p>
+                    Abandoned checkout check: {date(data.health.cartAbandonment.checkedAt)}
+                  </p>}
+                </div>
+              )}
               {data.health ? (
                 data.health.unresolved ? (
                   <>

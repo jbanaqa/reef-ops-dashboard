@@ -78,7 +78,7 @@ export async function authorizeDelivery(handoff: Handoff): Promise<boolean> {
       if (latest.observedAt !== cart.observedAt) return stop("Checkout changed during preparation", false);
       const dependency = await cartDependency(tx, m, latest);
       const quietUntil = m.channel === "EMAIL" ? cartEmailNextAllowed(live.cart!, (m.profile.properties as { timezone?: string })?.timezone) : null;
-      if (dependency || quietUntil) return stop("Waiting for checkout inactivity or cart email sending hours", false,
+      if (dependency || quietUntil) return stop("Waiting for the abandonment delay or cart email sending hours", false,
         new Date(Math.max(+(dependency || 0), +(quietUntil || 0))));
     }
     return true;

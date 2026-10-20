@@ -598,8 +598,9 @@ function FlowEditorState({
           Email and text consent are checked before sending. Existing Klaviyo
           automations should be paused before this flow goes live to avoid
           duplicate reminders. Saved email edits apply when waiting messages are
-          prepared. The first email waits for checkout inactivity. The final
-          email waits until the first has sent, then starts its follow-up delay.
+          prepared. The first email waits after Shopify confirms abandonment;
+          checkout updates do not restart the wait. The final email waits until
+          the first has sent, then starts its follow-up delay.
         </p>
       )}
       <p>{draftStatus}</p>
@@ -786,8 +787,8 @@ function FlowEditorState({
                 <p className="mk-modal-explanation">
                   {flow.cart
                     ? selected.target.timing === "branchMinutes"
-                      ? "Minutes after the first email sends. Recovery stops after 72 hours without checkout activity."
-                      : "Minutes of checkout inactivity. Recovery stops after 72 hours without checkout activity."
+                      ? "Minutes after the first email sends. Recovery ends 72 hours after Shopify confirms abandonment."
+                      : "Minutes after Shopify confirms abandonment. Updates do not restart the wait. Recovery ends after 72 hours."
                     : "Minutes after the triggering event, not after the previous step."}
                 </p>
                 <label>

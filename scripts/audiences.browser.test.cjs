@@ -294,6 +294,12 @@ const { chromium } = require("playwright");
                   occurredAt: "2026-09-09T12:00:00Z",
                   payload: { tags: ["b2b"] },
                 },
+                ...["checkouts/create", "checkouts/update", "CART_ABANDONMENT_CONFIRMED", "CART_ABANDONMENT_IGNORED"].map((type, i) => ({
+                  id: "checkout-event-" + i,
+                  type,
+                  occurredAt: "2026-09-09T12:00:00Z",
+                  payload: {},
+                })),
               ],
             },
           },
@@ -408,6 +414,14 @@ const { chromium } = require("playwright");
     await page.getByText("Scheduled", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Activity", exact: true }).click();
     await page.getByText("Tags added: b2b", { exact: true }).waitFor();
+    for (const label of [
+      "Shopify checkout notification",
+      "Shopify checkout update",
+      "Abandoned checkout confirmed",
+      "Checkout not eligible for recovery",
+      "A checkout update does not confirm a customer visit.",
+    ]) await page.getByText(label, { exact: true }).waitFor();
+    assert.equal(await page.getByText("Checkout started", { exact: true }).count(), 0);
     await page.keyboard.press("Escape");
     assert.equal(await page.getByRole("dialog").count(), 0);
     assert.equal(

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isolated, type Context } from "./cart-launch.integration";
+import { isolated, cartAbandonmentFixture, type Context } from "./cart-launch.integration";
 
 const amount = (subtotalCents = 15000) => ({ currency: "USD" as const, subtotalCents, merchandiseLines: 1 });
 
@@ -14,26 +14,33 @@ export function registerCartMinimumTests(context: () => Context) {
     ] as const) {
       const p = await h.make(`minimum-${label}@example.com`);
       await h.store.atomic(tx => enrollCart(tx, p.id, label, start, h.f,
-        "https://store.example/checkouts/" + label, [{ product_id: 1 }], start, facts));
+        "https://store.example/checkouts/" + label, [{ product_id: 1 }], start, facts, cartAbandonmentFixture(start, "1", p.id + ":" + label)));
       assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id } }), expected, label);
     }
     assert.equal(h.emails.length, 0);
   }));
 
-  test("cart minimum: a newer ineligible checkout replaces older reminders and later qualifies in a fresh attempt", async () => isolated(context(), "minimum-lifecycle", async h => {
+  test("cart minimum: only a qualifying confirmed checkout can replace an existing reminder", async () => isolated(context(), "minimum-lifecycle", async h => {
     const { enrollCart, cartRunKey } = await import("../lib/marketing/cart");
     const p = await h.make("minimum-lifecycle@example.com"), start = new Date(Date.now() - 60000);
-    const enter = (token: string, observedAt: Date, subtotal: number) => h.store.atomic(tx => enrollCart(tx,
-      p.id, token, start, h.f, "https://store.example/checkouts/" + token,
-      [{ product_id: 1 }], observedAt, amount(subtotal)));
+    const proofs = new Map<string, ReturnType<typeof cartAbandonmentFixture>>(); let nextProof = 0;
+    const enter = (token: string, observedAt: Date, subtotal: number, newAbandonment = false) => {
+      const confirmed = !proofs.has(token) || newAbandonment;
+      if (!proofs.has(token) || newAbandonment) proofs.set(token, cartAbandonmentFixture(observedAt, String(++nextProof), p.id + ":" + token));
+      return h.store.atomic(tx => enrollCart(tx, p.id, token, start, h.f,
+        "https://store.example/checkouts/" + token, [{ product_id: 1 }], observedAt, amount(subtotal), confirmed ? proofs.get(token) : undefined));
+    };
     await enter("old-valid", start, 15000);
     const original = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
     await enter("new-low", new Date(+start + 1000), 2500);
-    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0);
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 2);
     await enter("old-valid", new Date(+start + 500), 20000);
-    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0,
-      "a delayed high-value webhook cannot restore an older checkout");
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 2,
+      "the existing confirmed checkout retains ownership");
     await enter("new-low", new Date(+start + 2000), 10000);
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 2,
+      "a high-value metadata update cannot replace the existing confirmed recovery");
+    await enter("new-low", new Date(+start + 3000), 10000, true);
     const fresh = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, status: "PENDING", flowCondition: "cart-v1:first" } });
     assert.notEqual(cartRunKey(fresh.key), cartRunKey(original.key));
     await enter("new-low", new Date(+start + 1000), 100);
@@ -45,16 +52,19 @@ export function registerCartMinimumTests(context: () => Context) {
     assert.match(JSON.stringify(h.emails[0]), /new-low/);
   }));
 
-  test("cart minimum: falling below the threshold stops an existing attempt; refilling creates a fresh one", async () => isolated(context(), "minimum-refill", async h => {
+  test("cart minimum: falling below the threshold stops recovery; a new confirmed abandonment is required", async () => isolated(context(), "minimum-refill", async h => {
     const { enrollCart, cartRunKey } = await import("../lib/marketing/cart");
     const p = await h.make("minimum-refill@example.com"), start = new Date(Date.now() - 60000);
-    const enter = (at: Date, subtotal: number) => h.store.atomic(tx => enrollCart(tx, p.id, "same-minimum", start,
-      h.f, "https://store.example/checkouts/same-minimum", [{ product_id: 1 }], at, amount(subtotal)));
+    const enter = (at: Date, subtotal: number, renewed = false) => h.store.atomic(tx => enrollCart(tx, p.id, "same-minimum", start,
+      h.f, "https://store.example/checkouts/same-minimum", [{ product_id: 1 }], at, amount(subtotal),
+      cartAbandonmentFixture(renewed ? at : start, renewed ? "2" : "1", p.id + ":same-minimum")));
     await enter(start, 15000);
     const first = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
     await enter(new Date(+start + 1000), 5000);
     assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0);
     await enter(new Date(+start + 2000), 15000);
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0);
+    await enter(new Date(+start + 3000), 15000, true);
     const next = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, status: "PENDING", flowCondition: "cart-v1:first" } });
     assert.notEqual(cartRunKey(first.key), cartRunKey(next.key));
     assert.equal((await h.prisma.marketingMessage.findUniqueOrThrow({ where: { id: first.id } })).status, "CANCELLED");
@@ -64,10 +74,10 @@ export function registerCartMinimumTests(context: () => Context) {
     const { enrollCart, completeCart } = await import("../lib/marketing/cart");
     const p = await h.make("minimum-completed@example.com"), start = new Date(Date.now() - 60000);
     await h.store.atomic(tx => enrollCart(tx, p.id, "completed-minimum", start, h.f,
-      "https://store.example/checkouts/completed-minimum", [{ product_id: 1 }], start, amount(100)));
+      "https://store.example/checkouts/completed-minimum", [{ product_id: 1 }], start, amount(100), cartAbandonmentFixture(start)));
     await h.store.atomic(tx => completeCart(tx, p.id, "completed-minimum", new Date(+start + 1000)));
     await h.store.atomic(tx => enrollCart(tx, p.id, "completed-minimum", start, h.f,
-      "https://store.example/checkouts/completed-minimum", [{ product_id: 1 }], new Date(+start + 2000), amount(20000)));
+      "https://store.example/checkouts/completed-minimum", [{ product_id: 1 }], new Date(+start + 2000), amount(20000), cartAbandonmentFixture(new Date(+start + 2000), "2")));
     assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id } }), 0);
     assert.equal(h.emails.length, 0);
   }));
@@ -95,6 +105,12 @@ export function registerCartMinimumTests(context: () => Context) {
         abandoned_checkout_url: "https://store.example/checkouts/" + example.label, line_items: example.lines,
       };
       await h.ingest.ingestShopify("checkouts/create", "minimum-ingest-" + example.label, payload);
+      assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id } }), 0,
+        "raw checkout notifications only stage candidates");
+      const { enrollCart } = await import("../lib/marketing/cart");
+      const { cartMerchandise } = await import("../lib/marketing/cart-merchandise");
+      await h.store.atomic(tx => enrollCart(tx, p.id, example.label, new Date(start), h.f, payload.abandoned_checkout_url,
+        example.lines, new Date(start), cartMerchandise(payload), cartAbandonmentFixture(new Date(start), "1", p.id + ":" + example.label)));
       assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id } }), example.expected, example.label);
       if (example.expected) {
         const first = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
@@ -110,7 +126,7 @@ export function registerCartMinimumTests(context: () => Context) {
     const { authorizeDelivery } = await import("../lib/marketing/send-guard");
     const p = await h.make("minimum-live@example.com"), start = new Date(Date.now() - 60000);
     await h.store.atomic(tx => enrollCart(tx, p.id, "minimum-live", start, h.f,
-      "https://store.example/checkouts/minimum-live", [{ product_id: 1 }], start, amount()));
+      "https://store.example/checkouts/minimum-live", [{ product_id: 1 }], start, amount(), cartAbandonmentFixture(start, "1", p.id + ":minimum-live")));
     const first = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
     const cartRun = await loadCart(first.key);
     const attemptedAt = new Date();
@@ -127,7 +143,7 @@ export function registerCartMinimumTests(context: () => Context) {
     const { enrollCart, cartRunKey } = await import("../lib/marketing/cart");
     const p = await h.make("minimum-legacy@example.com"), start = new Date(Date.now() - 60000);
     await h.store.atomic(tx => enrollCart(tx, p.id, "minimum-legacy", start, h.f,
-      "https://store.example/checkouts/minimum-legacy", [{ product_id: 1 }], start, amount()));
+      "https://store.example/checkouts/minimum-legacy", [{ product_id: 1 }], start, amount(), cartAbandonmentFixture(start, "1", p.id + ":minimum-legacy")));
     const first = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
     const run = await h.prisma.marketingResource.findUniqueOrThrow({ where: {
       shop_kind_key: { shop: h.shop, kind: "CART_RUN", key: cartRunKey(first.key) },

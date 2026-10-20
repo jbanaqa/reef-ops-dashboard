@@ -19,6 +19,7 @@ import {
 } from "@/lib/marketing/campaign-audience";
 import { cartProducts } from "@/lib/marketing/cart";
 import { cartReadiness } from "@/lib/marketing/cart";
+import { CART_ABANDONMENT_STATE_KEY } from "@/lib/marketing/cart-abandonment";
 import { readStock, lowStock } from "@/lib/marketing/stock";
 import { validateStock } from "@/lib/marketing/stock-config";
 import { isDashboardRequestAuthorized } from "@/lib/dashboard-request-auth";
@@ -783,7 +784,25 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" }, take: 10,
       select: { id: true, payload: true, createdAt: true },
     });
+    const [abandonmentState, awaitingAbandonment] = await Promise.all([
+      prisma.marketingResource.findUnique({
+        where: { shop_kind_key: { shop: shop(), kind: "SYSTEM", key: CART_ABANDONMENT_STATE_KEY } },
+        select: { data: true },
+      }),
+      prisma.marketingResource.count({
+        where: { shop: shop(), kind: "CART_CANDIDATE", enabled: true },
+      }),
+    ]);
+    const abandonmentData = abandonmentState?.data && typeof abandonmentState.data === "object" && !Array.isArray(abandonmentState.data)
+      ? abandonmentState.data as Record<string, unknown> : {};
+    const abandonmentTime = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
     const health = {
+      cartAbandonment: {
+        cutoverAt: abandonmentTime(abandonmentData.cutoverAt),
+        checkedAt: abandonmentTime(abandonmentData.checkedAt),
+        pending: awaitingAbandonment,
+        ...(typeof abandonmentData.error === "string" && abandonmentData.error ? { error: abandonmentData.error } : {}),
+      },
       skippedOrderReviews: skippedReviews.map((row) => {
         const payload = row.payload as { orderId?: string; orderLabel?: string; skipReason?: string };
         return { id: row.id, label: payload.orderLabel || payload.orderId || "Unknown order", reason: payload.skipReason || "Delivery date removed or invalid", createdAt: row.createdAt };

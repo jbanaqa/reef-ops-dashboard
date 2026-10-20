@@ -89,6 +89,8 @@ const { chromium } = require("playwright");
     let deliveryRuns = 0;
     let imports = 0;
     let engagementRunning = false;
+    let abandonmentError = "Access denied for abandonmentByAbandonedCheckoutId field.";
+    let pendingAbandonments = 2;
     await page.route("**/api/marketing**", async (route) => {
       const req = route.request();
       if (req.method() === "POST") {
@@ -212,6 +214,12 @@ const { chromium } = require("playwright");
           },
           health: {
             unresolved: conflictPending ? 1 : 0,
+            cartAbandonment: {
+              cutoverAt: "2026-10-19T22:00:00Z",
+              checkedAt: "2026-10-19T22:05:00Z",
+              pending: pendingAbandonments,
+              ...(abandonmentError ? { error: abandonmentError } : {}),
+            },
             skippedOrderUpdates: skippedCount,
             skippedOrderReviews: skippedCount ? [{ id: "skipped-1", label: "#1234", reason: "Delivery reminder window passed", createdAt: "2026-09-29T20:15:00Z" }] : [],
             inbox: conflictPending ? [{
@@ -239,6 +247,22 @@ const { chromium } = require("playwright");
       .getByRole("heading", { name: "Your email workspace", exact: true })
       .waitFor();
     await page.screenshot({ path: path.join(output, "overview-desktop.png") });
+    await page.getByText("No unresolved Shopify events.", { exact: true }).waitFor();
+    await page.getByRole("alert").getByText("Abandoned Cart verification needs attention.", { exact: true }).waitFor();
+    await page.getByText("Access denied for abandonmentByAbandonedCheckoutId field.", { exact: false }).waitFor();
+    await page.getByText("2 checkouts are waiting for Shopify to confirm abandonment.", { exact: true }).waitFor();
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Cart verification warning fits at " + width);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    abandonmentError = "";
+    pendingAbandonments = 1;
+    await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+    await page.getByText("1 checkout is waiting for Shopify to confirm abandonment.", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Abandoned Cart verification needs attention.", { exact: true }).count(), 0);
+    await page.getByText(/^Abandoned checkout check:/).waitFor();
+    pendingAbandonments = 0;
     assert.equal(saves.length, 0);
     await page
       .getByRole("button", { name: "Process Shopify events now", exact: true })

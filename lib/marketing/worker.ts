@@ -15,7 +15,9 @@ import {
   cancelCart,
   cartRunKey,
   cartSequenceStop,
+  reconcileUnverifiedCartMessages,
 } from "./cart";
+import { syncCartAbandonments, checkCartAbandonment } from "./cart-abandonment";
 import { prisma } from "@/lib/prisma";
 import { saveCampaignContent, resolveCampaignContent, isCampaignContentReference } from "./content-storage";
 import { resolveCartContent, saveCartContent } from "./cart-storage";
@@ -59,6 +61,7 @@ import {
 
 export async function runMarketing(onlyMessageId?: string) {
   const inbox = onlyMessageId ? null : await processMarketingInbox();
+  if (!onlyMessageId) await reconcileUnverifiedCartMessages();
   if (!onlyMessageId) await syncShopifyEmailUnsubscribes().catch((error) => {
     console.error("Shopify unsubscribe synchronization failed:", error);
   });
@@ -135,6 +138,7 @@ export async function runMarketing(onlyMessageId?: string) {
     await heartbeat({ skipped, sent: 0 });
     return { skipped };
   }
+  const abandonments = onlyMessageId ? null : await syncCartAbandonments();
   now.setTime(Date.now());
   const deadline = Date.now() + 180000;
   const campaigns = onlyMessageId
@@ -715,9 +719,9 @@ export async function runMarketing(onlyMessageId?: string) {
             });
             return null;
           }
-          if (!cartRun && (f?.data as { cart?: unknown })?.cart)
+          if (!cartRun)
             reason =
-              "Legacy cart reminder replaced; a new checkout is required";
+              "Checkout needs a verified Shopify abandonment";
           if (cartRun) {
             cartRun = await currentCart(tx, m.key, cartRun);
             const terminal = cartRun.stop || await cartSequenceStop(tx, m.key, m.flowCondition);
@@ -1169,10 +1173,11 @@ export async function runMarketing(onlyMessageId?: string) {
         try {
           cartRun = await currentCart(prisma, message.key, cartRun);
           const checkedAt = cartRun.observedAt;
-          const availableAtPreparation = cartRun.stop ? false : await cartPurchasable(cartRun);
+          const nativeStop = cartRun.stop || await checkCartAbandonment(cartRun);
+          const availableAtPreparation = nativeStop ? false : await cartPurchasable(cartRun);
           cartRun = await currentCart(prisma, message.key, cartRun);
           const changedAtPreparation = cartRun.observedAt !== checkedAt;
-          const stop = cartRun.stop || (!changedAtPreparation && !availableAtPreparation ? "No purchasable items remain in this checkout" : null);
+          const stop = cartRun.stop || nativeStop || (!changedAtPreparation && !availableAtPreparation ? "No purchasable items remain in this checkout" : null);
           if (stop) {
             await atomic(async tx => {
               await cancelCart(tx, cartRunKey(message.key), stop);
@@ -1265,11 +1270,12 @@ export async function runMarketing(onlyMessageId?: string) {
             continue;
           }
           const checkedCart = await currentCart(prisma, message.key, cartRun);
-          const available = checkedCart.stop ? false : await cartPurchasable(checkedCart);
+          const nativeStopNow = checkedCart.stop || await checkCartAbandonment(checkedCart);
+          const available = nativeStopNow ? false : await cartPurchasable(checkedCart);
           // Stock lookups are network calls: a checkout may change while they are running.
           const beforeSend = await currentCart(prisma, message.key, cartRun);
           const changedDuringStockCheck = beforeSend.observedAt !== checkedCart.observedAt;
-          const stopNow = beforeSend.stop || (!changedDuringStockCheck && !available ? "No purchasable items remain in this checkout" : null);
+          const stopNow = beforeSend.stop || nativeStopNow || (!changedDuringStockCheck && !available ? "No purchasable items remain in this checkout" : null);
           if (stopNow) {
             await atomic(async tx => {
               await cancelCart(tx, cartRunKey(message.key), stopNow);
@@ -1282,7 +1288,7 @@ export async function runMarketing(onlyMessageId?: string) {
           if (beforeSend.observedAt !== cartRun.observedAt || dependency || quietUntil) {
             await prisma.marketingMessage.update({ where: { id: message.id }, data: {
               status: "PENDING", dueAt: new Date(Math.max(Date.now() + 60000, +(dependency || 0), +(quietUntil || 0))),
-              error: "Waiting for checkout inactivity or cart email sending hours",
+              error: "Waiting for the abandonment delay or cart email sending hours",
             } });
             continue;
           }
@@ -1443,6 +1449,6 @@ export async function runMarketing(onlyMessageId?: string) {
         updatedAt: { lt: new Date(Date.now() - 7 * DAY) },
       },
     });
-  await heartbeat({ sent, inspected });
+  await heartbeat({ sent, inspected, abandonments });
   return { sent, inspected };
 }

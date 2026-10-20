@@ -31,9 +31,9 @@ const descriptions: Record<
     symbol: "Hi",
   },
   "abandoned-cart": {
-    trigger: "Checkout started",
+    trigger: "Shopify confirms an abandoned checkout",
     description:
-      "Follow up on unfinished checkouts, with purchase checks before sending.",
+      "Follow up once on confirmed abandoned checkouts, with purchase checks before sending.",
     symbol: "↗",
   },
   "delivery-upsell": {

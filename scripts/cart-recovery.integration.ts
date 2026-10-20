@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isolated, enrollCartFixture as enrollCart, type Context } from "./cart-launch.integration";
+import { isolated, enrollCartFixture as enrollCart, cartAbandonmentFixture, type Context } from "./cart-launch.integration";
 import { cartEmailNextAllowed } from "../lib/marketing/cart-schedule";
 import { validateCart } from "../lib/marketing/cart-config";
 import { DAY } from "../lib/marketing/rules";
@@ -28,7 +28,7 @@ export function registerCartRecoveryTests(context: () => Context) {
     assert.equal((await h.prisma.marketingMessage.findUniqueOrThrow({ where: { id: current.id } })).status, "CANCELLED");
   }));
 
-  test("cart recovery: empty then refill starts a fresh attempt; an older worker cannot cancel it", async () => isolated(context(), "refill", async h => {
+  test("cart recovery: refill needs a new confirmed abandonment; an older worker cannot cancel it", async () => isolated(context(), "refill", async h => {
     const { cartRunKey } = await import("../lib/marketing/cart");
     const p = await h.make("refill@example.com"), start = new Date(Date.now() - 60000);
     const enroll = (lines: { product_id: number; quantity?: number }[], at: Date) => h.store.atomic(tx => enrollCart(tx, p.id, "same", start, h.f, "https://store.example/checkouts/refill", lines, at));
@@ -37,6 +37,11 @@ export function registerCartRecoveryTests(context: () => Context) {
     await enroll([{ product_id: 1, quantity: 0 }], new Date(+start + 1000));
     assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0);
     await enroll([{ product_id: 2 }], new Date(+start + 2000));
+    assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0,
+      "a generic refill update cannot restart recovery");
+    await h.store.atomic(tx => enrollCart(tx, p.id, "same", start, h.f,
+      "https://store.example/checkouts/refill", [{ product_id: 2 }], new Date(+start + 3000), undefined,
+      cartAbandonmentFixture(new Date(+start + 2000), "2")));
     const fresh = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, status: "PENDING", flowCondition: "cart-v1:first" } });
     assert.notEqual(cartRunKey(original.key), cartRunKey(fresh.key));
     await h.prisma.marketingMessage.update({ where: { id: original.id }, data: { status: "PENDING" } });
@@ -103,23 +108,21 @@ export function registerCartRecoveryTests(context: () => Context) {
     assert.equal(h.emails.length, 1);
   }));
 
-  test("cart recovery: newer activity restarts inactivity, never the original purchase boundary", async () => isolated(context(), "inactivity", async h => {
+  test("cart recovery: generic updates preserve the confirmed abandonment delay and purchase boundary", async () => isolated(context(), "inactivity", async h => {
     h.f.steps[0].minutes = 180;
     const p = await h.make("active-checkout@example.com"), created = new Date(Date.now() - 4 * 3600000), activity = new Date(Date.now() - 60000);
     const enroll = (at: Date) => h.store.atomic(tx => enrollCart(tx, p.id, "active", created, h.f, "https://store.example/checkouts/active", [{ product_id: 1 }], at));
     await enroll(created); await enroll(activity);
     const first = await h.prisma.marketingMessage.findFirstOrThrow({ where: { profileId: p.id, flowCondition: "cart-v1:first" } });
     assert.equal(+first.triggerAt!, +created);
-    assert.equal(+first.dueAt, +activity + 180 * 60000);
+    assert.equal(+first.dueAt, +created + 180 * 60000);
     await enroll(new Date(+activity - 1000));
     assert.equal(+(await h.prisma.marketingMessage.findUniqueOrThrow({ where: { id: first.id } })).dueAt, +first.dueAt);
-    await h.prisma.marketingMessage.update({ where: { id: first.id }, data: { dueAt: new Date(Date.now() - 1000) } });
-    await h.worker.runMarketing(first.id);
-    assert.equal(h.emails.length, 0);
     h.orders.set(p.email!, new Date(+created + 60000).toISOString());
     await h.prisma.marketingMessage.update({ where: { id: first.id }, data: { dueAt: new Date(Date.now() - 1000) } });
     await h.worker.runMarketing(first.id);
     assert.equal(await h.prisma.marketingMessage.count({ where: { profileId: p.id, status: "PENDING" } }), 0);
+    assert.equal(h.emails.length, 0);
   }));
 
   test("cart recovery: sending window uses recipient zones, Pacific fallback, DST and exact boundaries", () => {
