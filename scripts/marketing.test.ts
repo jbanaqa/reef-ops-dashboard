@@ -48,6 +48,7 @@ test("templates show each saved flow email without replacing saved copy", () => 
 });
 import {
   content,
+  campaignProductFeed,
   couponTimeLeft,
   defaultCampaignContent,
   defaultContent,
@@ -150,6 +151,84 @@ test("campaign product grids preserve custom product counts and sort choices", (
   if (savedSection.type !== "products") throw new Error("Expected product grid");
   assert.equal(savedSection.feed?.limit, 18);
   assert.equal(savedSection.feed?.order, "best-selling");
+});
+
+test("campaign product tag rules survive save and reopen without restoring preset tags", () => {
+  const draft = structuredClone(defaultCampaignContent);
+  const first = draft.campaignLayout!.sections[0];
+  const second = draft.campaignLayout!.sections[1];
+  if (first.type !== "products" || !first.feed || second.type !== "products" || !second.feed)
+    throw Error("Expected dynamic product sections");
+  first.feed.tags = ["  B50 ", "Summer sale", "b50", "", "  "];
+  second.feed.tags = ["VIP: (weekly)"];
+  const saved = content(content(draft));
+  const savedFirst = saved.campaignLayout!.sections[0];
+  const savedSecond = saved.campaignLayout!.sections[1];
+  if (savedFirst.type !== "products" || savedSecond.type !== "products")
+    throw Error("Expected product sections");
+  assert.deepEqual(savedFirst.feed?.tags, ["B50", "Summer sale"]);
+  assert.deepEqual(savedSecond.feed?.tags, ["VIP: (weekly)"]);
+  assert.deepEqual(campaignProductFeed({ key: "anniversarysalesale" })?.tags, ["A50", "A55", "A60", "A65"]);
+  assert.deepEqual(campaignProductFeed({ ...first.feed, tags: [] })?.tags, [], "Clearing tags means all available products");
+  assert.deepEqual(campaignProductFeed({ ...first.feed, tags: ["", " "] })?.tags, []);
+  assert.deepEqual(campaignProductFeed({ ...first.feed, tags: ["B50"], order: "price-high", limit: 18 }),
+    { key: first.feed.key, name: first.feed.name, tags: ["B50"], order: "price-high", limit: 18 });
+  assert.throws(() => campaignProductFeed({ ...first.feed, tags: "B50" }), /list of tag names/);
+  assert.throws(() => campaignProductFeed({ ...first.feed, tags: ["B50", null] }), /list of tag names/);
+  assert.throws(() => campaignProductFeed({ ...first.feed, tags: ["a".repeat(256)] }), /255 characters/);
+  assert.throws(() => campaignProductFeed({ ...first.feed, tags: ["sale\u0000tag"] }), /control characters/);
+  assert.throws(() => campaignProductFeed({ ...first.feed, tags: Array.from({ length: 51 }, (_, index) => "tag" + index) }), /50 product tags/);
+});
+
+test("campaign custom tag rules use safe OR searches and exact tag matches for previews and sends", async (t) => {
+  const previous = Object.fromEntries(["SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET"].map(key => [key, process.env[key]]));
+  process.env.SHOPIFY_CLIENT_ID = "mock-client";
+  process.env.SHOPIFY_CLIENT_SECRET = "mock-secret";
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const special = 'VIP: (weekly) "frag" \\ staff';
+  const product = (id: string, tags: string[], available = true, published = true) => ({
+    id: "gid://shopify/Product/" + id, title: "Coral " + id, handle: "coral-" + id, tags,
+    createdAt: "2026-10-21T00:00:00Z", onlineStoreUrl: published ? "https://coralsanonymous.com/products/coral-" + id : null,
+    featuredImage: null, variants: { nodes: [{ id: "gid://shopify/ProductVariant/" + id,
+      availableForSale: available, price: "25.00", compareAtPrice: null, image: null }] },
+  });
+  const products = [product("1", ["SUMMER SALE"]), product("2", [special]), product("3", ["B50"]),
+    product("4", ["Summer sale bonus"]), product("5", ["B50"], false), product("6", ["B50"], true, false)];
+  const queries: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith("/admin/oauth/access_token")) return Response.json({ access_token: "mock-token" });
+    assert.match(String(input), /\/admin\/api\/2026-07\/graphql\.json$/);
+    const body = JSON.parse(String(init?.body));
+    queries.push(body.variables.query);
+    return Response.json({ data: { products: { nodes: products, pageInfo: { hasNextPage: false, endCursor: null } } } });
+  });
+  const { resolveCampaignProductFeeds } = await import("../lib/marketing/campaign-product-feed");
+  const source = structuredClone(defaultCampaignContent);
+  const section = source.campaignLayout!.sections[0];
+  if (section.type !== "products" || !section.feed) throw Error("Expected dynamic product section");
+  source.campaignLayout!.sections = [section];
+  section.feed = { ...section.feed, tags: ["Summer sale", special, "B50"], order: "newest", limit: 12 };
+  const draft = content(source);
+  const preview = await resolveCampaignProductFeeds(draft, "preview");
+  const sent = await resolveCampaignProductFeeds(content(draft), "actual-send");
+  const ids = (value: typeof source) => {
+    const row = value.campaignLayout!.sections[0];
+    if (row.type !== "products") throw Error("Expected product section");
+    return row.products.map(p => p.id).sort();
+  };
+  assert.deepEqual(ids(preview), ["gid://shopify/Product/1", "gid://shopify/Product/2", "gid://shopify/Product/3"]);
+  assert.deepEqual(ids(sent), ids(preview));
+  assert.equal(queries[0], 'status:active AND (tag:"Summer sale" OR tag:"VIP\\: \\(weekly\\) \\"frag\\" \\\\ staff" OR tag:"B50")');
+  assert.equal(queries[1], queries[0]);
+  section.feed.tags = [];
+  const all = await resolveCampaignProductFeeds(content(source));
+  assert.equal(queries[2], "status:active");
+  assert.deepEqual(ids(all), ["gid://shopify/Product/1", "gid://shopify/Product/2", "gid://shopify/Product/3", "gid://shopify/Product/4"]);
 });
 test("visual layouts can change without changing flow behavior or dynamic data", () => {
   const campaignLayout = structuredClone(defaultCampaignContent.campaignLayout!);

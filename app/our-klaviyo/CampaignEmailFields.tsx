@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   CampaignEmailLayout,
   CampaignEmailProduct,
   CampaignEmailSection,
+  CampaignProductFeedOrder,
   Content,
 } from "@/lib/marketing/rules";
 import {
@@ -53,7 +54,12 @@ export default function CampaignEmailFields({
   const [refreshingFeed, setRefreshingFeed] = useState<string | null>(null);
   const [feedError, setFeedError] = useState("");
   const layout = content.campaignLayout!;
-  const update = (next: CampaignEmailLayout) => onChange("campaignLayout", next);
+  const latestLayout = useRef(layout);
+  useEffect(() => { latestLayout.current = layout; }, [layout]);
+  const update = (next: CampaignEmailLayout) => {
+    latestLayout.current = next;
+    onChange("campaignLayout", next);
+  };
   const patchLayout = (patch: Partial<CampaignEmailLayout>) =>
     update({ ...layout, ...patch });
   const patchStyle = (patch: Partial<CampaignEmailLayout["style"]>) =>
@@ -79,6 +85,7 @@ export default function CampaignEmailFields({
     });
   };
   const refreshFeeds = async (sectionId: string) => {
+    const requestedLayout = layout;
     setRefreshingFeed(sectionId);
     setFeedError("");
     try {
@@ -101,8 +108,12 @@ export default function CampaignEmailFields({
       if (!response.ok) throw new Error(result.error || "Could not load products.");
       if (!result.content?.campaignLayout)
         throw new Error("The product preview did not include an email layout.");
+      if (latestLayout.current !== requestedLayout) {
+        setFeedError("The section settings changed. Refresh the product preview again.");
+        return;
+      }
       const resolved = result.content as Content;
-      onChange("campaignLayout", resolved.campaignLayout);
+      update(resolved.campaignLayout!);
     } catch (error) {
       setFeedError(error instanceof Error ? error.message : "Could not load products.");
     } finally {
@@ -207,7 +218,7 @@ export default function CampaignEmailFields({
           {layout.sections.map((section, sectionIndex) => (
             <details className="mk-campaign-builder-card" key={section.id}>
               <summary>
-                <span>{section.type === "products" ? `Product grid · ${campaignProductFeed(section.feed)?.name || section.feed?.name || "Manual"} · ${section.feed?.limit || section.products.length}` : section.type === "banner" ? `Full-width banner · ${section.text}` : `Full-width button · ${section.label}`}</span>
+                <span>{section.type === "products" ? `Product grid · ${section.feed?.name || "Manual"} · ${section.feed?.limit || section.products.length}` : section.type === "banner" ? `Full-width banner · ${section.text}` : `Full-width button · ${section.label}`}</span>
               </summary>
               <div className="mk-campaign-builder-actions">
                 <button type="button" disabled={sectionIndex === 0} onClick={() => patchLayout({ sections: move(layout.sections, sectionIndex, -1) })}>Move up</button>
@@ -264,13 +275,27 @@ export default function CampaignEmailFields({
                   </label>
                   {section.feed && (
                     <div className="mk-campaign-feed-card">
-                      <strong>{campaignProductFeed(section.feed)?.name || section.feed.name}</strong>
+                      <strong>{section.feed.name}</strong>
                       <span>
-                        {section.feed.tags.length
-                          ? `Tag includes ${section.feed.tags.join(" OR ")}. `
+                        {section.feed.tags.some((tag) => tag.trim())
+                          ? `Tag includes ${section.feed.tags.map((tag) => tag.trim()).filter(Boolean).join(" OR ")}. `
                           : "All categories. "}
                         Product selection and availability are checked when the campaign is prepared.
                       </span>
+                      <label>
+                        Product tags (match any)
+                        <textarea
+                          rows={Math.min(6, Math.max(2, section.feed.tags.length))}
+                          value={section.feed.tags.join("\n")}
+                          placeholder="One tag per line"
+                          onChange={(event) => replaceSection(sectionIndex, {
+                            ...section,
+                            feed: { ...section.feed!, tags: event.target.value.split(/\r?\n/) },
+                            products: [],
+                          })}
+                        />
+                      </label>
+                      <span>One tag per line. Leave blank to include all available products.</span>
                       <div className="mk-campaign-two-fields">
                         <label>
                           Number of products
@@ -280,16 +305,11 @@ export default function CampaignEmailFields({
                             max="40"
                             value={section.feed.limit}
                             onChange={(event) => {
-                              const feed = campaignProductFeed({
-                                ...section.feed,
-                                limit: Number(event.target.value),
+                              replaceSection(sectionIndex, {
+                                ...section,
+                                feed: { ...section.feed!, limit: Math.min(40, Math.max(1, Math.trunc(Number(event.target.value) || 1))) },
+                                products: [],
                               });
-                              if (feed)
-                                replaceSection(sectionIndex, {
-                                  ...section,
-                                  feed,
-                                  products: [],
-                                });
                             }}
                           />
                         </label>
@@ -298,16 +318,11 @@ export default function CampaignEmailFields({
                           <select
                             value={section.feed.order}
                             onChange={(event) => {
-                              const feed = campaignProductFeed({
-                                ...section.feed,
-                                order: event.target.value,
+                              replaceSection(sectionIndex, {
+                                ...section,
+                                feed: { ...section.feed!, order: event.target.value as CampaignProductFeedOrder },
+                                products: [],
                               });
-                              if (feed)
-                                replaceSection(sectionIndex, {
-                                  ...section,
-                                  feed,
-                                  products: [],
-                                });
                             }}
                           >
                             {campaignProductFeedOrders.map((order) => (

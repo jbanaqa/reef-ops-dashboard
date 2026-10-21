@@ -90,7 +90,8 @@ function seededShuffle<T>(items: T[], seed: string) {
 
 function feedQuery(feed: CampaignProductFeed) {
   if (!feed.tags.length) return "status:active";
-  const tags = feed.tags.map((tag) => `tag:${tag}`).join(" OR ");
+  // Tag names are literal search values, including spaces and query punctuation.
+  const tags = feed.tags.map((tag) => `tag:"${tag.replace(/[\\":()]/g, "\\$&")}"`).join(" OR ");
   return `status:active AND (${tags})`;
 }
 

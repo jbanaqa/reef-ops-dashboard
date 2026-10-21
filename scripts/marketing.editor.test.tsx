@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 import { readFile } from "node:fs/promises";
 import {
   type Content,
+  content as normalizeContent,
   defaultCampaignContent,
   defaultContent,
   defaultMarketingSettings,
@@ -656,7 +657,7 @@ test("abandoned cart editor controls its campaign-style product cards", async ()
   assert.equal(savedContent.productGridStyle.showButton, false);
 });
 
-test("campaign product grid controls update count and product order together", async () => {
+test("campaign product grids keep independent editable tag rules through count, order and saved content", async () => {
   const testing = await import("@testing-library/react");
   cleanup = testing.cleanup;
   let latest = structuredClone(defaultCampaignContent);
@@ -679,6 +680,12 @@ test("campaign product grid controls update count and product order together", a
   testing.fireEvent.click(
     view.getByText("Product grid · Sale product feed · 6", { exact: true }),
   );
+  const tagFields = view.getAllByLabelText("Product tags (match any)");
+  assert.equal((tagFields[0] as HTMLTextAreaElement).value, "A50\nA55\nA60\nA65");
+  testing.fireEvent.change(tagFields[0], {
+    target: { value: "Halloween 2026\nVIP sale\n" },
+  });
+  assert.equal((tagFields[0] as HTMLTextAreaElement).value, "Halloween 2026\nVIP sale\n", "Typing a new line must not remove it");
   testing.fireEvent.change(view.getAllByLabelText("Number of products")[0], {
     target: { value: "18" },
   });
@@ -691,8 +698,25 @@ test("campaign product grid controls update count and product order together", a
     if (section.type !== "products") throw new Error("Expected product grid");
     assert.equal(section.feed?.limit, 18);
     assert.equal(section.feed?.order, "best-selling");
+    assert.deepEqual(section.feed?.tags, ["Halloween 2026", "VIP sale", ""]);
     assert.equal(section.products.length, 0);
   });
+  const second = latest.campaignLayout!.sections[1];
+  assert.equal(second.type, "products");
+  if (second.type !== "products") throw new Error("Expected second grid");
+  assert.deepEqual(second.feed?.tags, ["AW50", "AW55", "AW60", "AW65"]);
+  testing.fireEvent.change(tagFields[1], { target: { value: "Winter deal\nStaff's picks" } });
+  const saved = normalizeContent(latest);
+  const firstSaved = saved.campaignLayout!.sections[0];
+  const secondSaved = saved.campaignLayout!.sections[1];
+  assert.equal(firstSaved.type, "products");
+  assert.equal(secondSaved.type, "products");
+  if (firstSaved.type !== "products" || secondSaved.type !== "products") throw new Error("Expected product grids");
+  assert.deepEqual(firstSaved.feed?.tags, ["Halloween 2026", "VIP sale"]);
+  assert.deepEqual(secondSaved.feed?.tags, ["Winter deal", "Staff's picks"]);
+  view.rerender(<CampaignEmailFields content={saved} subject="Sale" onSubject={() => undefined} onChange={() => undefined} />);
+  assert.equal((view.getAllByLabelText("Product tags (match any)")[0] as HTMLTextAreaElement).value, "Halloween 2026\nVIP sale");
+  assert.equal((view.getAllByLabelText("Product tags (match any)")[1] as HTMLTextAreaElement).value, "Winter deal\nStaff's picks");
 });
 
 test("campaign design controls resize the logo and default product images", async () => {

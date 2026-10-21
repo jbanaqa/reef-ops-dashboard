@@ -79,7 +79,7 @@ export type CampaignProductFeed = {
 };
 export function campaignProductFeed(value: unknown): CampaignProductFeed | undefined {
   const candidate = value as
-    | { key?: unknown; order?: unknown; limit?: unknown }
+    | { key?: unknown; tags?: unknown; order?: unknown; limit?: unknown }
     | null;
   const key = String(candidate?.key || "");
   const saved = campaignProductFeeds.find((feed) => feed.key === key);
@@ -93,11 +93,28 @@ export function campaignProductFeed(value: unknown): CampaignProductFeed | undef
   const limit = Number.isInteger(requestedLimit)
     ? Math.min(40, Math.max(1, requestedLimit))
     : saved?.limit;
+  let tags: string[] = saved ? [...saved.tags] : [];
+  if (saved && candidate?.tags !== undefined) {
+    if (!Array.isArray(candidate.tags) || candidate.tags.some((tag) => typeof tag !== "string"))
+      throw new Error("Product tags must be a list of tag names.");
+    const seen = new Set<string>();
+    tags = candidate.tags.flatMap((value: string) => {
+      const tag = value.trim();
+      if (!tag) return [];
+      if (tag.length > 255 || /[\u0000-\u001f\u007f]/.test(tag))
+        throw new Error("Each product tag must be 255 characters or fewer, without control characters.");
+      const key = tag.toLocaleLowerCase();
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [tag];
+    });
+    if (tags.length > 50) throw new Error("Use 50 product tags or fewer per section.");
+  }
   return saved
     ? {
         key: saved.key,
         name: saved.name,
-        tags: [...saved.tags],
+        tags,
         order: order!,
         limit: limit!,
       }

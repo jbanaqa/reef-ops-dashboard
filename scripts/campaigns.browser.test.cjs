@@ -7,6 +7,7 @@ const http = require("node:http");
 const { build } = require("esbuild");
 const { chromium } = require("playwright");
 (async () => {
+  const productTagsOnly = process.argv.includes("--product-tags-only");
   const output = await fs.mkdtemp(path.join(os.tmpdir(), "reef-shared-email-"));
   const bundle = await build({
     entryPoints: ["scripts/campaigns.browser.fixture.tsx"],
@@ -80,6 +81,16 @@ const { chromium } = require("playwright");
         style: { fontFamily: "Arial", emailBackground: "#fff7f5", contentBackground: "#ffffff", textColor: "#080808", salePriceColor: "#e84218", buttonBackground: "#79e93c", buttonTextColor: "#000000", productAlignment: "center", productGap: 18, sectionPadding: 18, productImageWidth: 140, buttonRadius: 5, titleSize: 18, priceSize: 21 },
       },
     };
+    if (productTagsOnly) {
+      content.campaignLayout.sections[0].feed = {
+        key: "anniversarysalesale", name: "Sale product feed", tags: ["A50", "A55", "A60", "A65"], order: "random", limit: 6,
+      };
+      content.campaignLayout.sections.splice(1, 0, {
+        id: "products-2", type: "products", backgroundColor: "#ffffff",
+        feed: { key: "newnewdiscount", name: "New discounts", tags: ["AW50", "AW55", "AW60", "AW65"], order: "newest", limit: 12 },
+        products: [{ ...content.campaignLayout.sections[0].products[0], id: "old-discount", title: "Old discount preview" }],
+      });
+    }
     const data = {
       profiles: [],
       campaigns: [
@@ -132,12 +143,34 @@ const { chromium } = require("playwright");
     };
     const writes = [];
     let reportError = false;
+    let holdProductPreview = false;
+    let releaseProductPreview;
+    let onProductPreviewHeld = () => undefined;
     await page.route("**/api/marketing**", async (route) => {
       const req = route.request();
       const url = new URL(req.url());
       if (req.method() === "POST") {
         const body = req.postDataJSON();
         writes.push(body);
+        if (productTagsOnly && body.action === "preview-campaign-feeds") {
+          if (holdProductPreview) {
+            holdProductPreview = false;
+            await new Promise(resolve => {
+              releaseProductPreview = resolve;
+              onProductPreviewHeld();
+            });
+          }
+          const resolved = structuredClone(body.content);
+          for (const section of resolved.campaignLayout.sections) {
+            if (section.type !== "products" || !section.feed) continue;
+            section.feed.tags = section.feed.tags.map(tag => tag.trim()).filter(Boolean);
+            section.products = [{
+              id: "preview-" + section.id, title: "Preview for " + (section.feed.tags.filter(Boolean).join(" or ") || "all products"),
+              url: "https://coralsanonymous.com/products/test-preview", salePrice: "$20.00", button: "Shop now",
+            }];
+          }
+          return route.fulfill({ json: { content: resolved } });
+        }
         if (body.action === "save-campaign")
           data.campaigns[0] = { ...data.campaigns[0], ...body };
         if (body.action === "save-resource")
@@ -221,6 +254,76 @@ const { chromium } = require("playwright");
         });
       else await route.fulfill({ json: data });
     });
+    if (productTagsOnly) {
+      const openSections = async () => {
+        await page.getByRole("button", { name: "Edit email and preview", exact: true }).click();
+        await page.getByRole("dialog").waitFor();
+        await page.getByRole("button", { name: "Layout", exact: true }).click();
+        await page.getByText("Email sections", { exact: true }).click();
+        for (const grid of await page.locator("summary").filter({ hasText: "Product grid" }).all()) await grid.click();
+      };
+      await page.goto("http://127.0.0.1:" + server.address().port);
+      await page.getByRole("button", { name: "Edit", exact: true }).click();
+      await page.getByRole("button", { name: "Continue to email" }).click();
+      await openSections();
+      const tags = page.getByLabel("Product tags (match any)");
+      assert.equal(await tags.count(), 2);
+      assert.equal(await tags.nth(0).inputValue(), "A50\nA55\nA60\nA65");
+      assert.equal(await tags.nth(1).inputValue(), "AW50\nAW55\nAW60\nAW65");
+      await tags.nth(0).fill("Halloween 2026");
+      await tags.nth(0).press("End");
+      await tags.nth(0).press("Enter");
+      await tags.nth(0).pressSequentially("VIP sale");
+      assert.equal(await tags.nth(0).inputValue(), "Halloween 2026\nVIP sale", "Entering a new line remains editable");
+      await page.getByLabel("Number of products", { exact: true }).nth(0).fill("9");
+      await page.getByLabel("Product order").nth(0).selectOption("price-low");
+      assert.equal(await tags.nth(0).inputValue(), "Halloween 2026\nVIP sale");
+      assert.equal(await tags.nth(1).inputValue(), "AW50\nAW55\nAW60\nAW65", "Other grids retain their own tags");
+      await tags.nth(1).fill("Winter deal\nStaff's picks");
+      assert.equal(await page.getByText(/Current preview ·/).count(), 0, "Changing rules clears the old product previews");
+      await page.getByRole("button", { name: "Refresh product preview", exact: true }).nth(0).click();
+      await page.getByText("Preview for Halloween 2026 or VIP sale", { exact: true }).waitFor({ state: "attached" });
+      const previewWrite = writes.findLast(write => write.action === "preview-campaign-feeds");
+      assert.deepEqual(previewWrite.content.campaignLayout.sections[0].feed.tags, ["Halloween 2026", "VIP sale"]);
+      assert.deepEqual(previewWrite.content.campaignLayout.sections[1].feed.tags, ["Winter deal", "Staff's picks"]);
+      assert.equal(previewWrite.content.campaignLayout.sections[0].feed.order, "price-low");
+      assert.equal(previewWrite.content.campaignLayout.sections[0].feed.limit, 9);
+      const previewHeld = new Promise(resolve => { onProductPreviewHeld = resolve; });
+      holdProductPreview = true;
+      await page.getByRole("button", { name: "Refresh product preview", exact: true }).nth(0).click();
+      await previewHeld;
+      await tags.nth(0).fill("Changed during preview");
+      releaseProductPreview();
+      await page.getByText("The section settings changed. Refresh the product preview again.", { exact: true }).first().waitFor();
+      assert.equal(await tags.nth(0).inputValue(), "Changed during preview", "An old preview response never restores old tags");
+      await tags.nth(0).fill("Halloween 2026\nVIP sale");
+      await page.getByRole("button", { name: "Refresh product preview", exact: true }).nth(0).click();
+      await page.getByText("Preview for Halloween 2026 or VIP sale", { exact: true }).waitFor({ state: "attached" });
+      await page.getByRole("button", { name: "Save email", exact: true }).click();
+      await page.getByText("Email saved", { exact: true }).first().waitFor();
+      const saved = writes.findLast(write => write.action === "save-campaign");
+      assert.deepEqual(saved.content.campaignLayout.sections[0].feed.tags, ["Halloween 2026", "VIP sale"]);
+      assert.deepEqual(saved.content.campaignLayout.sections[1].feed.tags, ["Winter deal", "Staff's picks"]);
+      await page.getByLabel("Back to campaign", { exact: true }).click();
+      await openSections();
+      assert.equal(await tags.nth(0).inputValue(), "Halloween 2026\nVIP sale", "Saved custom tags reopen unchanged");
+      assert.equal(await tags.nth(1).inputValue(), "Winter deal\nStaff's picks");
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        await tags.nth(0).scrollIntoViewIfNeeded();
+        assert.ok(await page.getByRole("dialog").evaluate(el => el.scrollWidth <= el.clientWidth), `Tag editor fits ${width}px`);
+        assert.ok(await tags.nth(0).evaluate(el => el.getBoundingClientRect().right <= innerWidth), `Tag field fits ${width}px`);
+        await page.screenshot({ path: path.join(output, `campaign-tags-${width}.png`) });
+      }
+      await tags.nth(0).fill("");
+      await page.getByRole("button", { name: "Refresh product preview", exact: true }).nth(0).click();
+      await page.getByText("Preview for all products", { exact: true }).waitFor({ state: "attached" });
+      assert.deepEqual(writes.findLast(write => write.action === "preview-campaign-feeds").content.campaignLayout.sections[0].feed.tags.filter(tag => tag.trim()), []);
+      assert.equal(await tags.nth(0).inputValue(), "", "An explicitly cleared rule stays empty after preview");
+      assert.deepEqual(errors, []);
+      console.log("PASS: custom per-grid tag rules survive edits, preview, save/reopen, and clearing at desktop/390/320. Screenshots: " + output);
+      return;
+    }
     if (process.argv.includes("--overview-only")) {
       data.eventCounts = [{ type: "OPENED", _count: 12 }];
       await page.goto("http://127.0.0.1:" + server.address().port + "/?tab=overview");

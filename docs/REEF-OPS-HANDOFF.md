@@ -1,5 +1,13 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Editable campaign section product tags — October 21, 2026
+
+Campaign email product grids now expose **Product tags (match any)** in Layout > Email sections. Each grid has its own newline-separated tag list using OR matching. Changing tags clears stale product cards; Refresh product preview resolves the new rule. Blank tags explicitly mean all available products. Selecting another preset intentionally starts with that preset's defaults, while count/order edits preserve custom tags. An in-flight preview cannot overwrite newer section settings.
+
+The feed normalizer preserves supplied tags instead of silently restoring preset A50/AW50 rules during save/reopen. Omitted tags retain legacy preset defaults; supplied tags are trimmed, deduplicated case-insensitively, and limited to 50 names of 255 characters each. Search values are quoted/escaped, and the existing exact-tag OR and availability checks are shared by previews and actual campaign preparation. No audience, consent, sending, schedule, saved campaign content or storage format is changed by rollout. Staff choose any new tag values themselves.
+
+Validation: 218 isolated marketing tests, TypeScript, changed-file lint and production build pass. The focused `node scripts/campaigns.browser.test.cjs --product-tags-only` run passes independent grids, newline typing, count/order, preview payloads, stale-response protection, save/reopen, blank rules and desktop/390/320 layouts. Shopify Admin 2026-07 query validation passes. Screenshot/validation artifacts are outside Git in `C:/Users/GuestUser/.codex/artifacts/campaign-tag-rules-2026-10-21/`. Verify both app and scheduled worker deploy the compatible commit before claiming this is live; Railway showed another Limited Access deployment pause during this iteration.
+
 ### Welcome first-order / assigned-code attribution — October 20, 2026
 
 Welcome no longer takes repeat purchases merely because an earlier email was opened. Ordinary Welcome credit requires the first positive qualifying recorded order after the original Welcome enrollment and a winning open/click within the existing window. The baseline is WELCOME_RUN.enteredAt, then a non-test WELCOME_ENTERED event, then the earliest real Welcome message.triggerAt; absent signup/order proof never guesses. Earlier purchases after signup but before the first email consume the first-order opportunity. All recorded order history is checked independently of report period, with canonical Shopify IDs and chronological tie handling; old/replayed events cannot create a second first order.
