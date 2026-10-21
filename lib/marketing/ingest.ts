@@ -11,7 +11,7 @@ import {
 } from "./delivery-upsell-config";
 import { validateFlow } from "./flow-config";
 import { findEmailAttribution } from "./attribution";
-import { compactOrderEvidence, type OrderEvidence } from "./order-evidence";
+import { compactOrderEvidence, orderStateUpdate, type OrderEvidence } from "./order-evidence";
 import { deliveryReviewConfig, orderUpdateSkipReason } from "./order-update-review";
 
 type Customer = {
@@ -51,6 +51,7 @@ type Payload = Customer & {
   expected_delivery_at?: string;
   abandoned_checkout_url?: string;
   financial_status?: string;
+  cancelled_at?: string | null;
   checkout_token?: string | null;
   discount_codes?: { code?: string }[] | null;
   token?: string;
@@ -471,23 +472,21 @@ export async function ingestShopify(
         }))
       ) {
         const orderAt = date(p.created_at || at.toISOString());
+        const orderPayload = {
+          orderId: String(p.id), revenue: String(p.total_price ?? ""),
+          orderLabel: String(p.name || p.id), currency: p.currency || "UNKNOWN",
+          model: "email-last-touch-with-welcome-rules", historical,
+          ...compactOrderEvidence(profile.id, p), ...orderStateUpdate({}, p, at),
+        };
         await record(tx, {
           key: orderKey,
           type: "ORDER",
           profileId: profile.id,
           messageId: historical
             ? undefined
-            : (await findEmailAttribution(tx, profile.id, orderAt))?.messageId,
+            : (await findEmailAttribution(tx, profile.id, orderAt, undefined, orderPayload))?.messageId,
           occurredAt: orderAt,
-          payload: {
-            orderId: String(p.id),
-            revenue: String(p.total_price || "0"),
-            orderLabel: String(p.name || p.id),
-            currency: p.currency || "UNKNOWN",
-            model: "email-last-touch",
-            historical,
-            ...compactOrderEvidence(profile.id, p),
-          },
+          payload: orderPayload,
         });
         if (!profile.lastOrderAt || profile.lastOrderAt < orderAt)
           await tx.marketingProfile.update({
@@ -505,7 +504,7 @@ export async function ingestShopify(
         });
       }
     }
-    if (["orders/create", "orders/updated"].includes(topic) && !p.test && p.id) {
+    if (["orders/create", "orders/updated"].includes(topic) && p.id) {
       const order = await tx.marketingEvent.findUnique({
         where: { shop_key: { shop: shop(), key: `order:${p.id}` } },
         select: { id: true, payload: true, profileId: true },
@@ -517,8 +516,9 @@ export async function ingestShopify(
           ...(saved.checkoutKey === undefined && evidence.checkoutKey !== undefined ? { checkoutKey: evidence.checkoutKey } : {}),
           ...(saved.discountCodes === undefined && evidence.discountCodes !== undefined ? { discountCodes: evidence.discountCodes } : {}),
         };
-        if (Object.keys(missing).length) await tx.marketingEvent.update({
-          where: { id: order.id }, data: { payload: json({ ...order.payload as object, ...missing }) },
+        const freshState = orderStateUpdate(order.payload, p, at);
+        if (Object.keys(missing).length || Object.keys(freshState).length) await tx.marketingEvent.update({
+          where: { id: order.id }, data: { payload: json({ ...order.payload as object, ...missing, ...freshState }) },
         });
       }
     }

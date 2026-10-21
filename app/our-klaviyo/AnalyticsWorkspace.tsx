@@ -267,12 +267,13 @@ export default function AnalyticsWorkspace() {
           <PerformanceTable heading="Campaigns" rows={campaigns} />
           <section className="mk-panel mk-attribution-settings">
             <div>
-              <p className="mk-eyebrow">KLAVIYO-STYLE MODEL</p>
+              <p className="mk-eyebrow">OPEN &amp; CLICK CREDIT</p>
               <h2>Attribution settings</h2>
               <p>
                 The most recent qualifying email open or click receives the
-                order. The window begins at delivery when recorded. Changing
-                either window recalculates this report from the recorded history.
+                order, except for verified assigned Welcome-code redemption.
+                The window begins at delivery when recorded. Changing either
+                window recalculates engagement-based credit from recorded history.
               </p>
             </div>
             {attribution && (
@@ -342,10 +343,14 @@ export default function AnalyticsWorkspace() {
           <section className="mk-panel mk-analytics-notes">
             <h2>How revenue is attributed</h2>
             <p>
-              An order is credited to the most recent qualifying Reef Ops email
-              interaction using the windows above. Like Klaviyo’s flow and
-              campaign reports, the selected period is based on when the message
-              was sent. Revenue is gross order value before refunds. Opens may
+              Campaigns and other flows use the most recent qualifying email
+              interaction within the windows above. Welcome uses that rule for
+              the first qualifying purchase after signup; later purchases count
+              only when they redeem that customer’s assigned Welcome code.
+              Verified Welcome-code redemption requires a prior Welcome offer
+              email, and can receive credit without a recorded open or click.
+              Each order receives one credit. The selected period is based on when
+              the credited message was sent. Revenue is gross order value before refunds. Opens may
               include privacy-proxy activity, and currencies remain separate
               instead of being converted.
             </p>

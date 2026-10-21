@@ -127,7 +127,6 @@ const { chromium } = require("playwright");
       },
       setup: { sendingEnabled: true, emailReady: true, migrationConfirmed: true },
       counts: { profiles: 0, mailable: 0, suppressions: 0 },
-      revenue: {},
       eventCounts: [],
       messageCounts: [],
     };
@@ -222,6 +221,24 @@ const { chromium } = require("playwright");
         });
       else await route.fulfill({ json: data });
     });
+    if (process.argv.includes("--overview-only")) {
+      data.eventCounts = [{ type: "OPENED", _count: 12 }];
+      await page.goto("http://127.0.0.1:" + server.address().port + "/?tab=overview");
+      await page.getByRole("heading", { name: "Engagement & attribution", exact: true }).waitFor();
+      const panel = page.locator("article").filter({ has: page.getByRole("heading", { name: "Engagement & attribution", exact: true }) });
+      assert.equal(await panel.getByRole("link", { name: "View attributed sales →", exact: true }).getAttribute("href"), "/our-klaviyo/analytics");
+      assert.match(await panel.innerText(), /OPENED\s+12/);
+      assert.equal(await panel.getByText(/Attributed order value|Display limited to 10,000 attributed orders/).count(), 0);
+      assert.equal(await panel.getByText(/Last recorded click|last recorded click/).count(), 0, "Overview does not repeat obsolete attribution settings");
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overview fits ${width}px`);
+        await page.screenshot({ path: path.join(output, `overview-${width}.png`) });
+      }
+      assert.deepEqual(errors, []);
+      console.log("PASS: overview keeps engagement counts and links to canonical attributed sales. Screenshots: " + output);
+      return;
+    }
     await page.goto("http://127.0.0.1:" + server.address().port);
     await page.getByRole("button", { name: "View results", exact: true }).click();
     const ordersPanel = page.getByRole("region", { name: "Attributed orders", exact: true });

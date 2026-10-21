@@ -25,6 +25,12 @@ const statusLabels: Record<string, string> = {
   UNKNOWN: "Needs review", PENDING: "Waiting", SENT: "Sent",
   SENDING: "Sending", CANCELLED: "Stopped", FAILED: "Failed",
 };
+const interactionNames: Record<string, string> = {
+  OPENED: "Recorded open", CLICKED: "Recorded click", COUPON: "Coupon redeemed",
+};
+const attributionNames: Record<string, string> = {
+  OPENED: "Open-based attribution", CLICKED: "Click-based attribution", COUPON: "Code-based attribution",
+};
 
 function DeliveryMetrics({ metrics }: { metrics: Metrics }) {
   const items = [
@@ -116,11 +122,15 @@ function ResultsDialog({ flowKey, close, initialDays }: {
         <DeliveryMetrics metrics={report.totals} />
         <details className="mk-fr-explanation">
           <summary>How sales are credited</summary>
-          <p>An order is credited to the most recent qualifying email open or click across Reef Ops flows and campaigns, using the same rules as Analytics: {report.attribution.emailClickDays}-day clicks and {report.attribution.emailOpenDays}-day opens. The attribution window starts at delivery when recorded, otherwise at send.</p>
+          {flowKey === "welcome" ? <>
+            <p>Welcome can receive credit for the first qualifying purchase after signup, or an order using that customer’s assigned Welcome code. Repeat purchases without that code do not count.</p>
+            <p>First-purchase credit requires the Welcome email to win the normal attribution rules: the most recent qualifying open or click across Reef Ops, within {report.attribution.emailClickDays} days of delivery for clicks or {report.attribution.emailOpenDays} days for opens. Send time is used when delivery is unavailable.</p>
+            <p>Welcome-code redemption can receive credit without a recorded open or click, outside those windows. A genuine Welcome offer email must have been sent to the customer before purchase. Each order is counted once.</p>
+          </> : <p>An order is credited to the most recent qualifying email open or click across Reef Ops flows and campaigns, using the same rules as Analytics: {report.attribution.emailClickDays}-day clicks and {report.attribution.emailOpenDays}-day opens. The attribution window starts at delivery when recorded, otherwise at send. Verified assigned Welcome-code redemption takes priority.</p>}
           <p>Buyer conversion counts distinct recipients with a credited order divided by distinct recipients sent an email. A buyer can receive multiple emails and place multiple orders. Each order receives one credit.</p>
           <p>Revenue is recorded gross order value before refunds or cancellations. Currencies stay separate. Attribution shows an association; it does not prove the email caused the purchase. Privacy features and bots can inflate opens.</p>
           <p>{report.totals.clicked ? `${number(report.totals.clicked)} emails have recorded clicks.` : "No recorded clicks are available in this period. Click tracking is deferred; this does not mean nobody visited the site."}</p>
-          <p>Checkout and flow-code badges add supporting evidence to orders already attributed above; they do not add extra revenue. Historical orders may lack the details needed to check them.</p>
+          <p>{flowKey === "welcome" ? "Order badges show first-purchase or Welcome-code credit. Historical orders may lack the details needed to verify code redemption." : "Checkout and flow-code badges add supporting evidence to orders already attributed above; they do not add extra revenue. Historical orders may lack the details needed to check them."}</p>
         </details>
         <section className="mk-fr-section" aria-label="Results by email">
           <h3>Results by email</h3>
@@ -152,13 +162,14 @@ function ResultsDialog({ flowKey, close, initialDays }: {
               <p className="mk-fr-credit">Credited to <strong>{order.step}</strong><small>{order.subject}</small></p>
               <dl className="mk-fr-timeline">
                 <div><dt>Email sent</dt><dd><time dateTime={order.sentAt}>{date(order.sentAt)}</time></dd></div>
-                <div><dt>{order.interaction === "CLICKED" ? "Recorded click" : "Recorded open"}</dt><dd><time dateTime={order.interactedAt}>{date(order.interactedAt)}</time></dd></div>
+                <div><dt>{interactionNames[order.interaction] || "Recorded interaction"}</dt><dd><time dateTime={order.interactedAt}>{date(order.interactedAt)}</time></dd></div>
                 <div><dt>Order placed</dt><dd><time dateTime={order.placedAt}>{date(order.placedAt)}</time></dd></div>
               </dl>
               <div className="mk-fr-badges">
                 {flowKey === "abandoned-cart" && <span className={order.checkoutMatch ? "is-evidence" : ""}>{order.checkoutMatch === true ? "Same checkout" : order.checkoutMatch === false ? "Different checkout" : "Checkout details unavailable"}</span>}
-                {order.discountCodes.length > 0 && <span className="is-evidence">Flow code used</span>}
-                <span>{order.interaction === "CLICKED" ? "Click-based attribution" : "Open-based attribution"}</span>
+                {flowKey === "welcome" && order.welcomeReason === "FIRST_ORDER" && <span className="is-evidence">First order after signup</span>}
+                {flowKey === "welcome" && order.welcomeReason === "WELCOME_CODE" ? <span className="is-evidence">Welcome code used</span> : order.discountCodes.length > 0 && <span className="is-evidence">Flow code used</span>}
+                <span>{attributionNames[order.interaction] || "Recorded attribution"}</span>
               </div>
               {order.discountCodes.length > 0 && <details className="mk-fr-code"><summary>Flow discount code</summary><p>{order.discountCodes.join(", ")}</p></details>}
             </li>)}

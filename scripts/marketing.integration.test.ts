@@ -16,6 +16,7 @@ import { registerFlowReportTests } from "./flow-report.integration";
 import { registerCartMinimumTests } from "./cart-minimum.integration";
 import { registerCartMerchandiseTests } from "./cart-merchandise.integration";
 import { registerCartAbandonmentTests } from "./cart-abandonment.integration";
+import { registerWelcomeAttributionTests } from "./welcome-attribution.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -53,6 +54,7 @@ registerFlowReportTests(() => ({ prisma, store, ingest, worker }));
 registerCartMinimumTests(() => ({ prisma, store, ingest, worker }));
 registerCartMerchandiseTests();
 registerCartAbandonmentTests(() => ({ prisma, store, ingest, worker }));
+registerWelcomeAttributionTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {
@@ -3278,7 +3280,7 @@ test("email attribution uses the latest qualifying interaction like Klaviyo", as
       shop,
       key: "attribution-older-click-message",
       profileId: profile.id,
-      flowKey: "welcome",
+      flowKey: "abandoned-cart",
       channel: "EMAIL",
       subject: "Older clicked message",
       content: defaultContent,

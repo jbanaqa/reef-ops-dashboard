@@ -102,8 +102,6 @@ type Data = {
   settings: MarketingSettings;
   counts: { profiles: number; mailable: number; suppressions: number };
   setup: Record<string, unknown>;
-  revenue: Record<string, number>;
-  revenueCapped: boolean;
   eventCounts: { type: string; _count: number }[];
   messageCounts: {
     status: string;
@@ -637,21 +635,11 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       {e.type} <b>{e._count.toLocaleString()}</b>
                     </p>
                   ))}
-                  {Object.entries(data.revenue).map(([currency, amount]) => (
-                    <p key={currency}>
-                      Attributed order value{" "}
-                      <b>
-                        {amount.toFixed(2)} {currency}
-                      </b>
-                    </p>
-                  ))}
+                  <Link href="/our-klaviyo/analytics">View attributed sales →</Link>
                   <small>
-                    {String(data.setup.attribution)} Opens can include
+                    Opens can include
                     privacy-proxy activity. Event totals are not unique
-                    recipient rates. Revenue is gross order value before refund
-                    adjustment.
-                    {data.revenueCapped &&
-                      " Display limited to 10,000 attributed orders."}
+                    recipient rates.
                   </small>
                 </article>
               </div>

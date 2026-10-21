@@ -43,6 +43,7 @@ async function message(h: Harness, profileId: string, flowKey: "welcome" | "aban
     channel: "EMAIL", subject: `${flowKey} email ${step + 1}`, content: defaultContent,
     status: options.status || (sentAt ? "SENT" : "PENDING"),
     dueAt: sentAt || new Date(), sentAt, createdAt: options.createdAt || ago(3),
+    triggerAt: options.createdAt || (sentAt ? new Date(+sentAt - 1000) : ago(3)),
   } });
 }
 
@@ -75,7 +76,9 @@ export function registerFlowReportTests(context: () => Context) {
     for (const status of ["PENDING", "SENDING", "CANCELLED", "FAILED", "UNKNOWN"])
       await message(h, second.id, "welcome", { step: 2, sentAt: null, createdAt: ago(1), status });
     await order(h, first.id, "1001", ago(1), { revenue: "42.50" });
-    await order(h, first.id, "1002", ago(0.5), { currency: "EUR", revenue: "12" });
+    await h.prisma.marketingResource.create({ data: { shop: h.shop, kind: "WELCOME_COUPON", key: first.id,
+      name: "Assigned Welcome offer", data: { code: "WELCOME-METRICS" } } });
+    await order(h, first.id, "1002", ago(0.5), { currency: "EUR", revenue: "12", discountCodes: ["WELCOME-METRICS"] });
     await order(h, second.id, "1003", ago(0.25));
     const report = await flowReport("welcome");
     assert.equal(report.flowKey, "welcome"); assert.equal(report.days, 30);
@@ -92,7 +95,7 @@ export function registerFlowReportTests(context: () => Context) {
     assert.ok(report.orders.every(item => item.profileId === first.id && item.email === first.email && item.subject === b.subject));
     assert.deepEqual(report.orders.map(item => item.label), ["#1002", "#1001"]);
     assert.equal(report.orders[0].shopifyUrl, `https://${h.shop}/admin/orders/1002`);
-    assert.ok(report.orders.every(item => item.interaction === "OPENED" && item.step === winningStep.label));
+    assert.ok(report.orders.every(item => ["OPENED", "COUPON"].includes(item.interaction) && item.step === winningStep.label));
     const analytics = await marketingAnalytics(), analyticsRow = analytics.rows.find(row => row.key === "welcome")!;
     assert.equal(analyticsRow.recipients, 2); assert.equal(analyticsRow.convertedRecipients, 1);
     assert.equal(analytics.totals.recipients, 2); assert.equal(analytics.totals.convertedRecipients, 1);
@@ -203,9 +206,9 @@ export function registerFlowReportTests(context: () => Context) {
     await order(h, p.id, "6001", ago(1), { discountCodes: ["welcome10-proof", "OTHER"] });
     await order(h, p.id, "6002", ago(0.5), { discountCodes: ["OTHER"] });
     const report = await flowReport("welcome");
-    assert.equal(report.totals.orders, 2); assert.equal(report.evidence.discountOrders, 1);
+    assert.equal(report.totals.orders, 1); assert.equal(report.evidence.discountOrders, 1);
     assert.deepEqual(report.orders.find(item => item.label === "#6001")!.discountCodes.map(code => code.toUpperCase()), ["WELCOME10-PROOF"]);
-    assert.deepEqual(report.orders.find(item => item.label === "#6002")!.discountCodes, []);
+    assert.equal(report.orders.some(item => item.label === "#6002"), false, "repeat purchases without the Welcome code are not Welcome sales");
     assert.ok(report.orders.every(item => item.checkoutMatch === null));
   }));
 
@@ -225,27 +228,27 @@ export function registerFlowReportTests(context: () => Context) {
 
   test("flow reports: order ledgers paginate without duplicate order credit and replayed events stay idempotent", async () => customerReportTest(context(), "pagination", async h => {
     const { flowReport } = await import("../lib/marketing/flow-report");
-    const p = await h.make("flow-pages@example.com"), m = await message(h, p.id, "welcome", { sentAt: ago(2) });
+    const p = await h.make("flow-pages@example.com"), m = await message(h, p.id, "abandoned-cart", { sentAt: ago(2) });
     await event(h, p.id, m.id, "OPENED", ago(1.5));
     for (let i = 0; i < 27; i++) await order(h, p.id, String(7000 + i), new Date(+ago(1) + i * 1000), { revenue: "10" });
     await order(h, p.id, "7026", ago(0.5), { revenue: "10" }, "duplicate-source-order-7026");
     await order(h, p.id, "gid://shopify/Order/7026", ago(0.5), { revenue: "10" }, "duplicate-gid-source-order-7026");
     await order(h, p.id, "7000", ago(1), { revenue: "999" }, "order:7000");
-    const first = await flowReport("welcome", 30, 1), second = await flowReport("welcome", 30, 2);
+    const first = await flowReport("abandoned-cart", 30, 1), second = await flowReport("abandoned-cart", 30, 2);
     assert.equal(first.totals.orders, 27); assert.equal(first.totals.convertedRecipients, 1); assert.deepEqual(first.totals.revenue, { USD: 270 });
     assert.deepEqual(first.ordersPage, { page: 1, pageSize: 25, total: 27, pages: 2 });
     assert.equal(first.orders.length, 25); assert.equal(second.orders.length, 2);
     assert.equal(new Set([...first.orders, ...second.orders].map(item => item.id)).size, 27);
     assert.ok(+new Date(first.orders[0].placedAt) > +new Date(second.orders[0].placedAt));
-    assert.equal((await flowReport("welcome", 30, 999)).ordersPage.page, 2);
-    assert.equal((await flowReport("welcome", 30, 0)).ordersPage.page, 1);
-    assert.equal((await flowReport("welcome", 30, 1.5)).ordersPage.page, 1);
+    assert.equal((await flowReport("abandoned-cart", 30, 999)).ordersPage.page, 2);
+    assert.equal((await flowReport("abandoned-cart", 30, 0)).ordersPage.page, 1);
+    assert.equal((await flowReport("abandoned-cart", 30, 1.5)).ordersPage.page, 1);
   }));
 
   test("flow reports: malformed or missing order amounts and currencies never fabricate revenue", async () => customerReportTest(context(), "unknown-money", async h => {
     const { flowReport } = await import("../lib/marketing/flow-report");
     const { marketingAnalytics } = await import("../lib/marketing/analytics");
-    const p = await h.make("flow-unknown-money@example.com"), m = await message(h, p.id, "welcome", { sentAt: ago(2) });
+    const p = await h.make("flow-unknown-money@example.com"), m = await message(h, p.id, "abandoned-cart", { sentAt: ago(2) });
     await event(h, p.id, m.id, "OPENED", ago(1.5));
     const payloads = [
       { revenue: "not money", currency: "USD" },
@@ -254,13 +257,13 @@ export function registerFlowReportTests(context: () => Context) {
       { revenue: "10", currency: null },
     ];
     for (let i = 0; i < payloads.length; i++) await order(h, p.id, String(8000 + i), ago(1), payloads[i]);
-    const report = await flowReport("welcome");
+    const report = await flowReport("abandoned-cart");
     assert.equal(report.totals.orders, 4); assert.equal(report.totals.convertedRecipients, 1);
     assert.deepEqual(report.totals.revenue, {});
     assert.ok(report.orders.filter(item => item.currency === "USD").every(item => item.amount === null));
     assert.ok(report.orders.every(item => item.checkoutMatch === null));
     const analytics = await marketingAnalytics();
-    assert.deepEqual(analytics.rows.find(row => row.key === "welcome")!.revenue, report.totals.revenue);
+    assert.deepEqual(analytics.rows.find(row => row.key === "abandoned-cart")!.revenue, report.totals.revenue);
     assert.deepEqual(analytics.totals.revenue, report.totals.revenue);
   }));
 

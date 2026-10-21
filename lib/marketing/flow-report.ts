@@ -1,6 +1,6 @@
 import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { attributionConfiguration, attributedOrders } from "./attribution";
+import { attributionConfiguration, attributedOrders, type AttributionMatch } from "./attribution";
 import { customerFlowMessages } from "./cart-report-scope";
 import { compactOrderEvidence, orderValue, type OrderEvidence } from "./order-evidence";
 import { DAY } from "./rules";
@@ -100,7 +100,8 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
 
   const orders: { id: string; label: string; shopifyUrl: string | null; profileId: string | null; email: string;
     placedAt: string; sentAt: string; subject: string; step: string; amount: number | null; currency: string | null;
-    interaction: "OPENED" | "CLICKED"; interactedAt: string; checkoutMatch: boolean | null; discountCodes: string[] }[] = [];
+    interaction: AttributionMatch["interaction"]; interactedAt: string; welcomeReason?: AttributionMatch["welcomeReason"];
+    checkoutMatch: boolean | null; discountCodes: string[] }[] = [];
   const details = new Map<string, { payload: OrderPayload; messageId: string; occurredAt: Date; profileId: string | null }>();
   for await (const { order, match } of attributedOrders(prisma, { since, until: now, flowKey, configuration: attribution })) {
     const message = match ? sentMessages.get(match.messageId) : undefined;
@@ -116,7 +117,8 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
       email: message.profile.email || "Email unavailable", placedAt: order.occurredAt.toISOString(),
       sentAt: message.sentAt.toISOString(), subject: message.subject, step: step.label, amount,
       currency, interaction: match.interaction,
-      interactedAt: match.interactedAt.toISOString(), checkoutMatch: null, discountCodes: [] });
+      interactedAt: match.interactedAt.toISOString(), ...(match.welcomeReason ? { welcomeReason: match.welcomeReason } : {}),
+      checkoutMatch: null, discountCodes: match.discountCode ? [match.discountCode] : [] });
     details.set(order.id, { payload, messageId: message.id, occurredAt: order.occurredAt, profileId: order.profileId });
   }
   // Older compact ORDER records lack evidence. Reuse small fields from retained
@@ -147,14 +149,14 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
       if (!detail.payload.orderLabel && source.label) orders.find(order => order.id === eventId)!.label = source.label;
     }
   }
-  // Allocate code evidence only to a real message sent before the order. A shared
-  // Welcome coupon may appear in several emails, but an order is still counted once.
+  // Welcome code evidence already comes from the central winning match. Cart
+  // codes remain supporting evidence and cannot independently assign credit.
   const coupons = new Map<string, { code: string; sentAt: Date }[]>();
   const couponMessages = new Map<string, { profileId: string; sentAt: Date }[]>();
   const buyerProfiles = new Set([...details.values()].flatMap(detail => detail.profileId || []));
   for (const message of sentMessages.values()) {
-    if (!buyerProfiles.has(message.profileId) || (flowKey === "welcome" && (message.flowStep ?? 0) >= 3)) continue;
-    const key = flowKey === "welcome" ? message.profileId : message.id;
+    if (flowKey === "welcome" || !buyerProfiles.has(message.profileId)) continue;
+    const key = message.id;
     const list = couponMessages.get(key) || [];
     list.push({ profileId: message.profileId, sentAt: message.sentAt! }); couponMessages.set(key, list);
   }
@@ -183,8 +185,8 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
       if (order.checkoutMatch === null) evidence.missingCheckoutDetails++;
     }
     const used = new Set((detail.payload.discountCodes || []).filter(code => typeof code === "string").map(code => code.trim().toUpperCase()));
-    order.discountCodes = [...new Set((coupons.get(message.profileId) || [])
-      .filter(coupon => coupon.sentAt <= detail.occurredAt && used.has(coupon.code)).map(coupon => coupon.code))];
+    order.discountCodes = [...new Set([...order.discountCodes, ...(coupons.get(message.profileId) || [])
+      .filter(coupon => coupon.sentAt <= detail.occurredAt && used.has(coupon.code)).map(coupon => coupon.code)])];
     if (order.discountCodes.length) evidence.discountOrders++;
   }
   for (const row of [totals, ...steps]) {

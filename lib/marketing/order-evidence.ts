@@ -4,6 +4,42 @@ type OrderSource = {
   checkout_token?: unknown;
   discount_codes?: unknown;
 };
+type OrderStateSource = { financial_status?: unknown; cancelled_at?: unknown; test?: unknown };
+export type OrderState = { financialStatus?: string; cancelledAt?: string | null; test?: boolean };
+type StateTimes = Partial<Record<keyof OrderState, string>>;
+
+/** Small lifecycle facts can change without rewriting the original order amount. */
+export function compactOrderState(source: OrderStateSource): OrderState {
+  return {
+    ...(typeof source.financial_status === "string" ? { financialStatus: source.financial_status.toLowerCase().slice(0, 40) } : {}),
+    ...(source.cancelled_at === null || typeof source.cancelled_at === "string" ? { cancelledAt: source.cancelled_at } : {}),
+    ...(typeof source.test === "boolean" ? { test: source.test } : {}),
+  };
+}
+
+/** Partial/out-of-order webhooks cannot overwrite newer facts in another field. */
+export function orderStateUpdate(existing: unknown, source: OrderStateSource, at: Date): OrderState & { orderStateAt?: StateTimes } {
+  const saved = (existing || {}) as { orderStateAt?: StateTimes | string };
+  const state = compactOrderState(source);
+  const times = typeof saved.orderStateAt === "object" && saved.orderStateAt ? saved.orderStateAt : {};
+  const changes: OrderState = {};
+  const nextTimes = { ...times };
+  for (const key of Object.keys(state) as (keyof OrderState)[]) {
+    const previous = new Date(times[key] || (typeof saved.orderStateAt === "string" ? saved.orderStateAt : ""));
+    if (Number.isFinite(+previous) && +at < +previous) continue;
+    Object.assign(changes, { [key]: state[key] });
+    nextTimes[key] = at.toISOString();
+  }
+  return Object.keys(changes).length ? { ...changes, orderStateAt: nextTimes } : {};
+}
+
+/** Welcome conversions require positive known value and no explicit invalidation. */
+export function qualifyingOrder(payload: unknown): boolean {
+  const source = (payload || {}) as OrderState;
+  const { amount, currency } = orderValue(payload);
+  return amount !== null && amount > 0 && !!currency && source.test !== true && !source.cancelledAt &&
+    !["voided", "refunded"].includes(String(source.financialStatus || "").toLowerCase());
+}
 
 export type OrderEvidence = {
   checkoutKey?: string | null;

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { shop } from "./store";
-import { attributedOrders, attributionConfiguration } from "./attribution";
+import { attributedOrders, attributionConfiguration, type AttributionMatch } from "./attribution";
 import { Prisma } from "@/app/generated/prisma/client";
 import { orderValue } from "./order-evidence";
 
@@ -27,7 +27,7 @@ export async function campaignReport(id: string, requestedPage = 1) {
   };
   const reasons = new Map<string, number>();
   const sentMessageIds = new Set<string>();
-  const orders: { id: string; orderId: string | null; label: string | null; profileId: string | null; placedAt: Date; amount: number | null; currency: string | null; interaction: "CLICKED" | "OPENED"; interactedAt: Date }[] = [];
+  const orders: { id: string; orderId: string | null; label: string | null; profileId: string | null; placedAt: Date; amount: number | null; currency: string | null; interaction: AttributionMatch["interaction"]; interactedAt: Date }[] = [];
   let firstSentAt: Date | undefined;
   let cursor: string | undefined;
   for (;;) {

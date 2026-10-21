@@ -41,7 +41,7 @@ export default function CampaignOrders({ report, onLoaded }: {
           <div className="mk-order-summary">
             {order.shopifyUrl ? <a href={order.shopifyUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${order.label} in Shopify`}>{order.label} ↗</a> : <strong>{order.label}</strong>}
             <time dateTime={order.placedAt}>{date(order.placedAt)}</time>
-            <small>Credited after email {order.interaction === "CLICKED" ? "click" : "open"} · {date(order.interactedAt)}</small>
+            <small>{order.interaction === "COUPON" ? "Coupon redeemed" : "Credited after email " + (order.interaction === "CLICKED" ? "click" : "open")} · {date(order.interactedAt)}</small>
           </div>
           <div className="mk-order-customer"><span>Customer</span><strong>{order.customer?.name || order.customer?.email || "Customer unavailable"}</strong>{order.customer?.name && order.customer.email && <small>{order.customer.email}</small>}</div>
           <div className="mk-order-amount"><span>Revenue</span><strong>{order.amount !== null && order.currency ? `${order.currency} ${order.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Amount unavailable"}</strong></div>

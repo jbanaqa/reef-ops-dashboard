@@ -26,7 +26,9 @@ function report(flowKey: "welcome" | "abandoned-cart", days: number, page: numbe
     placedAt: at, sentAt: "2026-10-18T17:00:00.000Z", subject: name + " offer",
     step: flowKey === "welcome" ? "Email #1 · Welcome offer" : "Email #2 · Discount offer",
     amount: index === 2 ? null : 100 + index, currency: index === 2 ? null : "USD",
-    interaction: "OPENED" as const, interactedAt: "2026-10-19T16:00:00.000Z",
+    interaction: flowKey === "welcome" && index === 0 ? "COUPON" as const : "OPENED" as const,
+    interactedAt: flowKey === "welcome" && index === 0 ? at : "2026-10-19T16:00:00.000Z",
+    ...(flowKey === "welcome" ? { welcomeReason: index === 0 ? "WELCOME_CODE" as const : "FIRST_ORDER" as const } : {}),
     checkoutMatch: flowKey === "welcome" ? null : index === 0 ? true : index === 1 ? false : null,
     discountCodes: index === 0 ? ["FLOW-TEST-CODE"] : [],
   }));

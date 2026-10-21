@@ -678,7 +678,6 @@ export async function GET(request: Request) {
       counts,
       messageCounts,
       eventCounts,
-      orders,
     ] = await Promise.all([
       prisma.marketingProfile.findMany({
         where: {
@@ -751,17 +750,7 @@ export async function GET(request: Request) {
         where: { shop: shop() },
         _count: true,
       }),
-      prisma.marketingEvent.findMany({
-        where: { shop: shop(), type: "ORDER", messageId: { not: null } },
-        select: { payload: true, messageId: true },
-        take: 10000,
-      }),
     ]);
-    const revenue: Record<string, number> = {};
-    for (const order of orders) {
-      const p = order.payload as { currency: string; revenue: string };
-      revenue[p.currency] = (revenue[p.currency] || 0) + Number(p.revenue || 0);
-    }
     const settings = await loadMarketingSettings();
     const inboxRows = await prisma.marketingWebhookInbox.findMany({
         where: { shop: shop(), status: { not: "DONE" } },
@@ -858,8 +847,6 @@ export async function GET(request: Request) {
         },
         messageCounts,
         eventCounts,
-        revenue,
-        revenueCapped: orders.length === 10000,
         setup: setup(settings.operations, settings.postalAddress),
       },
       { headers: { "Cache-Control": "no-store" } },

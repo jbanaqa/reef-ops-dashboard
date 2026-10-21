@@ -1,16 +1,19 @@
 import { DAY, marketingSettings } from "./rules";
 import { shop, type Tx } from "./store";
 import { customerCartMessages } from "./cart-report-scope";
+import { welcomeAttributionFacts, type WelcomeOrderPayload } from "./welcome-attribution";
 
 type AttributionClient = Pick<
   Tx,
-  "marketingEvent" | "marketingMessage" | "marketingResource"
+  "marketingEvent" | "marketingMessage" | "marketingResource" | "$queryRaw"
 >;
 
 export type AttributionMatch = {
   messageId: string;
-  interaction: "CLICKED" | "OPENED";
+  interaction: "CLICKED" | "OPENED" | "COUPON";
   interactedAt: Date;
+  welcomeReason?: "FIRST_ORDER" | "WELCOME_CODE";
+  discountCode?: string;
 };
 
 export async function attributionConfiguration(client: AttributionClient) {
@@ -66,7 +69,7 @@ export async function* attributedOrders(
       const batch = page.slice(index, index + 20);
       const matches = await Promise.all(
         batch.map((order) => order.profileId
-          ? findEmailAttribution(client, order.profileId, order.occurredAt, options.configuration)
+          ? findEmailAttribution(client, order.profileId, order.occurredAt, options.configuration, order.payload as WelcomeOrderPayload)
           : null),
       );
       for (let offset = 0; offset < batch.length; offset++) {
@@ -83,7 +86,7 @@ export async function* attributedOrders(
   }
 }
 
-/** Klaviyo-style email last touch: the latest qualifying open or click wins. */
+/** One winner: verified Welcome-code redemption, otherwise eligible email last touch. */
 export async function findEmailAttribution(
   client: AttributionClient,
   profileId: string,
@@ -92,6 +95,7 @@ export async function findEmailAttribution(
     emailClickDays: number;
     emailOpenDays: number;
   },
+  order?: WelcomeOrderPayload,
 ): Promise<AttributionMatch | null> {
   const settings = configuration || (await attributionConfiguration(client));
   const maxDays = Math.max(settings.emailClickDays, settings.emailOpenDays);
@@ -100,20 +104,24 @@ export async function findEmailAttribution(
       shop: shop(),
       profileId,
       channel: "EMAIL",
-      sentAt: {
-        // Delivery normally follows immediately, while a short cushion keeps a
-        // delayed provider delivery eligible without scanning all history.
-        gte: new Date(+convertedAt - (maxDays + 7) * DAY),
-        lte: convertedAt,
-      },
-      OR: [
+      sentAt: { lte: convertedAt },
+      AND: [{ OR: [
         { flowKey: { not: null } },
         { campaign: { is: { testOfCampaignId: null } } },
-      ],
+      ] }, { OR: [
+        { flowKey: "welcome" },
+        // Welcome code evidence can outlive an open window; other messages
+        // retain the existing bounded engagement lookup.
+        { sentAt: { gte: new Date(+convertedAt - (maxDays + 7) * DAY) } },
+      ] }],
     },
-    select: { id: true, key: true, flowKey: true, profileId: true, sentAt: true },
+    select: { id: true, key: true, flowKey: true, profileId: true, sentAt: true, flowStep: true, triggerAt: true },
   });
-  const messages = await customerCartMessages(client, shop(), candidates);
+  const customerMessages = await customerCartMessages(client, shop(), candidates);
+  const welcome = await welcomeAttributionFacts(client, profileId, convertedAt, customerMessages, order);
+  if (welcome.couponMatch) return { messageId: welcome.couponMatch.messageId,
+    interaction: "COUPON", interactedAt: convertedAt, welcomeReason: "WELCOME_CODE", discountCode: welcome.couponMatch.code };
+  const messages = customerMessages.filter(message => message.flowKey !== "welcome" || welcome.eligibleMessageIds.has(message.id));
   if (!messages.length) return null;
   const deliveryEvents = await client.marketingEvent.findMany({
     where: {
@@ -163,6 +171,8 @@ export async function findEmailAttribution(
         messageId: event.messageId,
         interaction: event.type as AttributionMatch["interaction"],
         interactedAt: event.occurredAt,
+        ...(order && messages.find(message => message.id === event.messageId)?.flowKey === "welcome"
+          ? { welcomeReason: "FIRST_ORDER" as const } : {}),
       };
   }
   return null;

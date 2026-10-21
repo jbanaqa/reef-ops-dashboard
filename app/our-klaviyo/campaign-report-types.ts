@@ -9,7 +9,7 @@ export type CampaignReport = {
   orders: {
     id: string; orderId: string | null; label: string; placedAt: string;
     amount: number | null; currency: string | null;
-    interaction: "CLICKED" | "OPENED"; interactedAt: string;
+    interaction: "CLICKED" | "OPENED" | "COUPON"; interactedAt: string;
     customer: { id: string; name: string; email: string | null } | null;
     shopifyUrl: string | null;
   }[];
