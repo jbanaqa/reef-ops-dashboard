@@ -1,5 +1,6 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useRef, useState } from "react";
 import {
   Content,
@@ -113,6 +114,7 @@ function FlowEditorState({
     content: Content,
   ) => void | Promise<unknown>;
 }) {
+  const { marketingFetch, brand } = useMarketingBrand();
   const upgrade = (data: Data) =>
     resource.key === "abandoned-cart"
       ? cartDraft(data as FlowConfig)
@@ -152,7 +154,7 @@ function FlowEditorState({
     }
     return !!result?.data;
   }
-  const draftKey = resource.id || resource.key;
+  const draftKey = brand.id === "corals-anonymous" ? resource.id || resource.key : `${brand.id}:${resource.id || resource.key}`;
   const [draftReady, setDraftReady] = useState(false);
   const [draftStatus, setDraftStatus] = useState("Loading saved draft…");
   const writes = useRef(Promise.resolve());
@@ -240,7 +242,7 @@ function FlowEditorState({
     setChecking(true);
     setCheckError("");
     try {
-      const r = await fetch("/api/marketing", {
+      const r = await marketingFetch("/api/marketing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "cart-readiness" }),

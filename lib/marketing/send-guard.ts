@@ -1,5 +1,6 @@
 import { atomic, shop } from "./store";
-import { eligible, marketingSettings } from "./rules";
+import { eligible } from "./rules";
+import { scopedMarketingSettings as marketingSettings } from "./settings";
 import { setup } from "./delivery";
 import { customerMarketingFlows, masterAudienceAllows } from "./master-audience";
 import { campaignConsentEligible, resolveCampaignAudience, resolvedAudienceMatches } from "./campaign-audience";
@@ -48,7 +49,7 @@ export async function authorizeDelivery(handoff: Handoff): Promise<boolean> {
     const settings = await tx.marketingResource.findUnique({ where: {
       shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" },
     } });
-    const saved = marketingSettings(settings?.data), gates = setup(saved.operations, saved.postalAddress);
+    const saved = marketingSettings(settings?.data), gates = setup(saved.operations, saved.postalAddress, saved.sender);
     if (!gates.sendingEnabled || !gates.migrationConfirmed || !gates.emailReady ||
       (m.channel !== "EMAIL" && !gates.smsReady) ||
       (m.flowKey && customerMarketingFlows.has(m.flowKey) && !gates.ingestEnabled))

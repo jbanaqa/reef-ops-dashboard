@@ -1,4 +1,5 @@
 "use client";
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useRef, useState } from "react";
 import type { CampaignReport } from "./campaign-report-types";
 import "./campaign-orders.css";
@@ -10,6 +11,7 @@ function date(value: string) {
 export default function CampaignOrders({ report, onLoaded }: {
   report: CampaignReport; onLoaded: (report: CampaignReport) => void;
 }) {
+  const { marketingFetch } = useMarketingBrand();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const active = useRef<AbortController | null>(null);
@@ -20,7 +22,7 @@ export default function CampaignOrders({ report, onLoaded }: {
     active.current = controller;
     setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/marketing?view=campaign-report&id=${encodeURIComponent(report.campaign.id)}&ordersPage=${page}`, { cache: "no-store", signal: controller.signal });
+      const response = await marketingFetch(`/api/marketing?view=campaign-report&id=${encodeURIComponent(report.campaign.id)}&ordersPage=${page}`, { cache: "no-store", signal: controller.signal });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Could not load attributed orders.");
       if (!controller.signal.aborted) onLoaded(result);

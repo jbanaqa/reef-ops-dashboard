@@ -1,5 +1,6 @@
 "use client";
 
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useRef, useState } from "react";
 import type {
   CampaignEmailLayout,
@@ -14,7 +15,6 @@ import {
   campaignProductFeeds,
 } from "@/lib/marketing/rules";
 
-const home = "https://coralsanonymous.com/collections/new-arrivals";
 const id = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -26,7 +26,7 @@ function move<T>(items: T[], index: number, direction: -1 | 1) {
   return next;
 }
 
-const blankProduct = (): CampaignEmailProduct => ({
+const blankProduct = (home: string): CampaignEmailProduct => ({
   id: id("product"),
   title: "Product name",
   url: home,
@@ -51,6 +51,10 @@ export default function CampaignEmailFields({
   onSubject: (value: string) => void;
   showInbox?: boolean;
 }) {
+  const { marketingFetch, brand } = useMarketingBrand();
+  const isMacro = brand.id === "macroalgae-farms";
+  const home = brand.storefrontOrigin + (isMacro ? "/collections/all" : "/collections/new-arrivals");
+  const availableFeeds = isMacro ? campaignProductFeeds.filter((feed) => feed.key === "newnew1").map((feed) => ({ ...feed, name: "Newest products" })) : campaignProductFeeds;
   const [refreshingFeed, setRefreshingFeed] = useState<string | null>(null);
   const [feedError, setFeedError] = useState("");
   const layout = content.campaignLayout!;
@@ -89,7 +93,7 @@ export default function CampaignEmailFields({
     setRefreshingFeed(sectionId);
     setFeedError("");
     try {
-      const response = await fetch("/api/marketing", {
+      const response = await marketingFetch("/api/marketing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "preview-campaign-feeds", content }),
@@ -259,7 +263,8 @@ export default function CampaignEmailFields({
                     <select
                       value={section.feed?.key || "manual"}
                       onChange={(event) => {
-                        const feed = campaignProductFeed({ key: event.target.value });
+                        const selectedFeed = campaignProductFeed({ key: event.target.value });
+                        const feed = isMacro && selectedFeed ? { ...selectedFeed, tags: [], name: "Newest products" } : selectedFeed;
                         replaceSection(sectionIndex, {
                           ...section,
                           feed,
@@ -268,7 +273,7 @@ export default function CampaignEmailFields({
                       }}
                     >
                       <option value="manual">Choose products manually</option>
-                      {campaignProductFeeds.map((feed) => (
+                      {availableFeeds.map((feed) => (
                         <option key={feed.key} value={feed.key}>{feed.name}</option>
                       ))}
                     </select>
@@ -378,14 +383,14 @@ export default function CampaignEmailFields({
                       </div>
                     </details>
                   ))}
-                  {!section.feed && <button type="button" onClick={() => replaceSection(sectionIndex, { ...section, products: [...section.products, blankProduct()] })}>Add product</button>}
+                  {!section.feed && <button type="button" onClick={() => replaceSection(sectionIndex, { ...section, products: [...section.products, blankProduct(home)] })}>Add product</button>}
                 </div>
               )}
             </details>
           ))}
         </div>
         <div className="mk-campaign-add-row">
-          <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("products"), type: "products", backgroundColor: "#ffffff", products: [blankProduct(), blankProduct()] }] })}>Add product grid</button>
+          <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("products"), type: "products", backgroundColor: "#ffffff", products: [blankProduct(home), blankProduct(home)] }] })}>Add product grid</button>
           <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("cta"), type: "cta", label: "SHOP NOW!", url: home, backgroundColor: "#3c8429", textColor: "#ffffff" }] })}>Add full-width button</button>
           <button type="button" onClick={() => patchLayout({ sections: [...layout.sections, { id: id("banner"), type: "banner", text: "Promotional banner", url: home, backgroundColor: "#ffffff", textColor: "#080808", accentColor: "#5439ee", borderColor: "#5439ee", borderWidth: 0 }] })}>Add full-width banner</button>
         </div>

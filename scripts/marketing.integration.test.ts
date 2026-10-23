@@ -17,6 +17,9 @@ import { registerCartMinimumTests } from "./cart-minimum.integration";
 import { registerCartMerchandiseTests } from "./cart-merchandise.integration";
 import { registerCartAbandonmentTests } from "./cart-abandonment.integration";
 import { registerWelcomeAttributionTests } from "./welcome-attribution.integration";
+import { registerMacroSubscriberTests } from "./macro-subscribers.integration";
+import { registerMarketingBrandRouteTests } from "./marketing-brand-routes.integration";
+import { registerMarketingBrandWorkerTests } from "./marketing-brands.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -55,6 +58,9 @@ registerCartMinimumTests(() => ({ prisma, store, ingest, worker }));
 registerCartMerchandiseTests();
 registerCartAbandonmentTests(() => ({ prisma, store, ingest, worker }));
 registerWelcomeAttributionTests(() => ({ prisma, store, ingest, worker }));
+registerMacroSubscriberTests(() => ({ prisma, store, ingest, worker }));
+registerMarketingBrandRouteTests(() => ({ prisma, store, ingest, worker }));
+registerMarketingBrandWorkerTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {

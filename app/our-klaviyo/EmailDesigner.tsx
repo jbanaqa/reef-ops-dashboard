@@ -1,5 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
+import { defaultMacroCampaignContent } from "@/lib/marketing/brands";
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useRef, useState } from "react";
 import {
   Content,
@@ -193,6 +195,8 @@ export default function EmailDesigner({
     content: Content,
   ) => void | Promise<unknown>;
 }) {
+  const { marketingFetch, href, brand } = useMarketingBrand();
+  const isMacro = brand.id === "macroalgae-farms";
   const dialog = useRef<HTMLDialogElement>(null);
   const [panel, setPanel] = useState<
     "content" | "layout" | "artwork" | "footer" | "test"
@@ -260,7 +264,7 @@ export default function EmailDesigner({
     setSocialFeedLoading(true);
     setSocialFeedError("");
     try {
-      const response = await fetch("/api/marketing", {
+      const response = await marketingFetch("/api/marketing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "preview-welcome-social-feed", content: { ...content, socialProductFeed: socialFeed } }),
@@ -721,7 +725,7 @@ export default function EmailDesigner({
                             ...(content.products || []),
                             {
                               title: "",
-                              url: "https://coralsanonymous.com",
+                              url: brand.storefrontOrigin,
                               price: "",
                             },
                           ])
@@ -752,7 +756,7 @@ export default function EmailDesigner({
                         changeContent("layout", layout);
                         if (layout === "campaign-sale" && !content.campaignLayout) {
                           const campaignLayout = structuredClone(
-                            defaultCampaignContent.campaignLayout!,
+                            (isMacro ? defaultMacroCampaignContent : defaultCampaignContent).campaignLayout!,
                           );
                           if (content.template !== "campaign-sale")
                             campaignLayout.sections = [];
@@ -761,10 +765,10 @@ export default function EmailDesigner({
                       }}
                     >
                       <option value="standard">Standard</option>
-                      <option value="b2b-wholesale">B2B wholesale</option>
-                      <option value="cart-recovery">Cart recovery</option>
-                      <option value="welcome">Welcome offer</option>
-                      <option value="welcome-social">Welcome social</option>
+                      {!isMacro && <option value="b2b-wholesale">B2B wholesale</option>}
+                      {!isMacro && <option value="cart-recovery">Cart recovery</option>}
+                      {!isMacro && <option value="welcome">Welcome offer</option>}
+                      {!isMacro && <option value="welcome-social">Welcome social</option>}
                       <option value="campaign-sale">Campaign sale</option>
                     </select>
                   </label>
@@ -1379,7 +1383,7 @@ export default function EmailDesigner({
                     "Add your mailing address in Settings before sending."}
                 </p>
                 <a
-                  href="/our-klaviyo/settings"
+                  href={href("/our-klaviyo/settings")}
                   target="_blank"
                   rel="noopener noreferrer"
                 >

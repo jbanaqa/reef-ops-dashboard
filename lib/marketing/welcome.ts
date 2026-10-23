@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "./shopify";
 import { type FlowConfig, validateFlow } from "./flow-config";
 import { content, couponTimeLeft, eligible, type Content } from "./rules";
 import { json, record, shop, type Tx } from "./store";

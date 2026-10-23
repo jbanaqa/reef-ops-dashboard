@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "./shopify";
 import { shop } from "./store";
 import { deliveryDateFromTags } from "./delivery-upsell-config";
 

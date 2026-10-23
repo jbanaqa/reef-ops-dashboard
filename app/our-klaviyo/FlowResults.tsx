@@ -1,5 +1,6 @@
 "use client";
 
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useId, useRef, useState } from "react";
 import type { FlowReport } from "@/lib/marketing/flow-report";
 
@@ -50,6 +51,7 @@ function ResultsDialog({ flowKey, close, initialDays }: {
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const { marketingFetch } = useMarketingBrand();
   const [request, setRequest] = useState({ days: initialDays, page: 1, version: 0 });
   const [response, setResponse] = useState<{
     request: typeof request; report?: FlowReport; error?: string;
@@ -77,7 +79,7 @@ function ResultsDialog({ flowKey, close, initialDays }: {
     });
     async function load() {
       try {
-        const result = await fetch(`/api/marketing?${params}`, {
+        const result = await marketingFetch(`/api/marketing?${params}`, {
           cache: "no-store", signal: controller.signal,
         });
         const payload = await result.json();
@@ -91,7 +93,7 @@ function ResultsDialog({ flowKey, close, initialDays }: {
     }
     void load();
     return () => controller.abort();
-  }, [flowKey, request]);
+  }, [flowKey, request, marketingFetch]);
   const refresh = () => setRequest(value => ({ ...value, version: value.version + 1 }));
   return <dialog ref={dialog} className="mk-flow-results-dialog" aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); close(); }}>

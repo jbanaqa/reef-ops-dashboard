@@ -11,6 +11,22 @@ import {
   personalize,
 } from "./rules";
 import { screenEmail } from "./email-screen";
+import { currentMarketingBrand, marketingEnv } from "./context";
+import { marketingBrand } from "./brands";
+
+export type DeliverySender = { name?: string; email?: string; replyTo?: string };
+
+function senderMailbox(sender?: DeliverySender) {
+  const configured = sender?.email?.trim() || marketingEnv("RESEND_FROM_EMAIL") || "";
+  return (configured.match(/<([^<>]+)>\s*$/)?.[1] || configured).trim();
+}
+
+function senderFrom(sender?: DeliverySender) {
+  const configured = sender?.email?.trim() || marketingEnv("RESEND_FROM_EMAIL") || "";
+  const name = sender?.name?.replace(/[\r\n<>"]/g, " ").trim();
+  if (!name || !configured) return configured;
+  return `${name} <${senderMailbox(sender)}>`;
+}
 
 export type Delivery = {
   id: string;
@@ -24,6 +40,7 @@ export type Delivery = {
   address?: string;
   organizationName?: string;
   branding?: import("./rules").EmailBranding;
+  sender?: DeliverySender;
   /** Invoked after asynchronous preparation, immediately before contacting the provider. */
   beforeSend?: () => Promise<void>;
 };
@@ -171,16 +188,17 @@ export async function checkEmailBeforeSending(address: string) {
 export const resendProvider: DeliveryProvider = {
   async send(m) {
     await checkEmailBeforeSending(m.to);
-    const key = process.env.RESEND_API_KEY,
-      from = process.env.RESEND_FROM_EMAIL,
-      address = m.address || process.env.MARKETING_POSTAL_ADDRESS,
-      organizationName = m.organizationName || "Corals Anonymous";
+    const key = marketingEnv("RESEND_API_KEY"),
+      from = senderFrom(m.sender),
+      address = m.address || marketingEnv("MARKETING_POSTAL_ADDRESS"),
+      organizationName = m.organizationName || marketingBrand(currentMarketingBrand()).name;
     if (!key || !from || !address)
       throw new DeliveryError(
         "Email sender and postal address are not configured.",
       );
     const body = JSON.stringify({
       from,
+      ...(m.sender?.replyTo ? { reply_to: m.sender.replyTo } : {}),
       to: [m.to],
       subject: personalize(m.subject, m.profileName),
       ...emailBody(m, address, organizationName),
@@ -188,7 +206,7 @@ export const resendProvider: DeliveryProvider = {
         "List-Unsubscribe": `<${m.unsubscribe}>`,
         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
       },
-      tags: [{ name: "marketing_message", value: m.id }],
+      tags: [{ name: "marketing_message", value: m.id }, { name: "marketing_brand", value: currentMarketingBrand() }],
     });
     // Keep this outside the network-error catch: stopping here is a known non-send.
     await m.beforeSend?.();
@@ -236,8 +254,8 @@ export const resendProvider: DeliveryProvider = {
 // A carrier adapter must implement this contract before SMS can be enabled.
 export const smsProvider: DeliveryProvider = {
   async send(m) {
-    const endpoint = process.env.MARKETING_SMS_GATEWAY_URL,
-      key = process.env.MARKETING_SMS_GATEWAY_KEY;
+    const endpoint = marketingEnv("MARKETING_SMS_GATEWAY_URL"),
+      key = marketingEnv("MARKETING_SMS_GATEWAY_KEY");
     if (!endpoint || !key || !endpoint.startsWith("https://"))
       throw new DeliveryError("SMS gateway is not configured.");
     const body = JSON.stringify({
@@ -285,30 +303,36 @@ export const smsProvider: DeliveryProvider = {
 
 export function setup(
   operations?: MarketingOperations,
-  postalAddress = process.env.MARKETING_POSTAL_ADDRESS || "",
+  postalAddress = marketingEnv("MARKETING_POSTAL_ADDRESS") || "",
+  sender?: DeliverySender,
 ) {
+  // Deployment capability alone must never activate a newly selected store.
+  operations ||= currentMarketingBrand() === "macroalgae-farms"
+    ? { sendingEnabled: false, migrationConfirmed: false, ingestEnabled: false, formEnabled: false }
+    : undefined;
   const env = {
-    sendingEnabled: process.env.MARKETING_SEND_ENABLED === "true",
-    migrationConfirmed: process.env.MARKETING_MIGRATION_CONFIRMED === "true",
-    ingestEnabled: process.env.MARKETING_INGEST_ENABLED === "true",
-    formEnabled: process.env.MARKETING_FORM_ENABLED === "true",
+    sendingEnabled: marketingEnv("MARKETING_SEND_ENABLED") === "true",
+    migrationConfirmed: marketingEnv("MARKETING_MIGRATION_CONFIRMED") === "true",
+    ingestEnabled: marketingEnv("MARKETING_INGEST_ENABLED") === "true",
+    formEnabled: marketingEnv("MARKETING_FORM_ENABLED") === "true",
   };
   return {
     deployment: env,
-    senderEmail: process.env.RESEND_FROM_EMAIL || "",
+    senderEmail: senderMailbox(sender),
+    senderName: sender?.name?.trim() || marketingEnv("RESEND_FROM_EMAIL")?.match(/^\s*([^<>]*)<[^<>]+>\s*$/)?.[1]?.trim().replace(/^"|"$/g, "") || "",
     sendingEnabled:
       env.sendingEnabled && (operations?.sendingEnabled ?? env.sendingEnabled),
     emailReady: !!(
-      process.env.RESEND_API_KEY &&
-      process.env.RESEND_FROM_EMAIL &&
+      marketingEnv("RESEND_API_KEY") &&
+      senderFrom(sender) &&
       postalAddress.trim() &&
-      process.env.APP_BASE_URL &&
-      process.env.RESEND_WEBHOOK_SECRET
+      marketingEnv("APP_BASE_URL") &&
+      marketingEnv("RESEND_WEBHOOK_SECRET")
     ),
     smsReady: !!(
-      process.env.MARKETING_SMS_GATEWAY_URL &&
-      process.env.MARKETING_SMS_GATEWAY_KEY &&
-      process.env.MARKETING_SMS_WEBHOOK_SECRET
+      marketingEnv("MARKETING_SMS_GATEWAY_URL") &&
+      marketingEnv("MARKETING_SMS_GATEWAY_KEY") &&
+      marketingEnv("MARKETING_SMS_WEBHOOK_SECRET")
     ),
     migrationConfirmed:
       env.migrationConfirmed &&
@@ -317,8 +341,8 @@ export function setup(
       env.ingestEnabled && (operations?.ingestEnabled ?? env.ingestEnabled),
     formEnabled:
       env.formEnabled && (operations?.formEnabled ?? env.formEnabled),
-    couponReady: !!process.env.MARKETING_WELCOME_COUPON,
-    storefrontOrigin: process.env.MARKETING_STOREFRONT_ORIGIN || "",
+    couponReady: !!marketingEnv("MARKETING_WELCOME_COUPON"),
+    storefrontOrigin: marketingEnv("MARKETING_STOREFRONT_ORIGIN") || "",
     attribution:
       "Klaviyo-style email last touch. One message per order; currencies remain separate.",
   };

@@ -1,5 +1,6 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useRef, useState } from "react";
 import type { FlowConfig } from "@/lib/marketing/flow-config";
 import type { Content } from "@/lib/marketing/rules";
@@ -16,6 +17,7 @@ type History = {
   completedAt?: string;
 };
 export default function CartTools({ flow }: { flow: FlowConfig }) {
+  const { marketingFetch, apiUrl } = useMarketingBrand();
   const [panel, setPanel] = useState<"products" | "history" | null>(
     null,
   );
@@ -34,7 +36,7 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
     [],
   );
   async function request(action: string, body: object = {}) {
-    const r = await fetch("/api/marketing", {
+    const r = await marketingFetch("/api/marketing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, ...body }),
@@ -53,7 +55,7 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
     stop.current = false;
     try {
       if (next !== "products") {
-        const r = await fetch(
+        const r = await marketingFetch(
           "/api/marketing?view=cart-history",
         );
         const d = await r.json();
@@ -195,7 +197,7 @@ export default function CartTools({ flow }: { flow: FlowConfig }) {
                   consent enabled and run Check Shopify connection to confirm
                   activity arrived.
                 </p>
-                <a href="/api/marketing?view=tracking-pixel" download>
+                <a href={apiUrl("/api/marketing?view=tracking-pixel")} download>
                   Download tracking script for this store
                 </a>
               </details>

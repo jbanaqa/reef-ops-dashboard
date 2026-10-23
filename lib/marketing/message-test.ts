@@ -3,7 +3,7 @@ import { cartRunKey, type CartRun } from "./cart";
 import { cartTestBlock } from "./cart-config";
 import { setup } from "./delivery";
 import { validateFlow, type FlowConfig } from "./flow-config";
-import { marketingSettings } from "./rules";
+import { scopedMarketingSettings as marketingSettings } from "./settings";
 import { atomic, json, record, shop, type Tx } from "./store";
 import { welcomeAudienceBlock, type WelcomeRun } from "./welcome";
 import { runMarketing } from "./worker";
@@ -166,7 +166,7 @@ async function assertDeliveryReady(tx: Tx) {
     },
   });
   const saved = marketingSettings(settings?.data);
-  const ready = setup(saved.operations, saved.postalAddress);
+  const ready = setup(saved.operations, saved.postalAddress, saved.sender);
   if (
     !ready.sendingEnabled ||
     !ready.migrationConfirmed ||

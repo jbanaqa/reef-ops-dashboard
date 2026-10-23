@@ -38,11 +38,9 @@ import {
   content,
   date,
   defaultContent,
-  defaultMarketingSettings,
   email,
   eligible,
   extractEmailBranding,
-  marketingSettings,
   MarketingSettings,
   render,
   segment,
@@ -63,10 +61,14 @@ import {
 import { validateFlow } from "@/lib/marketing/flow-config";
 import { deliveryDateFromTags, deliveryUpsellDueAt } from "@/lib/marketing/delivery-upsell-config";
 import { enrollExistingWelcomeTest, removeProfileFromList } from "@/lib/marketing/profile-testing";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "@/lib/marketing/shopify";
 import { resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
 import { inspectOrderIdentity } from "@/lib/marketing/identity-review";
 import { deliveryReviewConfig, orderUpdateSkipReason } from "@/lib/marketing/order-update-review";
+import { currentMarketingBrand, marketingEnv, runWithMarketingBrand } from "@/lib/marketing/context";
+import { defaultMacroCampaignContent, marketingBrands, type MarketingBrand } from "@/lib/marketing/brands";
+import { scopedMarketingSettings as marketingSettings, validateMarketingSender } from "@/lib/marketing/settings";
+import { shopifySubscriberStatus, syncShopifySubscribers, setShopifySubscriberSyncRunning } from "@/lib/marketing/shopify-subscribers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -74,11 +76,7 @@ async function loadMarketingSettings() {
   const row = await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
   });
-  const settings = marketingSettings(
-    row?.data,
-    process.env.MARKETING_POSTAL_ADDRESS ||
-      defaultMarketingSettings.postalAddress,
-  );
+  const settings = marketingSettings(row?.data);
   if (settings.branding.footerConfigured) return settings;
   const delivery = await prisma.marketingResource.findUnique({
     where: {
@@ -233,7 +231,7 @@ async function scheduleCampaignTest(id: string, to: string, scheduledAt: Date) {
   if (original.channel !== "EMAIL")
     throw new Error("One-contact campaign tests currently support email only.");
   const settings = await loadMarketingSettings();
-  const readiness = setup(settings.operations, settings.postalAddress);
+  const readiness = setup(settings.operations, settings.postalAddress, settings.sender);
   if (!readiness.sendingEnabled || !readiness.emailReady || !readiness.migrationConfirmed)
     throw new Error("Complete email setup, migration review, and enable customer sending before running a campaign test.");
   if (await inboxUnresolved())
@@ -310,7 +308,7 @@ async function setTriggerFlowTest(key: string, to: string | null) {
   if (!["b2b-welcome", "abandoned-cart", "welcome", "delivery-upsell"].includes(key))
     throw new Error("This flow has no customer-triggered test mode.");
   const settings = await loadMarketingSettings();
-  const ready = setup(settings.operations, settings.postalAddress);
+  const ready = setup(settings.operations, settings.postalAddress, settings.sender);
   if (to && (!ready.sendingEnabled || !ready.emailReady || !ready.migrationConfirmed || !ready.ingestEnabled))
     throw new Error("Complete email setup and enable sending and Shopify ingestion before testing a real trigger.");
   if (to && await inboxUnresolved())
@@ -390,7 +388,7 @@ async function simulateDeliveryFlowTest(to: string, deliveryDate: string) {
   if (dueAt <= new Date())
     throw new Error("That delivery date places the reminder in the past. Choose a later date.");
   const settings = await loadMarketingSettings();
-  const ready = setup(settings.operations, settings.postalAddress);
+  const ready = setup(settings.operations, settings.postalAddress, settings.sender);
   if (!ready.sendingEnabled || !ready.emailReady || !ready.migrationConfirmed)
     throw new Error("Complete email setup, migration review, and sending controls before scheduling a simulated notice.");
   if (await inboxUnresolved())
@@ -479,13 +477,14 @@ const SHOPIFY_WEBHOOK_CREATE = `
 
 async function registerShopifyMarketingWebhooks() {
   const publicBase =
-    process.env.APP_BASE_URL || process.env.REEF_OPS_PUBLIC_URL;
+    marketingEnv("APP_BASE_URL") || process.env.REEF_OPS_PUBLIC_URL;
   if (!publicBase)
     throw new Error(
       "APP_BASE_URL or REEF_OPS_PUBLIC_URL is required to register Shopify webhooks.",
     );
   const callback = new URL("/api/marketing/webhooks", publicBase);
   callback.searchParams.set("source", "shopify");
+  if (currentMarketingBrand() === "macroalgae-farms") callback.searchParams.set("brand", "macroalgae-farms");
   const callbackUrl = callback.toString();
   const existing = await shopifyGraphql<ShopifyWebhookList>(
     SHOPIFY_WEBHOOKS_QUERY,
@@ -498,6 +497,7 @@ async function registerShopifyMarketingWebhooks() {
     message?: string;
   }[] = [];
   for (const topic of SHOPIFY_MARKETING_WEBHOOK_TOPICS) {
+    if (currentMarketingBrand() === "macroalgae-farms" && !["CUSTOMERS_CREATE", "CUSTOMERS_UPDATE", "CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE", "ORDERS_CREATE", "ORDERS_UPDATED"].includes(topic)) continue;
     const found = current.find(
       (w) => w.topic === topic && w.uri === callbackUrl,
     );
@@ -560,12 +560,28 @@ function authorize(request: Request) {
       return Response.json({ error: "Invalid origin" }, { status: 403 });
   }
 }
+function requestedBrand(request: Request): MarketingBrand {
+  const id = new URL(request.url).searchParams.get("brand") || "corals-anonymous";
+  if (id !== "corals-anonymous" && id !== "macroalgae-farms") throw Error("Choose Corals Anonymous or Macroalgae Farms.");
+  return id;
+}
 export async function GET(request: Request) {
+  try { return await runWithMarketingBrand(requestedBrand(request), () => getMarketing(request)); }
+  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unknown marketing brand." }, { status: 400 }); }
+}
+async function getMarketing(request: Request) {
   const denied = authorize(request);
   if (denied) return denied;
   try {
     const url = new URL(request.url),
       view = url.searchParams.get("view") || "overview";
+    const macro = currentMarketingBrand() === "macroalgae-farms";
+    if (macro) {
+      if (["welcome-activity", "cart-report", "flow-report", "cart-history", "audience-backfill", "engagement-backfill", "tracking-pixel", "stock-status"].includes(view))
+        return Response.json({ error: "Macroalgae Farms currently supports campaigns. Customer flows and signup forms are separate." }, { status: 400 });
+      await seed();
+    }
+    if (view === "shopify-subscribers") return Response.json(await shopifySubscriberStatus(), { headers: { "Cache-Control": "no-store" } });
     if (view === "welcome-activity")
       return Response.json(await welcomeActivity(url), { headers: { "Cache-Control": "no-store" } });
     if (view === "cart-report")
@@ -644,7 +660,7 @@ export async function GET(request: Request) {
       const s = await loadMarketingSettings();
       return new Response(
         render(
-          defaultContent,
+          macro ? defaultMacroCampaignContent : defaultContent,
           "#unsubscribe",
           s.postalAddress,
           undefined,
@@ -833,6 +849,8 @@ export async function GET(request: Request) {
     };
     return Response.json(
       {
+        brand: marketingBrands.find(brand => brand.id === currentMarketingBrand()),
+        brands: marketingBrands,
         health,
         profiles,
         nextCursor: profiles.length === 100 ? profiles[99].id : null,
@@ -847,7 +865,7 @@ export async function GET(request: Request) {
         },
         messageCounts,
         eventCounts,
-        setup: setup(settings.operations, settings.postalAddress),
+        setup: setup(settings.operations, settings.postalAddress, settings.sender),
       },
       { headers: { "Cache-Control": "no-store" } },
     );
@@ -856,19 +874,36 @@ export async function GET(request: Request) {
     return Response.json(
       {
         error:
-          "Marketing data is unavailable. Apply the marketing migration and configure DATABASE_URL and SHOPIFY_SHOP_DOMAIN.",
+          currentMarketingBrand() === "macroalgae-farms"
+            ? "Macroalgae Farms marketing data is unavailable. Check the database and Macroalgae Farms Shopify connection."
+            : "Marketing data is unavailable. Apply the marketing migration and configure DATABASE_URL and SHOPIFY_SHOP_DOMAIN.",
       },
       { status: 503 },
     );
   }
 }
 export async function POST(request: Request) {
+  try { return await runWithMarketingBrand(requestedBrand(request), () => postMarketing(request)); }
+  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unknown marketing brand." }, { status: 400 }); }
+}
+async function postMarketing(request: Request) {
   const denied = authorize(request);
   if (denied) return denied;
   try {
     const raw = await request.text();
     if (raw.length > 12000000) throw new Error("Request too large.");
     const b = JSON.parse(raw);
+    if (currentMarketingBrand() === "macroalgae-farms") {
+      const campaignActions = new Set(["initialize", "preview", "preview-campaign-feeds", "test-email", "run-campaign-test", "send-test-message-now", "cancel-test-message", "clear-unsent-test-messages", "run-delivery", "import", "save-settings", "audience-count", "suppress", "save-campaign", "schedule", "send-now", "cancel", "save-resource", "sync-shopify-subscribers", "pause-shopify-subscribers", "register-shopify-webhooks", "process-inbox"]);
+      if (!campaignActions.has(b.action) || (b.action === "save-resource" && !["SEGMENT", "TEMPLATE"].includes(b.kind)))
+        throw Error("Macroalgae Farms currently supports campaigns. Corals Anonymous flows and signup forms are separate.");
+      await seed();
+    }
+    if (b.action === "sync-shopify-subscribers") {
+      await setShopifySubscriberSyncRunning(true);
+      return Response.json(await syncShopifySubscribers());
+    }
+    if (b.action === "pause-shopify-subscribers") return Response.json(await setShopifySubscriberSyncRunning(false));
     if (b.action === "check-stock") return Response.json(await lowStock());
     if (b.action === "remove-profile-list") {
       if (typeof b.profileId !== "string" || typeof b.list !== "string")
@@ -1034,7 +1069,7 @@ export async function POST(request: Request) {
     if (b.action === "test-email") {
       const to = email(b.to);
       const s = await loadMarketingSettings();
-      if (!setup(s.operations, s.postalAddress).emailReady)
+      if (!setup(s.operations, s.postalAddress, s.sender).emailReady)
         throw new Error("Complete email provider setup first.");
       const id = crypto.randomUUID();
       const testContent = await resolveCampaignProductFeeds(
@@ -1054,8 +1089,9 @@ export async function POST(request: Request) {
         address: s.postalAddress,
         organizationName: s.organizationName,
         branding: testBranding,
+        sender: s.sender,
         internalPreview: true,
-        unsubscribe: `${process.env.APP_BASE_URL}/api/marketing/unsubscribe?preview=1`,
+        unsubscribe: `${marketingEnv("APP_BASE_URL")}/api/marketing/unsubscribe?preview=1&brand=${currentMarketingBrand()}`,
       });
       // Test sends do not have a profile/message row, so persist the provider
       // ID under a deterministic key for delivery webhooks to resolve.
@@ -1088,6 +1124,7 @@ export async function POST(request: Request) {
         ...incoming,
         operations: { ...existing.operations, ...(incoming.operations || {}) },
       });
+      validateMarketingSender(s);
       const result = await prisma.marketingResource.upsert({
         where: {
           shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" },
@@ -1178,7 +1215,7 @@ export async function POST(request: Request) {
       return Response.json({
         ok: true,
         recipients,
-        sendingEnabled: setup(s.operations, s.postalAddress).sendingEnabled,
+        sendingEnabled: setup(s.operations, s.postalAddress, s.sender).sendingEnabled,
       });
     }
     if (b.action === "send-now") {
@@ -1187,7 +1224,7 @@ export async function POST(request: Request) {
       return Response.json({
         ok: true,
         recipients,
-        sendingEnabled: setup(s.operations, s.postalAddress).sendingEnabled,
+        sendingEnabled: setup(s.operations, s.postalAddress, s.sender).sendingEnabled,
       });
     }
     if (b.action === "cancel") {

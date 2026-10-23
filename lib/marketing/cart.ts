@@ -2,7 +2,7 @@ import { recommendationHistory } from "./cart-feed";
 import crypto from "node:crypto";
 import { uniqueDiscount } from "./discounts";
 import { prisma } from "@/lib/prisma";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "./shopify";
 import { Content, DAY, eligible } from "./rules";
 import { FlowConfig, validateFlow } from "./flow-config";
 import { atomic, json, record, shop, Tx } from "./store";

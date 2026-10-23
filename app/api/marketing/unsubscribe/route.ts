@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { atomic, consent, record, shop } from "@/lib/marketing/store";
 import { queueShopifyEmailUnsubscribe, syncShopifyEmailUnsubscribes } from "@/lib/marketing/unsubscribe";
+import { currentMarketingBrand, marketingBrandForShop, runWithMarketingBrand } from "@/lib/marketing/context";
 export const dynamic = "force-dynamic";
 const headers = {
   "Content-Type": "text/html; charset=utf-8",
@@ -9,8 +10,22 @@ const headers = {
   "X-Robots-Tag": "noindex, nofollow",
 };
 const page = (title: string, body: string) =>
-  `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Corals Anonymous</title></head><body style="margin:0;background:#f3f8fb;color:#12304c;font:16px Arial,sans-serif"><main style="box-sizing:border-box;max-width:520px;margin:12vh auto;padding:32px;background:white;border-radius:12px;text-align:center;box-shadow:0 4px 24px #12304c18"><h1>${title}</h1>${body}</main></body></html>`;
+  `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · ${brandName()}</title></head><body style="margin:0;background:#f3f8fb;color:#12304c;font:16px Arial,sans-serif"><main style="box-sizing:border-box;max-width:520px;margin:12vh auto;padding:32px;background:white;border-radius:12px;text-align:center;box-shadow:0 4px 24px #12304c18"><h1>${title}</h1>${body}</main></body></html>`;
+const brandName = () => currentMarketingBrand() === "macroalgae-farms" ? "Macroalgae Farms" : "Corals Anonymous";
+async function forMessageStore(request: Request, handle: (request: Request) => Promise<Response>) {
+  const params = new URL(request.url).searchParams;
+  const token = params.get("token") || "";
+  if (params.get("preview") === "1" && !token) return handle(request);
+  if (!/^[a-f0-9-]{36}$/i.test(token)) return new Response("Invalid link", { status: request.method === "POST" ? 404 : 400, headers });
+  const message = await prisma.marketingMessage.findUnique({ where: { token }, select: { shop: true } });
+  const brand = message && marketingBrandForShop(message.shop);
+  if (!brand || (params.has("brand") && params.get("brand") !== brand)) return new Response("Invalid link", { status: 404, headers });
+  return runWithMarketingBrand(brand, () => handle(request));
+}
 export async function GET(request: Request) {
+  return forMessageStore(request, getPreferences);
+}
+async function getPreferences(request: Request) {
   const params = new URL(request.url).searchParams;
   if (params.get("preview") === "1" && !params.has("token"))
     return new Response(
@@ -31,9 +46,12 @@ export async function GET(request: Request) {
   });
   if (!message) return new Response("Invalid link", { status: 404, headers });
   const label = message.channel === "EMAIL" ? "emails" : "messages";
-  return new Response(page("Marketing preferences", `<p style="line-height:1.5">Stop receiving marketing ${label} from Corals Anonymous.</p><form method="post" style="margin-top:24px"><button style="background:#134d78;color:white;border:0;border-radius:6px;padding:13px 22px;font-size:16px;cursor:pointer">Unsubscribe from ${label}</button></form>`), { headers });
+  return new Response(page("Marketing preferences", `<p style="line-height:1.5">Stop receiving marketing ${label} from ${brandName()}.</p><form method="post" style="margin-top:24px"><button style="background:#134d78;color:white;border:0;border-radius:6px;padding:13px 22px;font-size:16px;cursor:pointer">Unsubscribe from ${label}</button></form>`), { headers });
 }
 export async function POST(request: Request) {
+  return forMessageStore(request, unsubscribe);
+}
+async function unsubscribe(request: Request) {
   const token = new URL(request.url).searchParams.get("token") || "";
   const message = await prisma.marketingMessage.findFirst({
     where: { token, shop: shop() },
@@ -64,5 +82,5 @@ export async function POST(request: Request) {
   // The scheduled worker retries the durable sync request.
   if (message.channel === "EMAIL")
     await syncShopifyEmailUnsubscribes(1, message.profileId).catch(() => {});
-  return new Response(page("You’re unsubscribed", `<p style="line-height:1.5">You will no longer receive Corals Anonymous marketing ${message.channel === "EMAIL" ? "emails" : "messages"}.${message.channel === "EMAIL" ? " Your preference is being synchronized with our store." : ""}</p>`), { headers });
+  return new Response(page("You’re unsubscribed", `<p style="line-height:1.5">You will no longer receive ${brandName()} marketing ${message.channel === "EMAIL" ? "emails" : "messages"}.${message.channel === "EMAIL" ? " Your preference is being synchronized with our store." : ""}</p>`), { headers });
 }

@@ -1,4 +1,5 @@
-import { DAY, marketingSettings } from "./rules";
+import { DAY } from "./rules";
+import { scopedMarketingSettings as marketingSettings } from "./settings";
 import { shop, type Tx } from "./store";
 import { customerCartMessages } from "./cart-report-scope";
 import { welcomeAttributionFacts, type WelcomeOrderPayload } from "./welcome-attribution";

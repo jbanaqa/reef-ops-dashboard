@@ -337,6 +337,7 @@ export function editSharedEmailFooter(
   } as EmailBranding;
 }
 export type MarketingSettings = {
+  sender?: { name: string; email: string; replyTo: string };
   postalAddress: string;
   organizationName: string;
   branding: EmailBranding;
@@ -393,6 +394,11 @@ export function marketingSettings(
       : undefined;
   };
   return {
+    ...(v.sender ? { sender: {
+      name: String(v.sender.name || "").replace(/[\r\n]/g, "").trim().slice(0, 120),
+      email: String(v.sender.email || "").trim().toLowerCase().slice(0, 254),
+      replyTo: String(v.sender.replyTo || "").trim().toLowerCase().slice(0, 254),
+    } } : {}),
     postalAddress: String(v.postalAddress ?? fallbackAddress).slice(0, 500),
     organizationName: String(
       v.organizationName || defaultMarketingSettings.organizationName,
@@ -1967,7 +1973,7 @@ export function render(
     const logo = c.logo
       ? '<img src="' +
         e(c.logo) +
-        '" alt="Corals Anonymous" style="max-width:100%;width:' +
+        '" alt="' + e(organizationName) + '" style="max-width:100%;width:' +
         String(Math.round(260 * logoScale)) +
         'px;height:auto">'
       : '<strong style="font-size:24px;font-style:italic;color:#102d33">' +

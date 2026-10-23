@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "./shopify";
 import { atomic, consent, identify, IdentityConflictError, json, record, shop, type Tx } from "./store";
 import { date } from "./rules";
 import { enroll } from "./flows";
@@ -13,6 +13,7 @@ import { validateFlow } from "./flow-config";
 import { findEmailAttribution } from "./attribution";
 import { compactOrderEvidence, orderStateUpdate, type OrderEvidence } from "./order-evidence";
 import { deliveryReviewConfig, orderUpdateSkipReason } from "./order-update-review";
+import { applyMacroShopifyConsent, macroConsentObservationCurrent } from "./macro-subscriber-eligibility";
 
 type Customer = {
   id?: string | number;
@@ -428,6 +429,8 @@ export async function ingestShopify(
       ["SMS_MARKETING", c.sms_marketing_consent],
     ] as const) {
       if (value) {
+        if (channel === "EMAIL" && !(await macroConsentObservationCurrent(tx, profile.id, date(value.consent_updated_at || at.toISOString()))))
+          continue;
         const newSubscriber = await consent(
           tx,
           profile.id,
@@ -440,6 +443,8 @@ export async function ingestShopify(
           "shopify",
           date(value.consent_updated_at || at.toISOString()),
         );
+        if (channel === "EMAIL") await applyMacroShopifyConsent(tx, profile.id,
+          String(value.state || "UNKNOWN").toUpperCase(), date(value.consent_updated_at || at.toISOString()));
         if (newSubscriber && channel === "EMAIL" && !historical && !p.test && !tagTopic &&
             value.state === "subscribed" && value.consent_updated_at) {
           await enroll(tx, "welcome", profile.id, key, date(value.consent_updated_at));

@@ -1,11 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { json, shop } from "./store";
-import { marketingSettings } from "./rules";
+import { scopedMarketingSettings as marketingSettings } from "./settings";
+import { marketingEnv } from "./context";
 import { setup } from "./delivery";
 import { ingestShopify } from "./ingest";
 
 export async function ingestionEnabled() {
-  if (process.env.MARKETING_INGEST_ENABLED !== "true") return false;
+  if (marketingEnv("MARKETING_INGEST_ENABLED") !== "true") return false;
   const row = await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
   });

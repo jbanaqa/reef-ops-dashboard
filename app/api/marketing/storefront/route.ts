@@ -58,6 +58,7 @@ const headers = (origin: string) => ({
   "Cache-Control": "no-store",
 });
 export function OPTIONS(request: Request) {
+  if (new URL(request.url).searchParams.get("brand") === "macroalgae-farms") return new Response("Macroalgae Farms signup forms are not enabled.", { status: 403 });
   const origin = allowedOrigin(request);
   return new Response(null, {
     status: origin ? 204 : 403,
@@ -65,6 +66,7 @@ export function OPTIONS(request: Request) {
   });
 }
 export async function POST(request: Request) {
+  if (new URL(request.url).searchParams.get("brand") === "macroalgae-farms") return new Response("Macroalgae Farms signup forms are not enabled.", { status: 403 });
   const origin = allowedOrigin(request);
   if (!origin) return new Response("Origin denied", { status: 403 });
   const reply = (data: unknown, status = 200) =>

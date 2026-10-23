@@ -1,4 +1,5 @@
 "use client";
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import FlowEditor from "./FlowEditor";
@@ -131,6 +132,7 @@ export default function FlowsWorkspace({
   cancelScheduledTest: (id: string) => Promise<unknown>;
   campaignTests: { id: string; testOfCampaignId?: string | null; scheduledAt?: string | null; status: string; messages?: { status: string; profile: { email: string | null } }[] }[];
 }) {
+  const { href } = useMarketingBrand();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("enabled");
@@ -272,7 +274,7 @@ export default function FlowsWorkspace({
                           : selected.key === "welcome"
                             ? "Then sign up a new address. Existing subscribers cannot re-enter."
                             : "Then add a delivery-date tag to a test Shopify order."}</p>
-                      <p className="fw-test-footnote">Only this address can enter. Normal consent and delays apply. <Link href="/our-klaviyo/audiences">View messages →</Link></p>
+                      <p className="fw-test-footnote">Only this address can enter. Normal consent and delays apply. <Link href={href("/our-klaviyo/audiences")}>View messages →</Link></p>
                     </>
                   )}
                 </div>
@@ -364,7 +366,7 @@ export default function FlowsWorkspace({
                       : "Each message still needs to pass its workflow, timing, and subscription checks."}
               </p>
             </div>
-            <Link href="/our-klaviyo/settings">Sending settings →</Link>
+            <Link href={href("/our-klaviyo/settings")}>Sending settings →</Link>
           </div>
           <section className="fw-directory" aria-label="Workflows">
             <div className="fw-toolbar">
@@ -513,7 +515,7 @@ export default function FlowsWorkspace({
               marked reviewed. Open it to review the steps and manage its
               enabled state.
             </p>
-            <Link href="/our-klaviyo/audiences">
+            <Link href={href("/our-klaviyo/audiences")}>
               View customer message history →
             </Link>
           </div>

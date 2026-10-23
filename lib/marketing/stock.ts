@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "./shopify";
 import { atomic, identify, json, record, shop } from "./store";
-import { marketingSettings } from "./rules";
+import { scopedMarketingSettings as marketingSettings } from "./settings";
 import {
   StockConfig,
   stockCopy,

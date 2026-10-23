@@ -1,4 +1,4 @@
-import { getShopifyShopDomain, shopifyGraphql } from "@/lib/shopify";
+import { getShopifyShopDomain, shopifyGraphql } from "./shopify";
 import {
   type CampaignEmailProduct,
   type CampaignProductFeed,

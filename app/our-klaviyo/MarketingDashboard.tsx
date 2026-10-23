@@ -1,4 +1,6 @@
 "use client";
+import { useMarketingBrand } from "./MarketingBrand";
+import { defaultMacroCampaignContent, type MarketingBrand } from "@/lib/marketing/brands";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import EmailDesigner from "./EmailDesigner";
@@ -111,8 +113,8 @@ type Data = {
     _count: number;
   }[];
 };
-async function action(body: unknown) {
-  const response = await fetch("/api/marketing", {
+async function sendAction(body: unknown, marketingFetch: (path: string, options?: RequestInit) => Promise<Response>) {
+  const response = await marketingFetch("/api/marketing", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -144,10 +146,10 @@ const flowTemplateGroups = [
     description: "Cart recovery emails, including the two purchase-history outcomes.",
   },
 ] as const;
-const newCampaign = () => ({
+const campaignDefaults = (brand: MarketingBrand) => ({
   name: "",
   subject: "",
-  content: structuredClone(defaultCampaignContent),
+  content: structuredClone(brand === "macroalgae-farms" ? defaultMacroCampaignContent : defaultCampaignContent),
   audience: { version: 2 as const, includeKeys: ["mailable"], excludeKeys: [] },
   smartSending: true,
   recipientMode: "SEND_TIME" as const,
@@ -161,10 +163,10 @@ const testRunStatus = (status: string) => ({
   FAILED: "Failed",
   UNKNOWN: "Needs review",
 }[status] || status.toLowerCase());
-const currentCampaignContent = (item: Campaign) => {
+const currentCampaignContent = (item: Campaign, brand: MarketingBrand) => {
   const saved = structuredClone(item.content);
   const sections = saved.campaignLayout?.sections;
-  if (item.status !== "DRAFT" || !sections || sections.length !== 4) return saved;
+  if (brand !== "corals-anonymous" || item.status !== "DRAFT" || !sections || sections.length !== 4) return saved;
   const byId = new Map(sections.map((section) => [section.id, section]));
   const saleProducts =
     byId.get("sale-products") || byId.get("anniversary-sale-products");
@@ -186,7 +188,7 @@ const currentCampaignContent = (item: Campaign) => {
   ];
   return saved;
 };
-const campaignForm = (item: Campaign, resources: Resource[]): CampaignForm => {
+const campaignForm = (item: Campaign, resources: Resource[], brand: MarketingBrand): CampaignForm => {
   const saved = item.audience as Partial<CampaignAudience>;
   const audience =
     saved.version === 2
@@ -207,7 +209,7 @@ const campaignForm = (item: Campaign, resources: Resource[]): CampaignForm => {
     id: item.id,
     name: item.name,
     subject: item.subject,
-    content: currentCampaignContent(item),
+    content: currentCampaignContent(item, brand),
     audience,
     smartSending: item.smartSendingHours > 0,
     recipientMode:
@@ -291,12 +293,16 @@ function CampaignTestEmail({
   );
 }
 export default function MarketingDashboard({ tab }: { tab: string }) {
+  const { brand, marketingFetch, href, setHasUnsavedChanges } = useMarketingBrand();
+  const isMacro = brand.id === "macroalgae-farms";
+  const newCampaign = useCallback(() => campaignDefaults(brand.id), [brand.id]);
+  const action = useCallback((body: unknown) => sendAction(body, marketingFetch), [marketingFetch]);
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
 
-  const [campaign, setCampaign] = useState<CampaignForm>(newCampaign());
+  const [campaign, setCampaign] = useState<CampaignForm>(() => newCampaign());
   const [at, setAt] = useState(""),
     [editingEmail, setEditingEmail] = useState(false),
     [audienceCount, setAudienceCount] = useState<number | null>(null);
@@ -317,7 +323,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   );
   const templates: Resource[] = data
     ? [
-        ...flowEmailTemplates(data.resources),
+        ...(isMacro ? [] : flowEmailTemplates(data.resources)),
         ...data.resources.filter((r) => r.kind === "TEMPLATE"),
       ]
     : [];
@@ -353,11 +359,11 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     setAudienceCount(null);
   };
   const load = useCallback(async () => {
-    const r = await fetch("/api/marketing", { cache: "no-store" });
+    const r = await marketingFetch("/api/marketing", { cache: "no-store" });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     setData(d);
-  }, []);
+  }, [marketingFetch]);
   const hasActiveCampaignTest = !!data?.campaignTests?.some((test) =>
     ["PENDING", "SENDING"].includes(test.messages?.[0]?.status || ""),
   );
@@ -370,7 +376,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   }, [tab, hasActiveCampaignTest, load]);
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/marketing", { cache: "no-store", signal: controller.signal })
+    marketingFetch("/api/marketing", { cache: "no-store", signal: controller.signal })
       .then(async (r) => {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
@@ -383,7 +389,11 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, []);
+  }, [marketingFetch]);
+  useEffect(() => {
+    setHasUnsavedChanges(editingEmail || campaignOpen || !!resource || brandingDraft !== null);
+    return () => setHasUnsavedChanges(false);
+  }, [editingEmail, campaignOpen, resource, brandingDraft, setHasUnsavedChanges]);
   async function run<T>(
     fn: () => Promise<T>,
     message: string | ((result: T) => string) = "Saved",
@@ -465,7 +475,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
               : "Save email to keep your changes.")
           }
           organizationName={
-            data?.settings.organizationName || "Corals Anonymous"
+            data?.settings.organizationName || brand.name
           }
           postalAddress={data?.settings.postalAddress || ""}
           onSubject={(subject) => {
@@ -533,9 +543,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
       )}
       <header className="mk-header">
         <div>
-          <p className="mk-eyebrow">CORALS ANONYMOUS / OUR KLAVIYO</p>
+          <p className="mk-eyebrow">{brand.name.toUpperCase()} / MARKETING</p>
           <h1>{title(tab)}</h1>
-          <p>Your audience, campaigns, and customer journeys in Reef Ops.</p>
+          <p>{isMacro ? "Your subscribers, campaigns, and results for Macroalgae Farms." : "Your audience, campaigns, and customer journeys in Reef Ops."}</p>
         </div>
         <span
           className={`mk-status ${data?.setup.sendingEnabled ? "live" : ""}`}
@@ -560,19 +570,18 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
         </p>
       ) : (
         <>
-          {!data.resources.some((r) => r.kind === "FLOW") && (
+          {!data.resources.some((r) => r.kind === (isMacro ? "SEGMENT" : "FLOW")) && (
             <div className="mk-panel">
-              <h2>Set up Our Klaviyo</h2>
+              <h2>{isMacro ? "Set up Macroalgae Farms" : "Set up Our Klaviyo"}</h2>
               <p>
-                Create the five paused flows, standard email template, and
-                default audiences.
+                {isMacro ? "Create a campaign template and subscriber audience for this store. Customer sending stays paused." : "Create the five paused flows, standard email template, and default audiences."}
               </p>
               <button
                 disabled={busy}
                 onClick={() =>
                   run(
                     () => action({ action: "initialize" }),
-                    "Marketing defaults created. Flows remain paused for review.",
+                    isMacro ? "Macroalgae Farms campaign defaults created. Customer sending remains paused." : "Marketing defaults created. Flows remain paused for review.",
                   )
                 }
               >
@@ -635,7 +644,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       {e.type} <b>{e._count.toLocaleString()}</b>
                     </p>
                   ))}
-                  <Link href="/our-klaviyo/analytics">View attributed sales →</Link>
+                  <Link href={href("/our-klaviyo/analytics")}>View attributed sales →</Link>
                   <small>
                     Opens can include
                     privacy-proxy activity. Event totals are not unique
@@ -646,11 +655,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
               <article className="mk-panel">
                 <h2>Launch readiness</h2>
                 <p>
-                  Import suppressions and historical engagement, review flow
-                  copy and timing, connect providers, and validate a small send
-                  before switching off Klaviyo.
+                  {isMacro ? "Sync Shopify subscribers, confirm your email sender, and test a campaign before enabling customer sending." : "Import suppressions and historical engagement, review flow copy and timing, connect providers, and validate a small send before switching off Klaviyo."}
                 </p>
-                <Link href="/our-klaviyo/settings">
+                <Link href={href("/our-klaviyo/settings")}>
                   View setup and migration →
                 </Link>
               </article>
@@ -710,7 +717,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                     <label>
                       Campaign name
                       <input
-                        placeholder="Example: September coral sale"
+                        placeholder={isMacro ? "Example: New macroalgae arrivals" : "Example: September coral sale"}
                         value={campaign.name}
                         onChange={(e) =>
                           setCampaign({ ...campaign, name: e.target.value })
@@ -1113,7 +1120,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                               {item.status === "DRAFT" && (
                                 <button
                                   onClick={() => {
-                                    setCampaign(campaignForm(item, data.resources));
+                                    setCampaign(campaignForm(item, data.resources, brand.id));
                                     setCampaignOpen(true);
                                     setCampaignStep(0);
                                     setAt("");
@@ -1147,7 +1154,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                     name: `${item.name} copy`,
                                     subject: item.subject,
                                     content: item.content,
-                                    audience: campaignForm(item, data.resources).audience,
+                                    audience: campaignForm(item, data.resources, brand.id).audience,
                                     smartSending: item.smartSendingHours > 0,
                                     recipientMode: item.recipientMode === "SCHEDULE_TIME" ? "SCHEDULE_TIME" : "SEND_TIME",
                                   });
@@ -1162,7 +1169,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                   disabled={busy}
                                   onClick={() =>
                                     run(async () => {
-                                      const response = await fetch(`/api/marketing?view=campaign-report&id=${encodeURIComponent(item.id)}`, { cache: "no-store" });
+                                      const response = await marketingFetch(`/api/marketing?view=campaign-report&id=${encodeURIComponent(item.id)}`, { cache: "no-store" });
                                       const report = await response.json();
                                       if (!response.ok) throw new Error(report.error);
                                       setCampaignReport(report);
@@ -1221,7 +1228,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                     <span>{test.messages?.[0]?.profile.email || "Test contact"} · {testRunStatus(test.messages?.[0]?.status || test.status)} · {test.scheduledAt ? new Date(test.scheduledAt).toLocaleString() : "Queued"}</span>
                                     <span className="mk-campaign-test-run-actions">
                                       <button disabled={busy} onClick={() => run(async () => {
-                                        const response = await fetch(`/api/marketing?view=campaign-report&id=${encodeURIComponent(test.id)}`, { cache: "no-store" });
+                                        const response = await marketingFetch(`/api/marketing?view=campaign-report&id=${encodeURIComponent(test.id)}`, { cache: "no-store" });
                                         const report = await response.json();
                                         if (!response.ok) throw new Error(report.error);
                                         setCampaignReport(report);
@@ -1249,7 +1256,8 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           {tab === "audiences" && (
             <AudienceWorkspace sendingEnabled={!!data.setup.sendingEnabled} />
           )}
-          {tab === "flows" && (
+          {isMacro && ["flows", "forms"].includes(tab) && <section className="mk-card"><h2>Campaigns for Macroalgae Farms</h2><p>Flows and signup forms are not active for this brand. Create a campaign or review your Shopify subscribers.</p><Link href={href("/our-klaviyo/campaigns")}>Go to campaigns →</Link></section>}
+          {tab === "flows" && !isMacro && (
             <FlowsWorkspace
               resources={data.resources.filter((r) => r.kind === "FLOW")}
               messageCounts={data.messageCounts}
@@ -1301,8 +1309,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           {tab === "templates" && (
             <div className="mk-template-library">
               <p className="mk-muted">
-                Flow emails stay linked to their saved flows. Choose one to preview the
-                exact email, or save a separate reusable copy.
+                {isMacro ? "Reusable email layouts for Macroalgae Farms campaigns." : "Flow emails stay linked to their saved flows. Choose one to preview the exact email, or save a separate reusable copy."}
               </p>
               {flowTemplateGroups.map((group) => {
                 const groupTemplates = templates.filter(
@@ -1359,7 +1366,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                           <span className="mk-status">Reusable</span>
                         </div>
                         <p className="mk-template-label">Template layout</p>
-                        <h3>{template.subject || "Corals Anonymous email layout"}</h3>
+                        <h3>{template.subject || `${brand.name} email layout`}</h3>
                         <button onClick={() => setResource(template)}>Review and edit</button>
                       </article>
                     ))}
@@ -1372,7 +1379,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
               </section>
             </div>
           )}
-          {tab === "forms" && (
+          {tab === "forms" && !isMacro && (
             <article className="mk-panel">
               <h2>Storefront email signup</h2>
               <p>

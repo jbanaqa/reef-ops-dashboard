@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "./shopify";
 import { Prisma } from "@/app/generated/prisma/client";
 import { atomic, json, shop, type Tx } from "./store";
-import { marketingSettings } from "./rules";
+import { scopedMarketingSettings as marketingSettings } from "./settings";
 import { setup } from "./delivery";
 import { validateFlow } from "./flow-config";
 import { cartMerchandiseBlock, type CartMerchandise } from "./cart-merchandise";

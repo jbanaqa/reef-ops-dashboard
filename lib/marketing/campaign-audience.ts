@@ -4,6 +4,8 @@ import { eligible, matches, segment } from "./rules";
 import { inSegmentSnapshot, inMasterMarketingAudience, masterEngagementAllowed, snapshotConsentAllowed } from "./segment-snapshot";
 import type { Tx } from "./store";
 import { audienceWhere, segmentWhere, shop } from "./store";
+import { currentMarketingBrand } from "./context";
+import { macroShopifySubscribed, macroShopifySubscriberWhere, macroSubscriberList } from "./macro-subscriber-eligibility";
 
 export type CampaignAudience = {
   version: 2;
@@ -48,7 +50,9 @@ export async function resolveCampaignAudience(
 ): Promise<ResolvedCampaignAudience> {
   const parsed = campaignAudience(value);
   const masterRow = await tx.marketingResource.findUnique({ where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key: "mailable" } } });
-  const master = (masterRow?.data as { masterMarketing?: unknown } | undefined)?.masterMarketing ? segment(masterRow!.data) : undefined;
+  const master = currentMarketingBrand() === "macroalgae-farms"
+    ? { list: macroSubscriberList }
+    : (masterRow?.data as { masterMarketing?: unknown } | undefined)?.masterMarketing ? segment(masterRow!.data) : undefined;
   if (!("version" in parsed))
     return {
       config: null,
@@ -86,11 +90,13 @@ export function resolvedAudienceWhere(
   channel = "EMAIL",
   now = new Date(),
 ): Prisma.MarketingProfileWhereInput {
-  if (resolved.legacy) return { AND: [audienceWhere(resolved.legacy, channel, now), ...(resolved.master ? [audienceWhere(resolved.master, channel, now)] : [])] };
+  const source = currentMarketingBrand() === "macroalgae-farms" ? [macroShopifySubscriberWhere(now)] : [];
+  if (resolved.legacy) return { AND: [...source, audienceWhere(resolved.legacy, channel, now), ...(resolved.master ? [audienceWhere(resolved.master, channel, now)] : [])] };
   if (resolved.missingKeys.length)
     return { shop: shop(), id: "missing-campaign-audience" };
   return {
     AND: [
+      ...source,
       ...(resolved.master ? [audienceWhere(resolved.master, channel, now)] : []),
       ...(resolved.includes.length
         ? [{ OR: resolved.includes.map((item) => audienceWhere(item, channel, now)) }]
@@ -104,7 +110,7 @@ export function resolvedAudienceWhere(
 
 /** Does not change flow consent or general subscriber eligibility. */
 export function campaignConsentEligible(
-  profile: { properties?: unknown; lastOpenedAt?: Date | null; consents: { channel: string; status: string; suppressed: boolean }[] },
+  profile: { properties?: unknown; lists?: string[]; lastOpenedAt?: Date | null; consents: { channel: string; status: string; suppressed: boolean }[] },
   resolved: ResolvedCampaignAudience,
   channel = "EMAIL",
   now = new Date(),
@@ -112,6 +118,8 @@ export function campaignConsentEligible(
   const consent = profile.consents.find((item) => item.channel === channel);
   if (resolved.missingKeys.length) return false;
   const standard = eligible(consent);
+  if (currentMarketingBrand() === "macroalgae-farms" &&
+      (channel !== "EMAIL" || !standard || !profile.lists?.includes(macroSubscriberList) || !macroShopifySubscribed(profile.properties, now))) return false;
   if (resolved.master?.klaviyoSegment && resolved.master.masterMarketing &&
       (!snapshotConsentAllowed(profile.consents.find(item => item.channel === "EMAIL")) ||
        !inMasterMarketingAudience(profile.properties, resolved.master.klaviyoSegment, resolved.master.masterMarketing.startedAt) ||
@@ -131,6 +139,8 @@ export function resolvedAudienceMatches(
   resolved: ResolvedCampaignAudience,
   now = new Date(),
 ) {
+  if (currentMarketingBrand() === "macroalgae-farms" &&
+      (!profile.lists.includes(macroSubscriberList) || !macroShopifySubscribed(profile.properties, now))) return false;
   if (resolved.master && !matches(profile, resolved.master, now)) return false;
   if (resolved.legacy) return matches(profile, resolved.legacy, now);
   if (resolved.missingKeys.length) return false;

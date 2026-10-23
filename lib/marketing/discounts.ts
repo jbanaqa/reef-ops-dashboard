@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "./shopify";
 import { shop } from "./store";
 import { DAY } from "./rules";
 

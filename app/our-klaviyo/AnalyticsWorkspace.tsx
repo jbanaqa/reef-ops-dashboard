@@ -1,5 +1,6 @@
 "use client";
 
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useState } from "react";
 import FlowResults from "./FlowResults";
 
@@ -121,6 +122,8 @@ function PerformanceTable({
 }
 
 export default function AnalyticsWorkspace() {
+  const { marketingFetch, brand } = useMarketingBrand();
+  const isMacro = brand.id === "macroalgae-farms";
   const [days, setDays] = useState(30);
   const [report, setReport] = useState<AnalyticsReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,7 +137,7 @@ export default function AnalyticsWorkspace() {
   const [savingAttribution, setSavingAttribution] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/marketing?view=analytics&days=${days}`, {
+    marketingFetch(`/api/marketing?view=analytics&days=${days}`, {
       cache: "no-store",
       signal: controller.signal,
     })
@@ -159,7 +162,7 @@ export default function AnalyticsWorkspace() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [days, refresh]);
+  }, [days, refresh, marketingFetch]);
 
   const flows = report?.rows.filter((row) => row.kind === "FLOW") || [];
   const campaigns = report?.rows.filter((row) => row.kind === "CAMPAIGN") || [];
@@ -169,7 +172,7 @@ export default function AnalyticsWorkspace() {
     setSavingAttribution(true);
     setError("");
     try {
-      const response = await fetch("/api/marketing", {
+      const response = await marketingFetch("/api/marketing", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -200,7 +203,7 @@ export default function AnalyticsWorkspace() {
           <p className="mk-eyebrow">MARKETING RESULTS</p>
           <h2>Revenue and engagement</h2>
           <p>
-            Compare attributed sales from automated flows and one-time campaigns.
+            {isMacro ? "Track attributed sales and engagement from Macroalgae Farms campaigns." : "Compare attributed sales from automated flows and one-time campaigns."}
           </p>
         </div>
         <div className="mk-analytics-controls">
@@ -263,7 +266,7 @@ export default function AnalyticsWorkspace() {
               <small>{report.totals.convertedRecipients.toLocaleString()} buyers / {report.totals.recipients.toLocaleString()} recipients</small>
             </article>
           </div>
-          <PerformanceTable heading="Automated flows" rows={flows} viewFlow={setResultsFlow} />
+          {!isMacro && <PerformanceTable heading="Automated flows" rows={flows} viewFlow={setResultsFlow} />}
           <PerformanceTable heading="Campaigns" rows={campaigns} />
           <section className="mk-panel mk-attribution-settings">
             <div>
@@ -271,7 +274,7 @@ export default function AnalyticsWorkspace() {
               <h2>Attribution settings</h2>
               <p>
                 The most recent qualifying email open or click receives the
-                order, except for verified assigned Welcome-code redemption.
+                order{!isMacro && ", except for verified assigned Welcome-code redemption"}.
                 The window begins at delivery when recorded. Changing either
                 window recalculates engagement-based credit from recorded history.
               </p>
@@ -343,12 +346,7 @@ export default function AnalyticsWorkspace() {
           <section className="mk-panel mk-analytics-notes">
             <h2>How revenue is attributed</h2>
             <p>
-              Campaigns and other flows use the most recent qualifying email
-              interaction within the windows above. Welcome uses that rule for
-              the first qualifying purchase after signup; later purchases count
-              only when they redeem that customer’s assigned Welcome code.
-              Verified Welcome-code redemption requires a prior Welcome offer
-              email, and can receive credit without a recorded open or click.
+              {isMacro ? "Campaigns use the most recent qualifying email interaction within the windows above." : "Campaigns and other flows use the most recent qualifying email interaction within the windows above. Welcome uses that rule for the first qualifying purchase after signup; later purchases count only when they redeem that customer’s assigned Welcome code. Verified Welcome-code redemption requires a prior Welcome offer email, and can receive credit without a recorded open or click."}
               Each order receives one credit. The selected period is based on when
               the credited message was sent. Revenue is gross order value before refunds. Opens may
               include privacy-proxy activity, and currencies remain separate

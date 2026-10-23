@@ -27,8 +27,11 @@ import {
   content,
   DAY,
   eligible,
-  marketingSettings,
 } from "./rules";
+import { scopedMarketingSettings as marketingSettings } from "./settings";
+import { currentMarketingBrand, marketingEnv, runWithMarketingBrand } from "./context";
+import { marketingBrands, type MarketingBrand } from "./brands";
+import { syncShopifySubscribers } from "./shopify-subscribers";
 import { DeliveryError, DeliveryStopped, checkEmailBeforeSending, resendProvider, setup, smsProvider } from "./delivery";
 import { lowStock, stockStateKey } from "./stock";
 import {
@@ -60,8 +63,10 @@ import {
 } from "./welcome";
 
 export async function runMarketing(onlyMessageId?: string) {
+  const campaignsOnly = currentMarketingBrand() === "macroalgae-farms";
   const inbox = onlyMessageId ? null : await processMarketingInbox();
-  if (!onlyMessageId) await reconcileUnverifiedCartMessages();
+  if (!onlyMessageId && !campaignsOnly) await reconcileUnverifiedCartMessages();
+  if (!onlyMessageId && campaignsOnly) await syncShopifySubscribers();
   if (!onlyMessageId) await syncShopifyEmailUnsubscribes().catch((error) => {
     console.error("Shopify unsubscribe synchronization failed:", error);
   });
@@ -69,7 +74,7 @@ export async function runMarketing(onlyMessageId?: string) {
     where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
   });
   const settings = marketingSettings(settingsRow?.data),
-    config = setup(settings.operations, settings.postalAddress);
+    config = setup(settings.operations, settings.postalAddress, settings.sender);
   const unresolved = await inboxUnresolved();
   const heartbeat = async (data: object) => {
     if (onlyMessageId) return;
@@ -90,6 +95,7 @@ export async function runMarketing(onlyMessageId?: string) {
     where: {
       shop: shop(),
       status: "SENDING",
+      ...(campaignsOnly ? { campaignId: { not: null } } : {}),
       ...(onlyMessageId ? { id: onlyMessageId } : {}),
       attemptedAt: { lt: new Date(+now - 300000) },
     },
@@ -100,7 +106,7 @@ export async function runMarketing(onlyMessageId?: string) {
   });
   let stockCheck: Awaited<ReturnType<typeof lowStock>> | null = null;
   try {
-    if (!onlyMessageId) stockCheck = await lowStock();
+    if (!onlyMessageId && !campaignsOnly) stockCheck = await lowStock();
   } catch (error) {
     await prisma.marketingResource.upsert({
       where: {
@@ -138,13 +144,13 @@ export async function runMarketing(onlyMessageId?: string) {
     await heartbeat({ skipped, sent: 0 });
     return { skipped };
   }
-  const abandonments = onlyMessageId ? null : await syncCartAbandonments();
+  const abandonments = onlyMessageId || campaignsOnly ? null : await syncCartAbandonments();
   now.setTime(Date.now());
   const deadline = Date.now() + 180000;
   const campaigns = onlyMessageId
     ? []
     : await prisma.marketingCampaign.findMany({
-        where: { shop: shop(), status: "SCHEDULED", scheduledAt: { lte: now } },
+        where: { shop: shop(), status: "SCHEDULED", scheduledAt: { lte: now }, ...(campaignsOnly ? { channel: "EMAIL" } : {}) },
         take: 5,
         orderBy: { scheduledAt: "asc" },
       });
@@ -393,13 +399,13 @@ export async function runMarketing(onlyMessageId?: string) {
   }
   // Reserve capacity for both automation and campaign email; SMS never crowds
   // either out. Deferred records receive a future dueAt before the next run.
-  const emailFlow = await prisma.marketingMessage.findMany({
+  const emailFlow = campaignsOnly && !onlyMessageId ? [] : await prisma.marketingMessage.findMany({
     where: {
       ...(onlyMessageId ? { id: onlyMessageId } : {}),
       shop: shop(),
       status: "PENDING",
       channel: "EMAIL",
-      campaignId: null,
+      ...(campaignsOnly ? { campaignId: { not: null }, flowKey: null, flowCondition: null } : { campaignId: null }),
       dueAt: { lte: now },
     },
     orderBy: [{ dueAt: "asc" }, { id: "asc" }],
@@ -413,12 +419,13 @@ export async function runMarketing(onlyMessageId?: string) {
           status: "PENDING",
           channel: "EMAIL",
           campaignId: { not: null },
+          ...(campaignsOnly ? { flowKey: null, flowCondition: null } : {}),
           dueAt: { lte: now },
         },
         orderBy: [{ dueAt: "asc" }, { id: "asc" }],
         take: 100,
       });
-  const sms = onlyMessageId
+  const sms = onlyMessageId || campaignsOnly
     ? []
     : await prisma.marketingMessage.findMany({
         where: {
@@ -501,7 +508,7 @@ export async function runMarketing(onlyMessageId?: string) {
         },
       });
       const settings = marketingSettings(settingsRow?.data),
-        config = setup(settings.operations, settings.postalAddress);
+        config = setup(settings.operations, settings.postalAddress, settings.sender);
       if (
         !config.sendingEnabled ||
         !config.migrationConfirmed ||
@@ -1105,7 +1112,7 @@ export async function runMarketing(onlyMessageId?: string) {
             },
           });
           const state = marketingSettings(liveSettings?.data),
-            gates = setup(state.operations, state.postalAddress);
+            gates = setup(state.operations, state.postalAddress, state.sender);
           const expired = (message.content as Content).couponExpiresAt;
           const enteredAt = new Date(welcomeRun.enteredAt);
           const purchased =
@@ -1254,6 +1261,7 @@ export async function runMarketing(onlyMessageId?: string) {
           const liveSetup = setup(
             marketingSettings(liveSettings?.data).operations,
             settings.postalAddress,
+            settings.sender,
           );
           if (latest.status !== "SENDING") continue;
           const testBlock = cartTestBlock(
@@ -1362,6 +1370,7 @@ export async function runMarketing(onlyMessageId?: string) {
         address: settings.postalAddress,
         organizationName: settings.organizationName,
         branding: settings.branding,
+        sender: settings.sender,
         unsubscribe: unsubscribeUrl(message.token),
         beforeSend: async () => {
           try {
@@ -1424,7 +1433,7 @@ export async function runMarketing(onlyMessageId?: string) {
   const active = onlyMessageId
     ? []
     : await prisma.marketingCampaign.findMany({
-        where: { shop: shop(), status: "SENDING" },
+        where: { shop: shop(), status: "SENDING", ...(campaignsOnly ? { channel: "EMAIL" } : {}) },
         select: { id: true },
       });
   for (const c of active)
@@ -1451,4 +1460,24 @@ export async function runMarketing(onlyMessageId?: string) {
     });
   await heartbeat({ sent, inspected, abandonments });
   return { sent, inspected };
+}
+
+/** Scheduled entry point. A failure or pause for one store cannot select the other store's rows. */
+export async function runAllMarketingBrands() {
+  const results: { brand: MarketingBrand; result?: Awaited<ReturnType<typeof runMarketing>>; error?: string }[] = [];
+  for (const brand of marketingBrands) {
+    if (brand.id === "macroalgae-farms" && !runWithMarketingBrand(brand.id, () =>
+      marketingEnv("SHOPIFY_SHOP_DOMAIN") && marketingEnv("SHOPIFY_CLIENT_ID") && marketingEnv("SHOPIFY_CLIENT_SECRET"))) {
+      results.push({ brand: brand.id, result: { skipped: "Macroalgae Farms Shopify is not configured." } });
+      continue;
+    }
+    try {
+      const result = await runWithMarketingBrand(brand.id, () => runMarketing());
+      results.push({ brand: brand.id, result });
+    } catch (error) {
+      console.error(`Marketing worker failed for ${brand.name}:`, error);
+      results.push({ brand: brand.id, error: error instanceof Error ? error.message : "Worker failed" });
+    }
+  }
+  return results;
 }

@@ -4,6 +4,7 @@ import { content, withCoupon } from "./rules";
 import { flowSequence, validateFlow } from "./flow-config";
 export type { FlowConfig } from "./flow-config";
 import { json, shop, Tx } from "./store";
+import { currentMarketingBrand } from "./context";
 export async function enroll(
   tx: Tx,
   key: string,
@@ -19,6 +20,7 @@ export async function enroll(
     merchandise?: import("./cart-merchandise").CartMerchandise;
   } = {},
 ) {
+  if (currentMarketingBrand() !== "corals-anonymous") return;
   const resource = await tx.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "FLOW", key } },
   });

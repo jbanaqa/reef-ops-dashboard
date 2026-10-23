@@ -1,4 +1,5 @@
 "use client";
+import { useMarketingBrand, useMarketingRequest, useMarketingAction } from "./MarketingBrand";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { FlowProgress } from "@/lib/marketing/flow-progress";
@@ -109,19 +110,6 @@ export function audienceRules(s: Segment) {
       "No purchases in the last " + s.excludePurchasedDays + " days",
   ].filter(Boolean) as string[];
 }
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, { cache: "no-store", ...options });
-  const result = await response.json();
-  if (!response.ok)
-    throw new Error(result.error || "Something went wrong. Please try again.");
-  return result;
-}
-const post = <T,>(body: unknown) =>
-  request<T>("/api/marketing", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
 function Badge({ contact, channel }: { contact: Contact; channel?: string }) {
   const status = emailStatus(contact, channel);
   return <span className={"aw-badge " + status.tone}>{status.label}</span>;
@@ -326,6 +314,9 @@ function ContactPanel({
   changed: () => void;
   sendingEnabled: boolean;
 }) {
+  const request = useMarketingRequest();
+  const post = useMarketingAction();
+  const { brand } = useMarketingBrand();
   const [contact, setContact] = useState<Detail | null>(null);
   const [section, setSection] = useState("overview");
   const [error, setError] = useState("");
@@ -358,7 +349,7 @@ function ContactPanel({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [id, version]);
+  }, [id, version, request]);
   function refresh() {
     setLoading(true);
     setError("");
@@ -707,7 +698,7 @@ function ContactPanel({
                   </>
                 )}
               </section>
-              <details className="aw-manage">
+              {brand.id === "corals-anonymous" && <details className="aw-manage">
                 <summary>Test Welcome with this contact</summary>
                 <p>
                   For an existing subscriber who has never entered Welcome, set the Welcome flow’s test audience to this exact email, then enroll them here. This does not change their lists or reset an earlier Welcome run.
@@ -715,7 +706,7 @@ function ContactPanel({
                 <button type="button" disabled={busy || loading || !contact.email} onClick={enrollWelcomeTest}>
                   {busy ? "Working…" : "Enroll in Welcome test"}
                 </button>
-              </details>
+              </details>}
               <section className="aw-detail-section">
                 <h3>At a glance</h3>
                 <dl className="aw-facts">
@@ -1011,6 +1002,7 @@ function GroupEditor({
   close: () => void;
   saved: () => void;
 }) {
+  const post = useMarketingAction();
   const [name, setName] = useState(group.name);
   const [rules, setRules] = useState<Record<string, string>>(
     Object.fromEntries(
@@ -1159,6 +1151,8 @@ export default function AudienceWorkspace({
 }: {
   sendingEnabled: boolean;
 }) {
+  const request = useMarketingRequest();
+  const { href, brand } = useMarketingBrand();
   const [view, setView] = useState("contacts");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -1206,7 +1200,7 @@ export default function AudienceWorkspace({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [requestKey]);
+  }, [requestKey, request]);
   function reset() {
     setQuery("");
     setStatus("all");
@@ -1240,12 +1234,12 @@ export default function AudienceWorkspace({
           >
             Lists & segments
           </button>
-          <button
+          {brand.id === "corals-anonymous" && <button
             aria-current={view === "pending" ? "page" : undefined}
             onClick={() => changeView("pending")}
           >
             Pending flows
-          </button>
+          </button>}
         </nav>
         {view !== "pending" && (
           <button
@@ -1429,7 +1423,7 @@ export default function AudienceWorkspace({
                     {query || status !== "all" || b2b || groupKey ? (
                       <button onClick={reset}>Clear filters</button>
                     ) : (
-                      <Link href="/our-klaviyo/settings">
+                      <Link href={href("/our-klaviyo/settings")}>
                         Open sync settings →
                       </Link>
                     )}

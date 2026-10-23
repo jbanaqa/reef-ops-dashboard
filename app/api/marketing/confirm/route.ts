@@ -18,6 +18,7 @@ export async function GET() {
   );
 }
 export async function POST(request: Request) {
+  if (new URL(request.url).searchParams.get("brand") === "macroalgae-farms") return new Response("Macroalgae Farms signup forms are not enabled.", { status: 403, headers });
   try {
     const hash = confirmationHash(
       new URL(request.url).searchParams.get("token") || "",

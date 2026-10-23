@@ -1,16 +1,18 @@
 import { prisma } from "@/lib/prisma";
-import { shopifyGraphql } from "@/lib/shopify";
+import { shopifyGraphql } from "./shopify";
 import { json, shop, type Tx } from "./store";
+import { currentMarketingBrand, marketingEnv } from "./context";
 
 const kind = "SHOPIFY_EMAIL_UNSUBSCRIBE";
 
 export function unsubscribeUrl(token: string) {
-  const origin = process.env.MARKETING_UNSUBSCRIBE_ORIGIN || process.env.APP_BASE_URL;
+  const origin = marketingEnv("MARKETING_UNSUBSCRIBE_ORIGIN") || marketingEnv("APP_BASE_URL");
   if (!origin) throw new Error("Public unsubscribe origin is not configured.");
   const url = new URL("/api/marketing/unsubscribe", origin);
   if (url.protocol !== "https:" && process.env.NODE_ENV === "production")
     throw new Error("Public unsubscribe origin must use HTTPS.");
   url.searchParams.set("token", token);
+  if (currentMarketingBrand() === "macroalgae-farms") url.searchParams.set("brand", "macroalgae-farms");
   return url.toString();
 }
 

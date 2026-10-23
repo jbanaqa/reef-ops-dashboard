@@ -1,4 +1,5 @@
 "use client";
+import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useState } from "react";
 import { welcomeLabels } from "@/lib/marketing/welcome-config";
 
@@ -20,6 +21,7 @@ const status = (message?: Message) => !message ? "No message recorded"
 const eventNames: Record<string, string> = { DELIVERED: "Delivered", OPENED: "Opened", CLICKED: "Clicked", BOUNCED: "Bounced", COMPLAINED: "Spam complaint", UNSUBSCRIBED: "Unsubscribed" };
 
 export default function WelcomeActivity() {
+  const { marketingFetch } = useMarketingBrand();
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState("live");
   const [query, setQuery] = useState("");
@@ -39,7 +41,7 @@ export default function WelcomeActivity() {
       try {
         const params = new URLSearchParams({ view: "welcome-activity", scope, q: query });
         if (cursor) params.set("cursor", cursor);
-        const response = await fetch("/api/marketing?" + params, { signal: controller.signal });
+        const response = await marketingFetch("/api/marketing?" + params, { signal: controller.signal });
         const result = await response.json();
         if (!response.ok) throw Error(result.error || "Could not load Welcome activity.");
         if (!controller.signal.aborted) setReport(result);
@@ -48,7 +50,7 @@ export default function WelcomeActivity() {
       } finally { if (!controller.signal.aborted) setLoading(false); }
     }, 200);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [open, scope, query, cursor, version]);
+  }, [open, scope, query, cursor, version, marketingFetch]);
   return <details className="fw-welcome-activity" onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary>Welcome activity <span>Signups and message history</span></summary>
     {open && <div>

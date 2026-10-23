@@ -1,4 +1,7 @@
 "use client";
+import { useMarketingBrand, useMarketingAction, useMarketingUnsavedChanges } from "./MarketingBrand";
+import SenderIdentity from "./SenderIdentity";
+import MacroSettingsWorkspace from "./MacroSettingsWorkspace";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
@@ -86,19 +89,6 @@ const date = (value: unknown) =>
     : "No run recorded yet";
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
-async function action<T>(body: unknown): Promise<T> {
-  const response = await fetch("/api/marketing", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok)
-    throw new Error(
-      data.error || "Could not complete this action. Please try again.",
-    );
-  return data;
-}
 function Tag({
   children,
   active = false,
@@ -150,13 +140,15 @@ const sections = [
   { key: "business", name: "Business details", hint: "Name and email footer" },
   { key: "advanced", name: "Advanced", hint: "Connections and migration" },
 ];
-export default function SettingsWorkspace({
+function CoralsSettingsWorkspace({
   data,
   refresh,
 }: {
   data: SettingsData;
   refresh: () => Promise<void>;
 }) {
+  const action = useMarketingAction();
+  const { marketingFetch, href } = useMarketingBrand();
   const [section, setSection] = useState("overview");
   const [saved, setSaved] = useState(data.settings);
   const [business, setBusiness] = useState({
@@ -200,6 +192,7 @@ export default function SettingsWorkspace({
   const syncDirty = sync !== saved.operations.ingestEnabled;
   const migrationDirty = migration !== saved.operations.migrationConfirmed;
   const dirty = businessDirty || sendingDirty || syncDirty || migrationDirty;
+  useMarketingUnsavedChanges(dirty);
   useEffect(() => {
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -212,8 +205,8 @@ export default function SettingsWorkspace({
   useEffect(() => {
     let active = true;
     Promise.all([
-      fetch("/api/marketing?view=audience-backfill"),
-      fetch("/api/marketing?view=engagement-backfill"),
+      marketingFetch("/api/marketing?view=audience-backfill"),
+      marketingFetch("/api/marketing?view=engagement-backfill"),
     ])
       .then(async ([audienceResponse, engagementResponse]) => {
         const [audienceResult, engagementResult] = await Promise.all([
@@ -241,7 +234,7 @@ export default function SettingsWorkspace({
       active = false;
       stopBackfill.current = true;
     };
-  }, []);
+  }, [marketingFetch]);
   const setup = data.setup;
   const deployment = (setup.deployment || {}) as Partial<MarketingOperations>;
   const worker = data.resources.find(
@@ -770,7 +763,7 @@ export default function SettingsWorkspace({
                   </button>
                 </p>
               )}
-              <Link href="/our-klaviyo/audiences">
+              <Link href={href("/our-klaviyo/audiences")}>
                 View customer activity →
               </Link>
             </section>
@@ -986,22 +979,7 @@ export default function SettingsWorkspace({
                 </fieldset>
               </form>
             </section>
-            <section className="sw-card">
-              <h3>Sending address</h3>
-              <p>
-                Configured by your administrator. The business name above
-                changes the footer, not this From address.
-              </p>
-              <div className="sw-readonly">
-                {typeof setup.senderEmail === "string" && setup.senderEmail
-                  ? setup.senderEmail
-                  : "No sending address configured"}
-              </div>
-              <p className="sw-hint">
-                Configuration status does not verify domain authentication or
-                inbox placement.
-              </p>
-            </section>
+            <SenderIdentity settings={data.settings} setup={setup} refresh={refresh} />
           </>
         )}
         {section === "advanced" && (
@@ -1496,4 +1474,9 @@ export default function SettingsWorkspace({
       </div>
     </div>
   );
+}
+
+export default function SettingsWorkspace(props: { data: SettingsData; refresh: () => Promise<void> }) {
+  const { brand } = useMarketingBrand();
+  return brand.id === "macroalgae-farms" ? <MacroSettingsWorkspace {...props} /> : <CoralsSettingsWorkspace {...props} />;
 }

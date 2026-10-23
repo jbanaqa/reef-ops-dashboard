@@ -1,4 +1,5 @@
 "use client";
+import { useMarketingBrand } from "./MarketingBrand";
 import EmailDesigner from "./EmailDesigner";
 import {
   render,
@@ -145,6 +146,7 @@ export default function LowStockEditor({
     brandingSource?: Content,
   ) => Promise<FlowResource | undefined>;
 }) {
+  const { marketingFetch } = useMarketingBrand();
   const [panel, setPanel] = useState<StockPanel | null>(null);
   const [draft, setDraft] = useState<Draft>(() => initial(resource));
   const [brandingDraft, setBrandingDraft] = useState(settings.branding);
@@ -155,14 +157,14 @@ export default function LowStockEditor({
   const [checkStatus, setCheckStatus] = useState<CheckStatus | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/marketing?view=stock-status", { signal: controller.signal })
+    marketingFetch("/api/marketing?view=stock-status", { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((r) => {
         if (r) setCheckStatus((current) => current ?? r.status);
       })
       .catch(() => {});
     return () => controller.abort();
-  }, []);
+  }, [marketingFetch]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewFor, setPreviewFor] = useState("");
   const key = "stock-v2:" + resource.id;
@@ -276,7 +278,7 @@ export default function LowStockEditor({
     const config = JSON.stringify(s);
     try {
       validateStock(s);
-      const response = await fetch("/api/marketing", {
+      const response = await marketingFetch("/api/marketing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "preview-stock", stock: s }),
@@ -295,7 +297,7 @@ export default function LowStockEditor({
     setChecking(true);
     setError("");
     try {
-      const response = await fetch("/api/marketing", {
+      const response = await marketingFetch("/api/marketing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "check-stock" }),

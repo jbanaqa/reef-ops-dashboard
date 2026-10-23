@@ -7,9 +7,11 @@ import {
 import { validateFlow } from "./flow-config";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { getShopifyShopDomain } from "@/lib/shopify";
+import { marketingShop } from "./context";
 import { Prisma } from "@/app/generated/prisma/client";
 import { joinMasterAudience } from "./master-audience";
+import { currentMarketingBrand } from "./context";
+import { macroShopifySubscriberWhere } from "./macro-subscriber-eligibility";
 import {
   Channel,
   DAY,
@@ -20,7 +22,7 @@ import {
   Segment,
 } from "./rules";
 
-export const shop = () => getShopifyShopDomain();
+export const shop = marketingShop;
 export const json = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value));
 export type Tx = Prisma.TransactionClient;
@@ -225,6 +227,7 @@ export function audienceWhere(
           ? { consents: { none: { channel, OR: [{ suppressed: true }, { status: { notIn: ["SUBSCRIBED", "NEVER_SUBSCRIBED"] } }] } } }
           : { consents: { some: { channel, status: "SUBSCRIBED", suppressed: false } } }),
       },
+      ...(channel === "EMAIL" && currentMarketingBrand() === "macroalgae-farms" ? [macroShopifySubscriberWhere(now)] : []),
       segmentWhere(audience, now),
     ],
   };
@@ -317,6 +320,10 @@ const b2bContent = {
   template: "b2b-wholesale",
 };
 export async function seed() {
+  if ((await import("./context")).currentMarketingBrand() === "macroalgae-farms") {
+    await (await import("./macro-seed")).seedMacroMarketing();
+    return;
+  }
   for (const f of flowDefaults)
     await prisma.marketingResource.upsert({
       where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: f.key } },
