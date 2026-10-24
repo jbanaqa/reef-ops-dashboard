@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { shop } from "./store";
 import { attributedOrders, attributionConfiguration, type AttributionMatch } from "./attribution";
 import { Prisma } from "@/app/generated/prisma/client";
-import { orderValue } from "./order-evidence";
+import { addOrderRevenue, orderValue } from "./order-evidence";
 
 export async function campaignReport(id: string, requestedPage = 1) {
   if (!Number.isSafeInteger(requestedPage) || requestedPage < 1)
@@ -29,6 +29,7 @@ export async function campaignReport(id: string, requestedPage = 1) {
   const sentMessageIds = new Set<string>();
   const orders: { id: string; orderId: string | null; label: string | null; profileId: string | null; placedAt: Date; amount: number | null; currency: string | null; interaction: AttributionMatch["interaction"]; interactedAt: Date }[] = [];
   let firstSentAt: Date | undefined;
+  const unverifiedOrderIds = new Set<string>();
   let cursor: string | undefined;
   for (;;) {
     const page = await prisma.marketingMessage.findMany({
@@ -82,13 +83,13 @@ export async function campaignReport(id: string, requestedPage = 1) {
   if (firstSentAt) {
     const configuration = await attributionConfiguration(prisma);
     for await (const { order, match } of attributedOrders(prisma, {
-      since: firstSentAt, campaignId: id, configuration,
+      since: firstSentAt, campaignId: id, configuration, unverifiedOrderIds,
     })) {
       if (!match || !sentMessageIds.has(match.messageId)) continue;
       totals.ordered++;
       const payload = order.payload as { currency?: string; revenue?: string | number; orderId?: string; orderLabel?: string };
       const { amount, currency } = orderValue(payload);
-      if (currency && amount !== null) totals.revenue[currency] = (totals.revenue[currency] || 0) + amount;
+      addOrderRevenue(totals.revenue, payload);
       const orderId = String(payload.orderId || "").replace(/^gid:\/\/shopify\/Order\//, "");
       orders.push({ id: order.id, orderId: /^\d+$/.test(orderId) ? orderId : null,
         label: payload.orderLabel || null, profileId: order.profileId, placedAt: order.occurredAt,
@@ -115,6 +116,7 @@ export async function campaignReport(id: string, requestedPage = 1) {
   return {
     campaign,
     totals,
+    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size },
     orders: visible.map(({ profileId, ...order }) => ({ ...order,
       label: order.label || labels.find(label => label.orderId === order.orderId && label.label)?.label || (order.orderId ? `Order ${order.orderId}` : "Order number unavailable"),
       customer: profiles.find(profile => profile.id === profileId) || null,

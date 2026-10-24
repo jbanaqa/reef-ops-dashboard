@@ -32,6 +32,7 @@ import { scopedMarketingSettings as marketingSettings } from "./settings";
 import { currentMarketingBrand, marketingEnv, runWithMarketingBrand } from "./context";
 import { marketingBrands, type MarketingBrand } from "./brands";
 import { syncShopifySubscribers } from "./shopify-subscribers";
+import { refreshOrderPayments } from "./order-payments";
 import { DeliveryError, DeliveryStopped, checkEmailBeforeSending, resendProvider, setup, smsProvider } from "./delivery";
 import { lowStock, stockStateKey } from "./stock";
 import {
@@ -65,6 +66,9 @@ import {
 export async function runMarketing(onlyMessageId?: string) {
   const campaignsOnly = currentMarketingBrand() === "macroalgae-farms";
   const inbox = onlyMessageId ? null : await processMarketingInbox();
+  if (!onlyMessageId) await refreshOrderPayments().catch(error => {
+    console.error("Order payment refresh failed:", error);
+  });
   if (!onlyMessageId && !campaignsOnly) await reconcileUnverifiedCartMessages();
   if (!onlyMessageId && campaignsOnly) await syncShopifySubscribers();
   if (!onlyMessageId) await syncShopifyEmailUnsubscribes().catch((error) => {

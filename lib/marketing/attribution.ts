@@ -2,7 +2,9 @@ import { DAY } from "./rules";
 import { scopedMarketingSettings as marketingSettings } from "./settings";
 import { shop, type Tx } from "./store";
 import { customerCartMessages } from "./cart-report-scope";
-import { welcomeAttributionFacts, type WelcomeOrderPayload } from "./welcome-attribution";
+import { orderPaymentIdentity, welcomeAttributionFacts, type WelcomeOrderPayload } from "./welcome-attribution";
+import { ensureOrderPayments } from "./order-payments";
+import { orderValue, qualifyingOrder } from "./order-evidence";
 
 type AttributionClient = Pick<
   Tx,
@@ -36,6 +38,7 @@ export async function* attributedOrders(
     flowKey?: string;
     until?: Date;
     configuration: Awaited<ReturnType<typeof attributionConfiguration>>;
+    unverifiedOrderIds?: Set<string>;
   },
 ) {
   let cursor: string | undefined;
@@ -66,17 +69,18 @@ export async function* attributedOrders(
       take: 500,
       select: { id: true, profileId: true, occurredAt: true, payload: true },
     });
-    for (let index = 0; index < page.length; index += 20) {
-      const batch = page.slice(index, index + 20);
+    const paidOrders = await ensureOrderPayments(client, page);
+    for (const order of paidOrders) if (orderValue(order.payload).amount === null)
+      options.unverifiedOrderIds?.add(orderPaymentIdentity((order.payload as WelcomeOrderPayload).orderId, order.id));
+    for (let index = 0; index < paidOrders.length; index += 20) {
+      const batch = paidOrders.slice(index, index + 20);
       const matches = await Promise.all(
-        batch.map((order) => order.profileId
-          ? findEmailAttribution(client, order.profileId, order.occurredAt, options.configuration, order.payload as WelcomeOrderPayload)
+        batch.map((order) => order.profileId && qualifyingOrder(order.payload)
+          ? findEmailAttribution(client, order.profileId, order.occurredAt, options.configuration, order.payload as WelcomeOrderPayload, options.unverifiedOrderIds)
           : null),
       );
       for (let offset = 0; offset < batch.length; offset++) {
-        const id = String((batch[offset].payload as { orderId?: unknown }).orderId || "")
-          .replace(/^gid:\/\/shopify\/Order\//, "");
-        const identity = /^\d+$/.test(id) ? "order:" + id : "event:" + batch[offset].id;
+        const identity = orderPaymentIdentity((batch[offset].payload as WelcomeOrderPayload).orderId, batch[offset].id);
         if (seenOrders.has(identity)) continue;
         seenOrders.add(identity);
         yield { order: batch[offset], match: matches[offset] };
@@ -97,7 +101,9 @@ export async function findEmailAttribution(
     emailOpenDays: number;
   },
   order?: WelcomeOrderPayload,
+  unverifiedOrderIds?: Set<string>,
 ): Promise<AttributionMatch | null> {
+  if (order && !qualifyingOrder(order)) return null;
   const settings = configuration || (await attributionConfiguration(client));
   const maxDays = Math.max(settings.emailClickDays, settings.emailOpenDays);
   const candidates = await client.marketingMessage.findMany({
@@ -119,7 +125,7 @@ export async function findEmailAttribution(
     select: { id: true, key: true, flowKey: true, profileId: true, sentAt: true, flowStep: true, triggerAt: true },
   });
   const customerMessages = await customerCartMessages(client, shop(), candidates);
-  const welcome = await welcomeAttributionFacts(client, profileId, convertedAt, customerMessages, order);
+  const welcome = await welcomeAttributionFacts(client, profileId, convertedAt, customerMessages, order, unverifiedOrderIds);
   if (welcome.couponMatch) return { messageId: welcome.couponMatch.messageId,
     interaction: "COUPON", interactedAt: convertedAt, welcomeReason: "WELCOME_CODE", discountCode: welcome.couponMatch.code };
   const messages = customerMessages.filter(message => message.flowKey !== "welcome" || welcome.eligibleMessageIds.has(message.id));

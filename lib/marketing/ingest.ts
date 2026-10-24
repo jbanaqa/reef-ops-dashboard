@@ -10,7 +10,7 @@ import {
   deliveryUpsellDueAt,
 } from "./delivery-upsell-config";
 import { validateFlow } from "./flow-config";
-import { findEmailAttribution } from "./attribution";
+import { orderPaymentDirtyUpdate } from "./order-payments";
 import { compactOrderEvidence, orderStateUpdate, type OrderEvidence } from "./order-evidence";
 import { deliveryReviewConfig, orderUpdateSkipReason } from "./order-update-review";
 import { applyMacroShopifyConsent, macroConsentObservationCurrent } from "./macro-subscriber-eligibility";
@@ -481,15 +481,15 @@ export async function ingestShopify(
           orderId: String(p.id), revenue: String(p.total_price ?? ""),
           orderLabel: String(p.name || p.id), currency: p.currency || "UNKNOWN",
           model: "email-last-touch-with-welcome-rules", historical,
+          payment: null, ...orderPaymentDirtyUpdate({}, at),
           ...compactOrderEvidence(profile.id, p), ...orderStateUpdate({}, p, at),
         };
         await record(tx, {
           key: orderKey,
           type: "ORDER",
           profileId: profile.id,
-          messageId: historical
-            ? undefined
-            : (await findEmailAttribution(tx, profile.id, orderAt, undefined, orderPayload))?.messageId,
+          // Reports resolve attribution from verified payments and current engagement.
+          // Do not perform remote payment lookups inside this ingestion transaction.
           occurredAt: orderAt,
           payload: orderPayload,
         });
@@ -522,8 +522,9 @@ export async function ingestShopify(
           ...(saved.discountCodes === undefined && evidence.discountCodes !== undefined ? { discountCodes: evidence.discountCodes } : {}),
         };
         const freshState = orderStateUpdate(order.payload, p, at);
-        if (Object.keys(missing).length || Object.keys(freshState).length) await tx.marketingEvent.update({
-          where: { id: order.id }, data: { payload: json({ ...order.payload as object, ...missing, ...freshState }) },
+        const paymentDirty = orderPaymentDirtyUpdate(order.payload, at);
+        if (Object.keys(missing).length || Object.keys(freshState).length || Object.keys(paymentDirty).length) await tx.marketingEvent.update({
+          where: { id: order.id }, data: { payload: json({ ...order.payload as object, ...missing, ...freshState, ...paymentDirty }) },
         });
       }
     }

@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { DAY } from "./rules";
 import { shop } from "./store";
 import { customerCartMessages } from "./cart-report-scope";
-import { orderValue } from "./order-evidence";
+import { addOrderRevenue } from "./order-evidence";
 import {
   attributionConfiguration,
   attributedOrders,
@@ -39,11 +39,6 @@ const emptyRow = (key: string, kind: Row["kind"], name: string): Row => ({
   convertedRecipients: 0,
   revenue: {},
 });
-
-function money(target: Record<string, number>, payload: unknown) {
-  const { amount, currency } = orderValue(payload);
-  if (currency && amount !== null) target[currency] = (target[currency] || 0) + amount;
-}
 
 export async function marketingAnalytics(requestedDays = 30) {
   const days = periods.has(requestedDays) ? requestedDays : 30;
@@ -151,17 +146,18 @@ export async function marketingAnalytics(requestedDays = 30) {
   const storeRevenue: Record<string, number> = {};
   const attributedRevenue: Record<string, number> = {};
   let trackedOrders = 0;
+  const unverifiedOrderIds = new Set<string>();
   for await (const { order, match } of attributedOrders(prisma, {
-    since, until: now, configuration: attribution,
+    since, until: now, configuration: attribution, unverifiedOrderIds,
   })) {
     trackedOrders++;
-    money(storeRevenue, order.payload);
+    if ((order.payload as { test?: boolean }).test !== true) addOrderRevenue(storeRevenue, order.payload);
     const row = match ? rowFor.get(match.messageId) : undefined;
     if (row) {
       row.orders++;
       if (order.profileId) { buyers.get(row)!.add(order.profileId); allBuyers.add(order.profileId); }
-      money(row.revenue, order.payload);
-      money(attributedRevenue, order.payload);
+      addOrderRevenue(row.revenue, order.payload);
+      addOrderRevenue(attributedRevenue, order.payload);
     }
   }
   for (const row of rows.values()) {
@@ -179,6 +175,7 @@ export async function marketingAnalytics(requestedDays = 30) {
     days,
     since: since.toISOString(),
     attribution,
+    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size },
     totals: {
       messages: reportRows.reduce((sum, row) => sum + row.messages, 0),
       sent: reportRows.reduce((sum, row) => sum + row.sent, 0),

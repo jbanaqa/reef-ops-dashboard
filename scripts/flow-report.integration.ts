@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isolated, type Context } from "./cart-launch.integration";
 import { DAY, defaultContent } from "../lib/marketing/rules";
+import { mockOrderPaymentSource, paidOrderFixture } from "./paid-order.fixture";
 
 type Harness = Parameters<Parameters<typeof isolated>[2]>[0];
 type MessageOptions = {
@@ -56,7 +57,7 @@ async function event(h: Harness, profileId: string, messageId: string, type: str
 async function order(h: Harness, profileId: string, orderId: string, occurredAt: Date, extra: Record<string, unknown> = {}, key?: string) {
   return h.store.atomic(tx => h.store.record(tx, {
     key: key || `order:${orderId}`, type: "ORDER", profileId, occurredAt,
-    payload: { orderId, orderLabel: `#${orderId}`, revenue: "100", currency: "USD", ...extra },
+    payload: paidOrderFixture({ orderId, orderLabel: `#${orderId}`, revenue: "100", currency: "USD", ...extra }),
   }));
 }
 
@@ -258,16 +259,17 @@ export function registerFlowReportTests(context: () => Context) {
     ];
     for (let i = 0; i < payloads.length; i++) await order(h, p.id, String(8000 + i), ago(1), payloads[i]);
     const report = await flowReport("abandoned-cart");
-    assert.equal(report.totals.orders, 4); assert.equal(report.totals.convertedRecipients, 1);
+    assert.equal(report.totals.orders, 0); assert.equal(report.totals.convertedRecipients, 0);
     assert.deepEqual(report.totals.revenue, {});
-    assert.ok(report.orders.filter(item => item.currency === "USD").every(item => item.amount === null));
-    assert.ok(report.orders.every(item => item.checkoutMatch === null));
+    assert.equal(report.paymentVerification.unverifiedOrders, 4);
+    assert.deepEqual(report.orders, []);
     const analytics = await marketingAnalytics();
     assert.deepEqual(analytics.rows.find(row => row.key === "abandoned-cart")!.revenue, report.totals.revenue);
     assert.deepEqual(analytics.totals.revenue, report.totals.revenue);
   }));
 
   test("flow reports: replayed Shopify orders retain one small checkout and coupon evidence summary", async () => customerReportTest(context(), "ingest-evidence", async h => {
+    mockOrderPaymentSource({ "9001": { amount: "19.95" } });
     const { flowReport } = await import("../lib/marketing/flow-report");
     const { cartCheckoutKey } = await import("../lib/marketing/cart");
     const p = await h.make("flow-ingest-proof@example.com"), root = cartCheckoutKey(p.id, "ingest-proof-token");

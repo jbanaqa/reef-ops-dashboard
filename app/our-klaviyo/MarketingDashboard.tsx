@@ -1066,7 +1066,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       </div>
                       {!!Object.keys(campaignReport.totals.revenue).length && (
                         <p className="mk-campaign-revenue">
-                          Attributed revenue: {Object.entries(campaignReport.totals.revenue).map(([currency, amount]) => `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`).join(" · ")}
+                          Attributed paid revenue: {Object.entries(campaignReport.totals.revenue).map(([currency, amount]) => `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`).join(" · ")}
                         </p>
                       )}
                       <CampaignOrders key={campaignReport.campaign.id} report={campaignReport} onLoaded={setCampaignReport} />

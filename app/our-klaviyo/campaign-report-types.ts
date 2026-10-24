@@ -1,4 +1,5 @@
 export type CampaignReport = {
+  paymentVerification?: { unverifiedOrders: number };
   campaign: { id: string; name: string; status: string; scheduledAt: string | null };
   totals: {
     messages: number; queued: number; sent: number; delivered: number; opened: number;

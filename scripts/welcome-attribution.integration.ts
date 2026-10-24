@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isolated, type Context } from "./cart-launch.integration";
 import { DAY, defaultContent } from "../lib/marketing/rules";
+import { mockOrderPaymentSource, paidOrderFixture, paymentFixture } from "./paid-order.fixture";
 
 type Harness = Parameters<Parameters<typeof isolated>[2]>[0];
 const ago = (days: number) => new Date(Date.now() - days * DAY);
@@ -36,8 +37,8 @@ async function event(h: Harness, profileId: string, type: string, at: Date, payl
     occurredAt: at, payload: h.store.json(payload), messageId }));
 }
 async function order(h: Harness, profileId: string, id: string, at: Date, extra: Record<string, unknown> = {}) {
-  return event(h, profileId, "ORDER", at, { orderId: id, orderLabel: "#" + id.replace(/^gid:\/\/shopify\/Order\//, ""),
-    revenue: "100", currency: "USD", ...extra });
+  return event(h, profileId, "ORDER", at, paidOrderFixture({ orderId: id, orderLabel: "#" + id.replace(/^gid:\/\/shopify\/Order\//, ""),
+    revenue: "100", currency: "USD", ...extra }));
 }
 async function coupon(h: Harness, profileId: string, code = "WELCOME-ASSIGNED", extra: Record<string, unknown> = {}) {
   return h.prisma.marketingResource.create({ data: { shop: h.shop, kind: "WELCOME_COUPON", key: profileId,
@@ -71,10 +72,10 @@ export function registerWelcomeAttributionTests(context: () => Context) {
       "a caller without order evidence cannot bypass Welcome's first-order rule");
   }));
 
-  test("Welcome attribution: zero and malformed amounts never consume the first qualifying order", async () => reportTest(context(), "zero", async h => {
+  test("Welcome attribution: verified zero payments never consume the first qualifying order", async () => reportTest(context(), "zero", async h => {
     const p = await h.make("zero-welcome@example.com"); await run(h, p.id, ago(4));
     const m = await message(h, p.id, ago(3)); await event(h, p.id, "OPENED", ago(2.8), {}, m.id);
-    for (const [index, revenue] of ["0", "not-money", "", null, "-1"].entries())
+    for (const [index, revenue] of ["0", "0.00"].entries())
       await order(h, p.id, String(200 + index), ago(2.5 - index / 10), { revenue });
     await order(h, p.id, "210", ago(1.5), { revenue: "35" });
     await order(h, p.id, "211", ago(1), { revenue: "50" });
@@ -215,12 +216,13 @@ export function registerWelcomeAttributionTests(context: () => Context) {
     for (let index = 0; index < states.length; index++) await order(h, p.id, String(1200 + index), ago(3 - index / 10),
       { ...states[index], discountCodes: ["WELCOME-ASSIGNED"] });
     await reports(h, [], 0);
-    await order(h, p.id, "1210", ago(2), { revenue: "48", financialStatus: "pending" });
+    await order(h, p.id, "1210", ago(2), { revenue: "48", financialStatus: "pending", payment: paymentFixture("0") });
     await order(h, p.id, "1211", ago(1), { revenue: "99" });
-    await reports(h, ["#1210"], 48);
+    await reports(h, ["#1211"], 99);
   }));
 
   test("Welcome attribution: Shopify lifecycle updates remove invalid sales without rewriting original money or time", async () => reportTest(context(), "state-update", async h => {
+    mockOrderPaymentSource({ "1301": { amount: "55" } });
     const p = await h.make("state-update-welcome@example.com"); await run(h, p.id, ago(5));
     const m = await message(h, p.id, ago(4)); await event(h, p.id, "OPENED", ago(3.5), {}, m.id);
     const placedAt = ago(2);
@@ -249,6 +251,7 @@ export function registerWelcomeAttributionTests(context: () => Context) {
   }));
 
   test("Welcome attribution: an unrelated newer partial field cannot hide a delayed refund update", async () => reportTest(context(), "state-field-clock", async h => {
+    mockOrderPaymentSource({ "1401": { amount: "65" } });
     const p = await h.make("field-clock-welcome@example.com"); await run(h, p.id, ago(6));
     const m = await message(h, p.id, ago(5)); await event(h, p.id, "OPENED", ago(4.5), {}, m.id);
     const placedAt = ago(4), paidAt = ago(3), refundedAt = ago(2), partialAt = ago(1);

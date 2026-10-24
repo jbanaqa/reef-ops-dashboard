@@ -17,6 +17,9 @@ import { registerCartMinimumTests } from "./cart-minimum.integration";
 import { registerCartMerchandiseTests } from "./cart-merchandise.integration";
 import { registerCartAbandonmentTests } from "./cart-abandonment.integration";
 import { registerWelcomeAttributionTests } from "./welcome-attribution.integration";
+import { paidOrderFixture } from "./paid-order.fixture";
+import { registerPaidRevenueTests } from "./paid-revenue.integration";
+import { registerOrderPaymentTests } from "./order-payments.integration";
 import { registerMacroSubscriberTests } from "./macro-subscribers.integration";
 import { registerMarketingBrandRouteTests } from "./marketing-brand-routes.integration";
 import { registerMarketingBrandWorkerTests } from "./marketing-brands.integration";
@@ -58,6 +61,8 @@ registerCartMinimumTests(() => ({ prisma, store, ingest, worker }));
 registerCartMerchandiseTests();
 registerCartAbandonmentTests(() => ({ prisma, store, ingest, worker }));
 registerWelcomeAttributionTests(() => ({ prisma, store, ingest, worker }));
+registerPaidRevenueTests(() => ({ prisma, store, ingest, worker }));
+registerOrderPaymentTests(() => ({ prisma, store, ingest, worker }));
 registerMacroSubscriberTests(() => ({ prisma, store, ingest, worker }));
 registerMarketingBrandRouteTests(() => ({ prisma, store, ingest, worker }));
 registerMarketingBrandWorkerTests(() => ({ prisma, store, ingest, worker }));
@@ -3052,7 +3057,7 @@ test("cart reports count unique engagement and keep revenue currencies separate"
         messageId: m.id,
         payload:
           type === "ORDER"
-            ? { currency: i === 5 ? "USD" : "CAD", revenue: "12.50" }
+            ? paidOrderFixture({ currency: i === 5 ? "USD" : "CAD", revenue: "12.50" })
             : {},
       }),
     );
@@ -3132,7 +3137,7 @@ test("marketing analytics separates campaign revenue and recipient rates", async
     ["DELIVERED", {}],
     ["OPENED", {}],
     ["CLICKED", {}],
-    ["ORDER", { currency: "USD", revenue: "42.50" }],
+    ["ORDER", paidOrderFixture({ currency: "USD", revenue: "42.50" })],
   ] as const)
     await prisma.marketingEvent.create({
       data: {
@@ -3193,8 +3198,8 @@ test("campaign results and analytics recalculate late engagement and changed att
     { shop, key: "consistent-reports-click", type: "CLICKED", profileId: profile.id, messageId: older.id, occurredAt: at(2) },
     { shop, key: "consistent-reports-test-open", type: "OPENED", profileId: profile.id, messageId: testMessage.id, occurredAt: at(0.75) },
     // One stale saved assignment and one missing assignment: neither is authoritative.
-    { shop, key: "consistent-reports-order-usd", type: "ORDER", profileId: profile.id, messageId: older.id, occurredAt: at(0.5), payload: { orderId: "901", currency: "USD", revenue: "42.50" } },
-    { shop, key: "consistent-reports-order-eur", type: "ORDER", profileId: profile.id, occurredAt: at(0.25), payload: { orderId: "902", orderLabel: "#40902", currency: "EUR", revenue: "12" } },
+    { shop, key: "consistent-reports-order-usd", type: "ORDER", profileId: profile.id, messageId: older.id, occurredAt: at(0.5), payload: paidOrderFixture({ orderId: "901", currency: "USD", revenue: "42.50" }) },
+    { shop, key: "consistent-reports-order-eur", type: "ORDER", profileId: profile.id, occurredAt: at(0.25), payload: paidOrderFixture({ orderId: "902", orderLabel: "#40902", currency: "EUR", revenue: "12" }) },
     { shop, key: "consistent-reports-source", type: "orders/create", profileId: profile.id, occurredAt: at(0.5), payload: { id: 901, name: "#40901", privateNote: "Do not expose source payload" } },
     { shop: "other.myshopify.com", key: "consistent-reports-foreign-source", type: "orders/create", occurredAt: at(0.5), payload: { id: 901, name: "Wrong shop order" } },
   ] });
@@ -3255,7 +3260,7 @@ test("campaign order details paginate newest first and use safe fallbacks withou
   const campaign = await prisma.marketingCampaign.create({ data: { shop, name: "Order pages", subject: "Order pages", content: defaultContent, audience: {}, status: "COMPLETED" } });
   const message = await prisma.marketingMessage.create({ data: { shop, key: "order-pages-message", campaignId: campaign.id, profileId: profile.id, channel: "EMAIL", subject: "Order pages", content: defaultContent, status: "SENT", dueAt: sentAt, sentAt } });
   await prisma.marketingEvent.create({ data: { shop, key: "order-pages-open", type: "OPENED", profileId: profile.id, messageId: message.id, occurredAt: new Date(+sentAt + 1000) } });
-  await prisma.marketingEvent.createMany({ data: Array.from({ length: 27 }, (_, i) => ({ shop, key: `order-pages-${i}`, type: "ORDER", profileId: profile.id, occurredAt: new Date(+sentAt + 60000 + i * 1000), payload: { orderId: i === 26 ? "unsafe/non-order" : String(1000 + i), revenue: "10", currency: "USD" } })) });
+  await prisma.marketingEvent.createMany({ data: Array.from({ length: 27 }, (_, i) => ({ shop, key: `order-pages-${i}`, type: "ORDER", profileId: profile.id, occurredAt: new Date(+sentAt + 60000 + i * 1000), payload: paidOrderFixture({ orderId: i === 26 ? "unsafe/non-order" : String(1000 + i), revenue: "10", currency: "USD" }) })) });
   const first = await campaignReport(campaign.id), second = await campaignReport(campaign.id, 2);
   assert.equal(first.totals.ordered, 27); assert.deepEqual(first.totals.revenue, { USD: 270 });
   assert.deepEqual(first.ordersPage, { page: 1, pageSize: 25, total: 27, pages: 2 });

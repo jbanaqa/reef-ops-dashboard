@@ -2,7 +2,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { attributionConfiguration, attributedOrders, type AttributionMatch } from "./attribution";
 import { customerFlowMessages } from "./cart-report-scope";
-import { compactOrderEvidence, orderValue, type OrderEvidence } from "./order-evidence";
+import { addOrderRevenue, compactOrderEvidence, orderValue, type OrderEvidence } from "./order-evidence";
 import { DAY } from "./rules";
 import { shop } from "./store";
 import { welcomeLabels } from "./welcome-config";
@@ -103,14 +103,15 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
     interaction: AttributionMatch["interaction"]; interactedAt: string; welcomeReason?: AttributionMatch["welcomeReason"];
     checkoutMatch: boolean | null; discountCodes: string[] }[] = [];
   const details = new Map<string, { payload: OrderPayload; messageId: string; occurredAt: Date; profileId: string | null }>();
-  for await (const { order, match } of attributedOrders(prisma, { since, until: now, flowKey, configuration: attribution })) {
+  const unverifiedOrderIds = new Set<string>();
+  for await (const { order, match } of attributedOrders(prisma, { since, until: now, flowKey, configuration: attribution, unverifiedOrderIds })) {
     const message = match ? sentMessages.get(match.messageId) : undefined;
     if (!message?.sentAt || !match) continue;
     const step = stepFor(message), payload = order.payload as OrderPayload;
     const { amount, currency } = orderValue(payload), id = numericOrderId(payload);
     for (const row of [totals, step]) {
       row.orders++; buyerSets.get(row)!.add(message.profileId);
-      if (amount !== null && currency) row.revenue[currency] = (row.revenue[currency] || 0) + amount;
+      addOrderRevenue(row.revenue, payload);
     }
     orders.push({ id: order.id, label: payload.orderLabel || (id ? "Order " + id : "Order number unavailable"),
       shopifyUrl: id ? `https://${shop()}/admin/orders/${id}` : null, profileId: message.profileId,
@@ -195,7 +196,7 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
   orders.sort((a, b) => b.placedAt.localeCompare(a.placedAt) || b.id.localeCompare(a.id));
   const pageSize = 25, pages = Math.max(1, Math.ceil(orders.length / pageSize));
   const page = Math.min(Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1, pages);
-  return { flowKey, name, days, since: since.toISOString(), generatedAt: now.toISOString(), attribution, totals, steps,
+  return { flowKey, name, days, since: since.toISOString(), generatedAt: now.toISOString(), attribution, totals, steps, paymentVerification: { unverifiedOrders: unverifiedOrderIds.size },
     orders: orders.slice((page - 1) * pageSize, page * pageSize), ordersPage: { page, pageSize, total: orders.length, pages }, evidence,
     activity: recent.map(({ sortAt: _sortAt, ...message }) => { void _sortAt; return message; }),
     reasons: [...reasons].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([reason, count]) => ({ reason, count })),

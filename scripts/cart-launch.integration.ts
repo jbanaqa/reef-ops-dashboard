@@ -5,6 +5,7 @@ import type { PrismaClient } from "../app/generated/prisma/client";
 import { cartDraft } from "../lib/marketing/cart-config";
 import { validateFlow, type FlowConfig } from "../lib/marketing/flow-config";
 import { defaultContent, DAY } from "../lib/marketing/rules";
+import { paidOrderFixture } from "./paid-order.fixture";
 let loadCart: typeof import("../lib/marketing/cart")["loadCart"],
   cartRunKey: typeof import("../lib/marketing/cart")["cartRunKey"],
   resolveCartContent: typeof import("../lib/marketing/cart-storage")["resolveCartContent"],
@@ -124,7 +125,7 @@ export function registerCartLaunchTests(context: () => Context) {
     const real = await h.prisma.marketingMessage.create({ data: { shop: h.shop, key: "real-report-campaign", profileId: p.id, campaignId: campaign.id, channel: "EMAIL", subject: "Campaign", content: defaultContent, status: "SENT", sentAt: new Date(Date.now() - 10000), dueAt: new Date() } });
     await h.store.atomic(tx => h.store.record(tx, { key: "real-open", type: "OPENED", profileId: p.id, messageId: real.id, occurredAt: new Date(Date.now() - 1000) }));
     await h.store.atomic(tx => h.store.record(tx, { key: "test-open", type: "OPENED", profileId: p.id, messageId: first.id }));
-    await h.store.atomic(tx => h.store.record(tx, { key: "test-order", type: "ORDER", profileId: p.id, payload: { revenue: "100", currency: "USD" } }));
+    await h.store.atomic(tx => h.store.record(tx, { key: "test-order", type: "ORDER", profileId: p.id, payload: paidOrderFixture({ revenue: "100", currency: "USD" }) }));
     delete h.f.cart!.testEmail;
     await h.prisma.marketingResource.update({ where: { id: h.flowId }, data: { data: h.store.json(h.f) } });
     const report = await cartReport();
@@ -270,7 +271,7 @@ export function registerCartLaunchTests(context: () => Context) {
   test("cart launch: late engagement and attribution changes match Analytics; bounces and complaints count once", async () => isolated(context(), "report", async h => {
     const p = await h.make("late-cart@example.com");
     const m = await h.prisma.marketingMessage.create({ data: { shop: h.shop, key: "late-cart", profileId: p.id, flowKey: "abandoned-cart", flowCondition: "cart-v1:first", channel: "EMAIL", subject: "Cart", content: defaultContent, status: "SENT", sentAt: new Date(Date.now() - 4 * DAY), dueAt: new Date(), createdAt: new Date(Date.now() - 40 * DAY) } });
-    await h.store.atomic(tx => h.store.record(tx, { key: "late-order", type: "ORDER", profileId: p.id, occurredAt: new Date(Date.now() - DAY), payload: { orderId: "123", orderLabel: "#123", revenue: "100", currency: "USD" } }));
+    await h.store.atomic(tx => h.store.record(tx, { key: "late-order", type: "ORDER", profileId: p.id, occurredAt: new Date(Date.now() - DAY), payload: paidOrderFixture({ orderId: "123", orderLabel: "#123", revenue: "100", currency: "USD" }) }));
     assert.equal((await cartReport()).rows.find(r => r.key === "first")!.orders, 0);
     await h.store.atomic(tx => h.store.record(tx, { key: "late-open", type: "OPENED", profileId: p.id, messageId: m.id, occurredAt: new Date(Date.now() - 2 * DAY) }));
     for (const type of ["BOUNCED", "COMPLAINED"]) for (let i = 0; i < 2; i++) await h.store.atomic(tx => h.store.record(tx, { key: type + i, type, profileId: p.id, messageId: m.id }));

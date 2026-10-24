@@ -1,4 +1,5 @@
 import { cartCheckoutKey } from "./cart";
+import { Prisma } from "@/app/generated/prisma/client";
 
 type OrderSource = {
   checkout_token?: unknown;
@@ -8,7 +9,7 @@ type OrderStateSource = { financial_status?: unknown; cancelled_at?: unknown; te
 export type OrderState = { financialStatus?: string; cancelledAt?: string | null; test?: boolean };
 type StateTimes = Partial<Record<keyof OrderState, string>>;
 
-/** Small lifecycle facts can change without rewriting the original order amount. */
+/** Small lifecycle facts can change without rewriting the original purchase time. */
 export function compactOrderState(source: OrderStateSource): OrderState {
   return {
     ...(typeof source.financial_status === "string" ? { financialStatus: source.financial_status.toLowerCase().slice(0, 40) } : {}),
@@ -33,7 +34,7 @@ export function orderStateUpdate(existing: unknown, source: OrderStateSource, at
   return Object.keys(changes).length ? { ...changes, orderStateAt: nextTimes } : {};
 }
 
-/** Welcome conversions require positive known value and no explicit invalidation. */
+/** Welcome conversions require a verified positive payment and no explicit invalidation. */
 export function qualifyingOrder(payload: unknown): boolean {
   const source = (payload || {}) as OrderState;
   const { amount, currency } = orderValue(payload);
@@ -58,12 +59,19 @@ export function compactOrderEvidence(profileId: string, source: OrderSource): Or
   };
 }
 
-/** Invalid or unknown order values must not become a zero-valued sale. */
+/** Original order totals are not evidence of money collected from the customer. */
 export function orderValue(payload: unknown): { amount: number | null; currency: string | null } {
-  const source = (payload || {}) as { revenue?: unknown; currency?: unknown };
-  if (typeof source.currency !== "string" || !/^[A-Z]{3}$/.test(source.currency) ||
-    !["string", "number"].includes(typeof source.revenue) || String(source.revenue).trim() === "")
+  const source = ((payload || {}) as { payment?: { amount?: unknown; currency?: unknown } | null }).payment;
+  if (!source || typeof source.currency !== "string" || !/^[A-Z]{3}$/.test(source.currency) ||
+    !["string", "number"].includes(typeof source.amount) || !/^-?\d+(?:\.\d+)?$/.test(String(source.amount)))
     return { amount: null, currency: null };
-  const amount = Number(source.revenue);
-  return Number.isFinite(amount) && amount >= 0 ? { amount, currency: source.currency } : { amount: null, currency: null };
+  const amount = Number(source.amount);
+  return Number.isFinite(amount) ? { amount, currency: source.currency } : { amount: null, currency: null };
+}
+
+/** Sum decimals without exposing binary floating-point tails in report totals. */
+export function addOrderRevenue(target: Record<string, number>, payload: unknown): void {
+  const { amount, currency } = orderValue(payload);
+  if (currency && amount !== null)
+    target[currency] = new Prisma.Decimal(target[currency] || 0).plus(amount).toNumber();
 }

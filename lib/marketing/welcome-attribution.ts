@@ -1,10 +1,11 @@
 import { Prisma } from "@/app/generated/prisma/client";
-import { compactOrderEvidence, compactOrderState, qualifyingOrder, type OrderEvidence, type OrderState } from "./order-evidence";
+import { compactOrderEvidence, compactOrderState, orderValue, qualifyingOrder, type OrderEvidence, type OrderState } from "./order-evidence";
+import { ensureOrderPayments } from "./order-payments";
 import { shop, type Tx } from "./store";
 
 type Client = Pick<Tx, "marketingEvent" | "marketingResource" | "$queryRaw">;
 export type WelcomeOrderPayload = OrderEvidence & OrderState & {
-  orderId?: unknown; revenue?: unknown; currency?: unknown;
+  orderId?: unknown; revenue?: unknown; currency?: unknown; payment?: unknown;
 };
 export type WelcomeAttributionMessage = {
   id: string; flowKey: string | null; flowStep: number | null;
@@ -18,6 +19,10 @@ type Source = {
 const canonicalOrderId = (value: unknown): string | null => {
   const id = String(value || "").replace(/^gid:\/\/shopify\/Order\//, "");
   return /^\d+$/.test(id) ? BigInt(id).toString() : null;
+};
+export const orderPaymentIdentity = (orderId: unknown, eventId: string) => {
+  const id = canonicalOrderId(orderId);
+  return id ? "order:" + id : "event:" + eventId;
 };
 const timestamp = (value: unknown): Date | null => {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -71,7 +76,7 @@ export async function welcomeOrderPayload<T extends WelcomeOrderPayload>(client:
 }
 
 /** Earlier qualifying orders consume the first-order opportunity even outside the displayed period. */
-async function isFirstOrder(client: Client, profileId: string, enteredAt: Date, convertedAt: Date, order: WelcomeOrderPayload) {
+async function isFirstOrder(client: Client, profileId: string, enteredAt: Date, convertedAt: Date, order: WelcomeOrderPayload, unverifiedOrderIds?: Set<string>) {
   const currentId = canonicalOrderId(order.orderId);
   let cursor: { at: Date; id: string } | undefined;
   for (;;) {
@@ -79,17 +84,27 @@ async function isFirstOrder(client: Client, profileId: string, enteredAt: Date, 
       SELECT source.id, source."occurredAt",
         (SELECT COALESCE(jsonb_object_agg(field.key, field.value), '{}'::jsonb)
           FROM jsonb_each(CASE WHEN jsonb_typeof(source.payload) = 'object' THEN source.payload ELSE '{}'::jsonb END) AS field
-          WHERE field.key IN ('orderId', 'revenue', 'currency', 'discountCodes', 'financialStatus', 'cancelledAt', 'test')) AS payload
+          WHERE field.key IN ('orderId', 'revenue', 'currency', 'discountCodes', 'financialStatus', 'cancelledAt', 'test',
+            'payment', 'paymentDirtyAt', 'paymentCheckAt', 'paymentError')) AS payload
       FROM "MarketingEvent" AS source
       WHERE source.shop=${shop()} AND source."profileId"=${profileId} AND source.type='ORDER'
         AND source."occurredAt">=${enteredAt} AND source."occurredAt"<=${convertedAt}
         ${cursor ? Prisma.sql`AND (source."occurredAt", source.id)>(${cursor.at}, ${cursor.id})` : Prisma.empty}
       ORDER BY source."occurredAt" ASC, source.id ASC LIMIT 100`);
     if (!page.length) return true;
-    const payloads = await withSourceFacts(client, profileId, page.map(row => row.payload));
+    const paidOrders = await ensureOrderPayments(client, page);
+    const payloads = await withSourceFacts(client, profileId, paidOrders.map(row => row.payload));
     for (let index = 0; index < page.length; index++) {
       const prior = page[index], payload = payloads[index], priorId = canonicalOrderId(payload.orderId);
       if (currentId && priorId === currentId) continue;
+      const earlier = prior.occurredAt < convertedAt || !currentId || !priorId || BigInt(priorId) < BigInt(currentId);
+      if (!earlier) continue;
+      if (payload.test === true || payload.cancelledAt || ["voided", "refunded"].includes(String(payload.financialStatus || "").toLowerCase())) continue;
+      // An unknown earlier payment cannot manufacture a later "first" purchase.
+      if (orderValue(payload).amount === null) {
+        unverifiedOrderIds?.add(orderPaymentIdentity(payload.orderId, prior.id));
+        return false;
+      }
       if (!qualifyingOrder(payload)) continue;
       if (prior.occurredAt < convertedAt) return false;
       // Shopify order IDs give stable chronology when orders share a timestamp.
@@ -102,7 +117,7 @@ async function isFirstOrder(client: Client, profileId: string, enteredAt: Date, 
 
 export async function welcomeAttributionFacts(
   client: Client, profileId: string, convertedAt: Date,
-  messages: WelcomeAttributionMessage[], order?: WelcomeOrderPayload,
+  messages: WelcomeAttributionMessage[], order?: WelcomeOrderPayload, unverifiedOrderIds?: Set<string>,
 ) {
   const welcome = messages.filter(message => message.flowKey === "welcome" && message.sentAt && message.sentAt <= convertedAt);
   const empty = { enteredAt: null as Date | null, firstOrder: false, eligibleMessageIds: new Set<string>(),
@@ -126,7 +141,7 @@ export async function welcomeAttributionFacts(
     .sort((a, b) => +a - +b);
   const enteredAt = timestamp(run?.enteredAt) || enrollment?.occurredAt || triggers[0] || null;
   if (enteredAt && convertedAt < enteredAt) return { ...empty, enteredAt };
-  const firstOrder = !!enteredAt && await isFirstOrder(client, profileId, enteredAt, convertedAt, payload);
+  const firstOrder = !!enteredAt && await isFirstOrder(client, profileId, enteredAt, convertedAt, payload, unverifiedOrderIds);
   const coupon = resources.find(resource => resource.kind === "WELCOME_COUPON");
   const used = new Set((Array.isArray(payload.discountCodes) ? payload.discountCodes : [])
     .filter(code => typeof code === "string").map(code => code.trim().toUpperCase()));

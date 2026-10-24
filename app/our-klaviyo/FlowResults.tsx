@@ -17,7 +17,7 @@ const money = (values: Record<string, number>) => {
   const entries = Object.entries(values);
   return entries.length ? entries.map(([currency, amount]) =>
     `${currency} ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-  ).join(" · ") : "No attributed revenue";
+  ).join(" · ") : "No attributed paid revenue";
 };
 const names: Record<FlowKey, string> = {
   welcome: "Welcome", "abandoned-cart": "Abandoned Cart",
@@ -115,8 +115,9 @@ function ResultsDialog({ flowKey, close, initialDays }: {
       </div>}
       {loading && <p role="status" className="mk-fr-loading">Loading flow results…</p>}
       {report && <>
+        {!!report.paymentVerification?.unverifiedOrders && <p className="mk-fr-caption" role="status">Shopify payments could not be verified for {number(report.paymentVerification.unverifiedOrders)} {report.paymentVerification.unverifiedOrders === 1 ? "order" : "orders"}. Revenue and attribution may be incomplete.</p>}
         <div className="mk-fr-summary">
-          <article><span>Attributed revenue</span><strong>{money(report.totals.revenue)}</strong><small>Recorded gross order value</small></article>
+          <article><span>Attributed paid revenue</span><strong>{money(report.totals.revenue)}</strong><small>Payments received minus refunds</small></article>
           <article><span>Attributed orders</span><strong>{number(report.totals.orders)}</strong><small>See each credited order below</small></article>
           <article><span>Buyer conversion</span><strong>{rate(report.totals.convertedRecipients, report.totals.recipients)}</strong><small>{number(report.totals.convertedRecipients)} buyers / {number(report.totals.recipients)} email recipients</small></article>
           <article><span>Emails sent</span><strong>{number(report.totals.sent)}</strong><small>{number(report.totals.delivered)} confirmed delivered</small></article>
@@ -130,7 +131,7 @@ function ResultsDialog({ flowKey, close, initialDays }: {
             <p>Welcome-code redemption can receive credit without a recorded open or click, outside those windows. A genuine Welcome offer email must have been sent to the customer before purchase. Each order is counted once.</p>
           </> : <p>An order is credited to the most recent qualifying email open or click across Reef Ops flows and campaigns, using the same rules as Analytics: {report.attribution.emailClickDays}-day clicks and {report.attribution.emailOpenDays}-day opens. The attribution window starts at delivery when recorded, otherwise at send. Verified assigned Welcome-code redemption takes priority.</p>}
           <p>Buyer conversion counts distinct recipients with a credited order divided by distinct recipients sent an email. A buyer can receive multiple emails and place multiple orders. Each order receives one credit.</p>
-          <p>Revenue is recorded gross order value before refunds or cancellations. Currencies stay separate. Attribution shows an association; it does not prove the email caused the purchase. Privacy features and bots can inflate opens.</p>
+          <p>Paid revenue is payments received minus refunds, including tax and shipping. Currencies stay separate. Attribution shows an association; it does not prove the email caused the purchase. Privacy features and bots can inflate opens.</p>
           <p>{report.totals.clicked ? `${number(report.totals.clicked)} emails have recorded clicks.` : "No recorded clicks are available in this period. Click tracking is deferred; this does not mean nobody visited the site."}</p>
           <p>{flowKey === "welcome" ? "Order badges show first-purchase or Welcome-code credit. Historical orders may lack the details needed to verify code redemption." : "Checkout and flow-code badges add supporting evidence to orders already attributed above; they do not add extra revenue. Historical orders may lack the details needed to check them."}</p>
         </details>
@@ -148,7 +149,7 @@ function ResultsDialog({ flowKey, close, initialDays }: {
         </section>
         <section className="mk-fr-section" aria-label="Attributed orders">
           <div className="mk-fr-section-heading"><h3>Attributed orders <span>({number(report.ordersPage.total)})</span></h3>
-            <span>Orders included in the revenue above</span></div>
+            <span>Orders included in paid revenue above</span></div>
           {report.ordersPage.total > 0 && <div className="mk-fr-evidence-summary">
             {flowKey === "abandoned-cart" && <span>{number(report.evidence.matchingCheckoutOrders)} same checkout</span>}
             <span>{number(report.evidence.discountOrders)} used a flow code</span>

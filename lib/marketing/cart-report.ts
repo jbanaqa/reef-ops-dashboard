@@ -3,7 +3,7 @@ import { shop } from "./store";
 import { DAY } from "./rules";
 import { attributionConfiguration, attributedOrders } from "./attribution";
 import { customerCartMessages } from "./cart-report-scope";
-import { orderValue } from "./order-evidence";
+import { addOrderRevenue, orderValue } from "./order-evidence";
 const names: Record<string, string> = {
   sms: "Text message",
   first: "Email #1 · Soft push",
@@ -93,13 +93,14 @@ export async function cartReport() {
   }
   const orders: { id: string; label: string; url: string | null; email: string; at: string; step: string;
     currency: string; amount: number | null; interaction: string; interactedAt: string }[] = [];
-  for await (const { order, match } of attributedOrders(prisma, { since, configuration: attribution })) {
+  const unverifiedOrderIds = new Set<string>();
+  for await (const { order, match } of attributedOrders(prisma, { since, flowKey: "abandoned-cart", configuration: attribution, unverifiedOrderIds })) {
     const row = match ? rowFor.get(match.messageId) : undefined;
     if (!row || !match) continue;
     const p = order.payload as { currency?: string; revenue?: string; orderId?: string; orderLabel?: string };
     row.orders++;
     const { amount, currency } = orderValue(p);
-    if (currency && amount !== null) row.revenue[currency] = (row.revenue[currency] || 0) + amount;
+    addOrderRevenue(row.revenue, p);
     const id = String(p.orderId || "").replace(/^gid:\/\/shopify\/Order\//, "");
     orders.push({ id: order.id, label: p.orderLabel || (id ? "Order " + id : "Order"),
       url: /^\d+$/.test(id) ? `https://${shop()}/admin/orders/${id}` : null,
@@ -130,6 +131,7 @@ export async function cartReport() {
   return {
     since: since.toISOString(),
     attribution,
+    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size },
     orders,
     activity: activity.slice(0, 25).map(({ profile, key: _key, flowKey: _flow, ...m }) => {
       void _key; void _flow;

@@ -19,6 +19,7 @@ type AnalyticsRow = {
   revenue: Record<string, number>;
 };
 type AnalyticsReport = {
+  paymentVerification?: { unverifiedOrders: number };
   days: number;
   since: string;
   attribution: {
@@ -87,7 +88,7 @@ function PerformanceTable({
                 <th>Click rate</th>
                 <th>Orders</th>
                 <th>Customer conversion</th>
-                <th>Revenue</th>
+                <th>Paid revenue</th>
               </tr>
             </thead>
             <tbody>
@@ -242,11 +243,12 @@ export default function AnalyticsWorkspace() {
       )}
       {report && (
         <>
+          {!!report.paymentVerification?.unverifiedOrders && <p className="mk-notice" role="status">Shopify payments could not be verified for {report.paymentVerification.unverifiedOrders.toLocaleString()} {report.paymentVerification.unverifiedOrders === 1 ? "order" : "orders"}. Revenue and attribution may be incomplete.</p>}
           <div className="mk-analytics-summary" aria-busy={loading}>
             <article>
-              <span>Attributed revenue</span>
+              <span>Attributed paid revenue</span>
               <strong>{money(report.totals.revenue)}</strong>
-              <small>Gross order value tied to a Reef Ops message</small>
+              <small>Payments received minus refunds</small>
             </article>
             <article>
               <span>Attributed orders</span>
@@ -348,12 +350,13 @@ export default function AnalyticsWorkspace() {
             <p>
               {isMacro ? "Campaigns use the most recent qualifying email interaction within the windows above." : "Campaigns and other flows use the most recent qualifying email interaction within the windows above. Welcome uses that rule for the first qualifying purchase after signup; later purchases count only when they redeem that customer’s assigned Welcome code. Verified Welcome-code redemption requires a prior Welcome offer email, and can receive credit without a recorded open or click."}
               Each order receives one credit. The selected period is based on when
-              the credited message was sent. Revenue is gross order value before refunds. Opens may
+              the credited message was sent. Paid revenue is payments received minus refunds,
+              including tax and shipping. Opens may
               include privacy-proxy activity, and currencies remain separate
               instead of being converted.
             </p>
             <p>
-              Total tracked store revenue for this period: {money(report.totals.storeRevenue)}.
+              Total tracked paid revenue for this period: {money(report.totals.storeRevenue)}.
             </p>
           </section>
         </>

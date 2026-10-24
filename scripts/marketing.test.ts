@@ -1,6 +1,7 @@
 import test from "node:test";
 import "./email-screen.test";
 import "./marketing-context.test";
+import "./order-value.test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { proxy } from "../proxy";
