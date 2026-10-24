@@ -34,7 +34,7 @@ function report(flowKey: "welcome" | "abandoned-cart", days: number, page: numbe
   }));
   const empty = days === 7;
   return {
-    paymentVerification: { unverifiedOrders: empty ? 0 : 2 },
+    paymentVerification: { unverifiedOrders: empty ? 0 : 2, staleOrders: empty ? 0 : 4 },
     flowKey, name, days, since: "2026-09-19T17:00:00.000Z", generatedAt: at,
     attribution: { emailClickDays: 5, emailOpenDays: 1 },
     totals: empty ? { ...metrics, revenue: {}, orders: 0, convertedRecipients: 0 } : metrics,
@@ -52,7 +52,7 @@ window.fetch = async (input) => {
   const url = String(input), params = new URL(url, location.href).searchParams;
   window.__flowRequests.push(url);
   if (params.get("view") === "analytics") return Response.json({
-    paymentVerification: { unverifiedOrders: 2 },
+    paymentVerification: { unverifiedOrders: 2, staleOrders: 4 },
     days: 30, since: at, attribution: { emailClickDays: 5, emailOpenDays: 1 },
     totals: { ...metrics, messages: 100, trackedOrders: 15, storeRevenue: { USD: 1500 } },
     rows: ["welcome", "abandoned-cart"].map(key => ({ ...metrics, key, kind: "FLOW", name: key === "welcome" ? "Welcome" : "Abandoned Cart", messages: 100 })),

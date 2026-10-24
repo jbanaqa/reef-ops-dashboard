@@ -39,6 +39,7 @@ export async function* attributedOrders(
     until?: Date;
     configuration: Awaited<ReturnType<typeof attributionConfiguration>>;
     unverifiedOrderIds?: Set<string>;
+    staleOrderIds?: Set<string>;
   },
 ) {
   let cursor: string | undefined;
@@ -70,13 +71,17 @@ export async function* attributedOrders(
       select: { id: true, profileId: true, occurredAt: true, payload: true },
     });
     const paidOrders = await ensureOrderPayments(client, page);
-    for (const order of paidOrders) if (orderValue(order.payload).amount === null)
-      options.unverifiedOrderIds?.add(orderPaymentIdentity((order.payload as WelcomeOrderPayload).orderId, order.id));
+    for (const order of paidOrders) {
+      const payload = order.payload as WelcomeOrderPayload;
+      const identity = orderPaymentIdentity(payload.orderId, order.id);
+      if (orderValue(payload).amount === null) options.unverifiedOrderIds?.add(identity);
+      else if (payload.paymentStale === true) options.staleOrderIds?.add(identity);
+    }
     for (let index = 0; index < paidOrders.length; index += 20) {
       const batch = paidOrders.slice(index, index + 20);
       const matches = await Promise.all(
         batch.map((order) => order.profileId && qualifyingOrder(order.payload)
-          ? findEmailAttribution(client, order.profileId, order.occurredAt, options.configuration, order.payload as WelcomeOrderPayload, options.unverifiedOrderIds)
+          ? findEmailAttribution(client, order.profileId, order.occurredAt, options.configuration, order.payload as WelcomeOrderPayload, options.unverifiedOrderIds, options.staleOrderIds)
           : null),
       );
       for (let offset = 0; offset < batch.length; offset++) {
@@ -102,6 +107,7 @@ export async function findEmailAttribution(
   },
   order?: WelcomeOrderPayload,
   unverifiedOrderIds?: Set<string>,
+  staleOrderIds?: Set<string>,
 ): Promise<AttributionMatch | null> {
   if (order && !qualifyingOrder(order)) return null;
   const settings = configuration || (await attributionConfiguration(client));
@@ -125,7 +131,7 @@ export async function findEmailAttribution(
     select: { id: true, key: true, flowKey: true, profileId: true, sentAt: true, flowStep: true, triggerAt: true },
   });
   const customerMessages = await customerCartMessages(client, shop(), candidates);
-  const welcome = await welcomeAttributionFacts(client, profileId, convertedAt, customerMessages, order, unverifiedOrderIds);
+  const welcome = await welcomeAttributionFacts(client, profileId, convertedAt, customerMessages, order, unverifiedOrderIds, staleOrderIds);
   if (welcome.couponMatch) return { messageId: welcome.couponMatch.messageId,
     interaction: "COUPON", interactedAt: convertedAt, welcomeReason: "WELCOME_CODE", discountCode: welcome.couponMatch.code };
   const messages = customerMessages.filter(message => message.flowKey !== "welcome" || welcome.eligibleMessageIds.has(message.id));

@@ -94,7 +94,8 @@ export async function cartReport() {
   const orders: { id: string; label: string; url: string | null; email: string; at: string; step: string;
     currency: string; amount: number | null; interaction: string; interactedAt: string }[] = [];
   const unverifiedOrderIds = new Set<string>();
-  for await (const { order, match } of attributedOrders(prisma, { since, flowKey: "abandoned-cart", configuration: attribution, unverifiedOrderIds })) {
+  const staleOrderIds = new Set<string>();
+  for await (const { order, match } of attributedOrders(prisma, { since, flowKey: "abandoned-cart", configuration: attribution, unverifiedOrderIds, staleOrderIds })) {
     const row = match ? rowFor.get(match.messageId) : undefined;
     if (!row || !match) continue;
     const p = order.payload as { currency?: string; revenue?: string; orderId?: string; orderLabel?: string };
@@ -131,7 +132,7 @@ export async function cartReport() {
   return {
     since: since.toISOString(),
     attribution,
-    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size },
+    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size, staleOrders: staleOrderIds.size },
     orders,
     activity: activity.slice(0, 25).map(({ profile, key: _key, flowKey: _flow, ...m }) => {
       void _key; void _flow;

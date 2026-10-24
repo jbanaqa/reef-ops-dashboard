@@ -3,6 +3,7 @@
 import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useId, useRef, useState } from "react";
 import type { FlowReport } from "@/lib/marketing/flow-report";
+import PaymentVerificationNotice from "./PaymentVerificationNotice";
 
 type FlowKey = "welcome" | "abandoned-cart";
 type Metrics = FlowReport["totals"];
@@ -115,7 +116,7 @@ function ResultsDialog({ flowKey, close, initialDays }: {
       </div>}
       {loading && <p role="status" className="mk-fr-loading">Loading flow results…</p>}
       {report && <>
-        {!!report.paymentVerification?.unverifiedOrders && <p className="mk-fr-caption" role="status">Shopify payments could not be verified for {number(report.paymentVerification.unverifiedOrders)} {report.paymentVerification.unverifiedOrders === 1 ? "order" : "orders"}. Revenue and attribution may be incomplete.</p>}
+        <PaymentVerificationNotice verification={report.paymentVerification} className="mk-fr-caption" />
         <div className="mk-fr-summary">
           <article><span>Attributed paid revenue</span><strong>{money(report.totals.revenue)}</strong><small>Payments received minus refunds</small></article>
           <article><span>Attributed orders</span><strong>{number(report.totals.orders)}</strong><small>See each credited order below</small></article>

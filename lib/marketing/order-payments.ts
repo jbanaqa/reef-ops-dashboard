@@ -48,10 +48,21 @@ export function normalizedOrderPayment(value: unknown, now = Date.now()): OrderP
   return { amount: v.amount, currency: v.currency, sourceUpdatedAt: new Date(sourceUpdatedAt).toISOString(), checkedAt: new Date(checkedAt).toISOString() };
 }
 
-function currentPayment(state: State, now = Date.now()) {
+function usablePayment(state: Pick<State, "payment" | "paymentDirtyAt">, now = Date.now()) {
   const payment = normalizedOrderPayment(state.payment, now);
-  return payment && now - Date.parse(payment.checkedAt) < TTL &&
-    (time(state.paymentDirtyAt) === null || Date.parse(payment.sourceUpdatedAt) >= time(state.paymentDirtyAt)!) ? payment : null;
+  return payment && (time(state.paymentDirtyAt) === null || Date.parse(payment.sourceUpdatedAt) >= time(state.paymentDirtyAt)!) ? payment : null;
+}
+
+/** Refresh age is not a loss of payment proof. Only a newer source update invalidates it. */
+export function orderPaymentVerification(value: unknown, now = Date.now()): "verified" | "stale" | "unverified" {
+  const source = record(value);
+  const payment = usablePayment({ payment: source.payment, paymentDirtyAt: typeof source.paymentDirtyAt === "string" ? source.paymentDirtyAt : null }, now);
+  if (!payment) return "unverified";
+  return now - Date.parse(payment.checkedAt) >= TTL || source.paymentError ? "stale" : "verified";
+}
+
+function currentPayment(state: State, now = Date.now()) {
+  return orderPaymentVerification(state, now) === "verified" ? usablePayment(state, now) : null;
 }
 
 function backedOff(state: State, now = Date.now()) {
@@ -136,7 +147,7 @@ async function savePayment(client: Client, original: State, lookup: Lookup): Pro
     const older = !!saved && time(lookup.sourceUpdatedAt) !== null && Date.parse(saved.sourceUpdatedAt) > time(lookup.sourceUpdatedAt)!;
     const dirty = time(state.paymentDirtyAt), payment = !older && received && (dirty === null || Date.parse(received.sourceUpdatedAt) >= dirty) ? received : null;
     const lifecycle = payment && lookup.state ? orderStateUpdate({ orderStateAt: state.orderStateAt }, lookup.state, new Date(payment.sourceUpdatedAt)) : {};
-    // Keep the last authoritative version even when it is too stale to report. A failed
+    // Keep the last authoritative version even when it needs a refresh. A failed
     // refresh must not erase the watermark and let an older replica replace it later.
     const patch = payment ? { payment, ...lifecycle } : { payment: saved, paymentCheckAt: lookup.checkedAt, paymentCheckedFor: lookup.checkedFor,
       paymentError: lookup.error || (older ? "Shopify payment data is older than a saved payment observation." : "Shopify payment data predates a newer recorded order update.") };
@@ -176,9 +187,10 @@ export async function ensureOrderPayments<T extends OrderRow>(client: Client, or
       if (entry && !currentPayment(state) && !backedOff(state)) saved.set(state.id, await savePayment(client, state, await entry.pending.promise));
     }
     return orders.map(order => {
-      const state = saved.get(order.id), payment = state ? currentPayment(state) : null;
+      const state = saved.get(order.id), payment = state ? usablePayment(state) : null;
       return { ...order, payload: { ...record(order.payload), payment,
-        ...(state ? { paymentDirtyAt: state.paymentDirtyAt, paymentCheckAt: state.paymentCheckAt, paymentError: payment ? null : state.paymentError,
+        paymentStale: !!state && orderPaymentVerification(state) === "stale",
+        ...(state ? { paymentDirtyAt: state.paymentDirtyAt, paymentCheckAt: state.paymentCheckAt, paymentError: state.paymentError,
           ...(state.financialStatus !== null ? { financialStatus: state.financialStatus } : {}),
           ...(state.hasCancelledAt ? { cancelledAt: state.cancelledAt } : {}),
           ...(typeof state.test === "boolean" ? { test: state.test } : {}),
@@ -200,7 +212,7 @@ export async function refreshOrderPayments(limit = 100) {
         OR COALESCE(payload->>'paymentDirtyAt', '')>COALESCE(payload->'payment'->>'sourceUpdatedAt', ''))
       AND (payload->>'paymentCheckAt' IS NULL OR payload->>'paymentCheckAt'<=${cutoff}
         OR COALESCE(payload->>'paymentDirtyAt', '')>COALESCE(payload->>'paymentCheckedFor', ''))
-    ORDER BY COALESCE(payload->'payment'->>'checkedAt', payload->>'paymentCheckAt', ''), id LIMIT ${take}`);
+    ORDER BY GREATEST(COALESCE(payload->'payment'->>'checkedAt', ''), COALESCE(payload->>'paymentCheckAt', '')), id LIMIT ${take}`);
   const hydrated = await ensureOrderPayments(prisma, orders);
   return { checked: hydrated.length, verified: hydrated.filter(row => record(row.payload).payment !== null).length,
     unavailable: hydrated.filter(row => record(row.payload).payment === null).length };

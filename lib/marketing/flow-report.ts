@@ -104,7 +104,8 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
     checkoutMatch: boolean | null; discountCodes: string[] }[] = [];
   const details = new Map<string, { payload: OrderPayload; messageId: string; occurredAt: Date; profileId: string | null }>();
   const unverifiedOrderIds = new Set<string>();
-  for await (const { order, match } of attributedOrders(prisma, { since, until: now, flowKey, configuration: attribution, unverifiedOrderIds })) {
+  const staleOrderIds = new Set<string>();
+  for await (const { order, match } of attributedOrders(prisma, { since, until: now, flowKey, configuration: attribution, unverifiedOrderIds, staleOrderIds })) {
     const message = match ? sentMessages.get(match.messageId) : undefined;
     if (!message?.sentAt || !match) continue;
     const step = stepFor(message), payload = order.payload as OrderPayload;
@@ -196,7 +197,7 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
   orders.sort((a, b) => b.placedAt.localeCompare(a.placedAt) || b.id.localeCompare(a.id));
   const pageSize = 25, pages = Math.max(1, Math.ceil(orders.length / pageSize));
   const page = Math.min(Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1, pages);
-  return { flowKey, name, days, since: since.toISOString(), generatedAt: now.toISOString(), attribution, totals, steps, paymentVerification: { unverifiedOrders: unverifiedOrderIds.size },
+  return { flowKey, name, days, since: since.toISOString(), generatedAt: now.toISOString(), attribution, totals, steps, paymentVerification: { unverifiedOrders: unverifiedOrderIds.size, staleOrders: staleOrderIds.size },
     orders: orders.slice((page - 1) * pageSize, page * pageSize), ordersPage: { page, pageSize, total: orders.length, pages }, evidence,
     activity: recent.map(({ sortAt: _sortAt, ...message }) => { void _sortAt; return message; }),
     reasons: [...reasons].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([reason, count]) => ({ reason, count })),

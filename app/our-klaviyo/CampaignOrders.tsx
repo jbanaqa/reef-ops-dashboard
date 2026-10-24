@@ -2,6 +2,7 @@
 import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useRef, useState } from "react";
 import type { CampaignReport } from "./campaign-report-types";
+import PaymentVerificationNotice from "./PaymentVerificationNotice";
 import "./campaign-orders.css";
 
 function date(value: string) {
@@ -36,7 +37,7 @@ export default function CampaignOrders({ report, onLoaded }: {
       <div><h4>Attributed orders <span>({paging.total.toLocaleString()})</span></h4><p>Paid revenue from credited orders. All times Pacific.</p></div>
       <button disabled={busy} onClick={() => void load(paging.page)}>Refresh orders</button>
     </div>
-    {!!report.paymentVerification?.unverifiedOrders && <p className="mk-order-note" role="status">Shopify payments could not be verified for {report.paymentVerification.unverifiedOrders.toLocaleString()} {report.paymentVerification.unverifiedOrders === 1 ? "order" : "orders"}. Revenue and attribution may be incomplete.</p>}
+    <PaymentVerificationNotice verification={report.paymentVerification} className="mk-order-note" />
     {error && <p role="alert">{error} <button disabled={busy} onClick={() => void load(paging.page)}>Try again</button></p>}
     {!report.orders?.length ? <p className="mk-order-empty">No orders have been attributed to this campaign yet.</p> : <>
       <ol className="mk-order-list" aria-label="Orders credited to this campaign">

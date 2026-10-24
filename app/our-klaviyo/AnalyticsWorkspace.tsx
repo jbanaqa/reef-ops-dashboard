@@ -3,6 +3,7 @@
 import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useState } from "react";
 import FlowResults from "./FlowResults";
+import PaymentVerificationNotice, { type PaymentVerification } from "./PaymentVerificationNotice";
 
 type AnalyticsRow = {
   key: string;
@@ -19,7 +20,7 @@ type AnalyticsRow = {
   revenue: Record<string, number>;
 };
 type AnalyticsReport = {
-  paymentVerification?: { unverifiedOrders: number };
+  paymentVerification?: PaymentVerification;
   days: number;
   since: string;
   attribution: {
@@ -243,7 +244,7 @@ export default function AnalyticsWorkspace() {
       )}
       {report && (
         <>
-          {!!report.paymentVerification?.unverifiedOrders && <p className="mk-notice" role="status">Shopify payments could not be verified for {report.paymentVerification.unverifiedOrders.toLocaleString()} {report.paymentVerification.unverifiedOrders === 1 ? "order" : "orders"}. Revenue and attribution may be incomplete.</p>}
+          <PaymentVerificationNotice verification={report.paymentVerification} className="mk-notice" />
           <div className="mk-analytics-summary" aria-busy={loading}>
             <article>
               <span>Attributed paid revenue</span>

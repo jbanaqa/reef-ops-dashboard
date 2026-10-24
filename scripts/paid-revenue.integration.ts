@@ -162,4 +162,49 @@ export function registerPaidRevenueTests(context: () => Context) {
       "parallel first-order checks share the lookup and later views use persisted backoff");
     assert.equal(h.emails.length, 0);
   }));
+
+  test("paid revenue: an expired-cache outage retains verified sales across every report and separates new unknown orders", async () => isolated(context(), "paid-refresh-outage", async h => {
+    await settings(h);
+    const { campaignReport } = await import("../lib/marketing/campaign-report");
+    const { flowReport } = await import("../lib/marketing/flow-report");
+    const { cartReport } = await import("../lib/marketing/cart-report");
+    const { marketingAnalytics } = await import("../lib/marketing/analytics");
+    const c = await campaign(h), source: Record<string, { amount: string }> = {};
+    const profiles: { id: string }[] = [];
+    for (let index = 0; index < 16; index++) {
+      const p = await h.make(`paid-outage-${index}@example.com`), id = String(64000 + index);
+      profiles.push(p);
+      await sent(h, p.id, index < 8 ? { campaignId: c.id } : { flowKey: index < 12 ? "welcome" : "abandoned-cart" });
+      await order(h, p.id, id, "999.99"); source[id] = { amount: "100.00" };
+    }
+    mockOrderPaymentSource(source);
+    const before = await marketingAnalytics();
+    assert.equal(before.totals.orders, 16); assert.deepEqual(before.totals.revenue, { USD: 1600 });
+    assert.deepEqual(before.paymentVerification, { unverifiedOrders: 0, staleOrders: 0 });
+    // These contacts have no previous authoritative payment; a cache fallback may not invent one.
+    await order(h, profiles[0].id, "64998", "500");
+    await order(h, profiles[12].id, "64999", "500");
+    let failedRequests = 0;
+    globalThis.fetch = async () => { failedRequests++; throw Error("Temporary Shopify payment outage"); };
+    const realNow = Date.now;
+    try {
+      const later = realNow() + 6 * 60000; Date.now = () => later;
+      const analytics = await marketingAnalytics(), cr = await campaignReport(c.id);
+      const welcome = await flowReport("welcome"), cart = await flowReport("abandoned-cart"), legacy = await cartReport();
+      assert.equal(analytics.totals.orders, 16); assert.deepEqual(analytics.totals.revenue, before.totals.revenue);
+      assert.deepEqual(analytics.totals.storeRevenue, before.totals.storeRevenue);
+      assert.deepEqual(analytics.paymentVerification, { unverifiedOrders: 2, staleOrders: 16 });
+      assert.equal(cr.totals.ordered, 8); assert.deepEqual(cr.totals.revenue, { USD: 800 });
+      assert.deepEqual(cr.paymentVerification, { unverifiedOrders: 1, staleOrders: 8 });
+      assert.equal(welcome.totals.orders, 4); assert.deepEqual(welcome.totals.revenue, { USD: 400 });
+      assert.deepEqual(welcome.paymentVerification, { unverifiedOrders: 0, staleOrders: 4 });
+      assert.equal(cart.totals.orders, 4); assert.deepEqual(cart.totals.revenue, { USD: 400 });
+      assert.deepEqual(cart.paymentVerification, { unverifiedOrders: 1, staleOrders: 4 });
+      assert.deepEqual(legacy.paymentVerification, cart.paymentVerification);
+      assert.equal(legacy.rows.reduce((sum, row) => sum + row.orders, 0), 4);
+      assert.deepEqual(legacy.rows.find(row => row.key === "first")!.revenue, { USD: 400 });
+      assert.equal(failedRequests, 1, "a refresh outage has one scoped backoff, without changing any previously verified sale");
+      assert.equal(h.emails.length, 0);
+    } finally { Date.now = realNow; }
+  }));
 }

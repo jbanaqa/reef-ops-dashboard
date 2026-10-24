@@ -5,7 +5,7 @@ import { shop, type Tx } from "./store";
 
 type Client = Pick<Tx, "marketingEvent" | "marketingResource" | "$queryRaw">;
 export type WelcomeOrderPayload = OrderEvidence & OrderState & {
-  orderId?: unknown; revenue?: unknown; currency?: unknown; payment?: unknown;
+  orderId?: unknown; revenue?: unknown; currency?: unknown; payment?: unknown; paymentStale?: boolean;
 };
 export type WelcomeAttributionMessage = {
   id: string; flowKey: string | null; flowStep: number | null;
@@ -76,7 +76,7 @@ export async function welcomeOrderPayload<T extends WelcomeOrderPayload>(client:
 }
 
 /** Earlier qualifying orders consume the first-order opportunity even outside the displayed period. */
-async function isFirstOrder(client: Client, profileId: string, enteredAt: Date, convertedAt: Date, order: WelcomeOrderPayload, unverifiedOrderIds?: Set<string>) {
+async function isFirstOrder(client: Client, profileId: string, enteredAt: Date, convertedAt: Date, order: WelcomeOrderPayload, unverifiedOrderIds?: Set<string>, staleOrderIds?: Set<string>) {
   const currentId = canonicalOrderId(order.orderId);
   let cursor: { at: Date; id: string } | undefined;
   for (;;) {
@@ -105,6 +105,7 @@ async function isFirstOrder(client: Client, profileId: string, enteredAt: Date, 
         unverifiedOrderIds?.add(orderPaymentIdentity(payload.orderId, prior.id));
         return false;
       }
+      if (payload.paymentStale === true) staleOrderIds?.add(orderPaymentIdentity(payload.orderId, prior.id));
       if (!qualifyingOrder(payload)) continue;
       if (prior.occurredAt < convertedAt) return false;
       // Shopify order IDs give stable chronology when orders share a timestamp.
@@ -117,7 +118,7 @@ async function isFirstOrder(client: Client, profileId: string, enteredAt: Date, 
 
 export async function welcomeAttributionFacts(
   client: Client, profileId: string, convertedAt: Date,
-  messages: WelcomeAttributionMessage[], order?: WelcomeOrderPayload, unverifiedOrderIds?: Set<string>,
+  messages: WelcomeAttributionMessage[], order?: WelcomeOrderPayload, unverifiedOrderIds?: Set<string>, staleOrderIds?: Set<string>,
 ) {
   const welcome = messages.filter(message => message.flowKey === "welcome" && message.sentAt && message.sentAt <= convertedAt);
   const empty = { enteredAt: null as Date | null, firstOrder: false, eligibleMessageIds: new Set<string>(),
@@ -141,7 +142,7 @@ export async function welcomeAttributionFacts(
     .sort((a, b) => +a - +b);
   const enteredAt = timestamp(run?.enteredAt) || enrollment?.occurredAt || triggers[0] || null;
   if (enteredAt && convertedAt < enteredAt) return { ...empty, enteredAt };
-  const firstOrder = !!enteredAt && await isFirstOrder(client, profileId, enteredAt, convertedAt, payload, unverifiedOrderIds);
+  const firstOrder = !!enteredAt && await isFirstOrder(client, profileId, enteredAt, convertedAt, payload, unverifiedOrderIds, staleOrderIds);
   const coupon = resources.find(resource => resource.kind === "WELCOME_COUPON");
   const used = new Set((Array.isArray(payload.discountCodes) ? payload.discountCodes : [])
     .filter(code => typeof code === "string").map(code => code.trim().toUpperCase()));

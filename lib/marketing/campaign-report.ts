@@ -30,6 +30,7 @@ export async function campaignReport(id: string, requestedPage = 1) {
   const orders: { id: string; orderId: string | null; label: string | null; profileId: string | null; placedAt: Date; amount: number | null; currency: string | null; interaction: AttributionMatch["interaction"]; interactedAt: Date }[] = [];
   let firstSentAt: Date | undefined;
   const unverifiedOrderIds = new Set<string>();
+  const staleOrderIds = new Set<string>();
   let cursor: string | undefined;
   for (;;) {
     const page = await prisma.marketingMessage.findMany({
@@ -83,7 +84,7 @@ export async function campaignReport(id: string, requestedPage = 1) {
   if (firstSentAt) {
     const configuration = await attributionConfiguration(prisma);
     for await (const { order, match } of attributedOrders(prisma, {
-      since: firstSentAt, campaignId: id, configuration, unverifiedOrderIds,
+      since: firstSentAt, campaignId: id, configuration, unverifiedOrderIds, staleOrderIds,
     })) {
       if (!match || !sentMessageIds.has(match.messageId)) continue;
       totals.ordered++;
@@ -116,7 +117,7 @@ export async function campaignReport(id: string, requestedPage = 1) {
   return {
     campaign,
     totals,
-    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size },
+    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size, staleOrders: staleOrderIds.size },
     orders: visible.map(({ profileId, ...order }) => ({ ...order,
       label: order.label || labels.find(label => label.orderId === order.orderId && label.label)?.label || (order.orderId ? `Order ${order.orderId}` : "Order number unavailable"),
       customer: profiles.find(profile => profile.id === profileId) || null,

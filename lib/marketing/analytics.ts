@@ -147,8 +147,9 @@ export async function marketingAnalytics(requestedDays = 30) {
   const attributedRevenue: Record<string, number> = {};
   let trackedOrders = 0;
   const unverifiedOrderIds = new Set<string>();
+  const staleOrderIds = new Set<string>();
   for await (const { order, match } of attributedOrders(prisma, {
-    since, until: now, configuration: attribution, unverifiedOrderIds,
+    since, until: now, configuration: attribution, unverifiedOrderIds, staleOrderIds,
   })) {
     trackedOrders++;
     if ((order.payload as { test?: boolean }).test !== true) addOrderRevenue(storeRevenue, order.payload);
@@ -175,7 +176,7 @@ export async function marketingAnalytics(requestedDays = 30) {
     days,
     since: since.toISOString(),
     attribution,
-    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size },
+    paymentVerification: { unverifiedOrders: unverifiedOrderIds.size, staleOrders: staleOrderIds.size },
     totals: {
       messages: reportRows.reduce((sum, row) => sum + row.messages, 0),
       sent: reportRows.reduce((sum, row) => sum + row.sent, 0),

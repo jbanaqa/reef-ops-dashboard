@@ -61,13 +61,17 @@ async function isolated(context: Context, name: string, work: (h: Harness) => Pr
 
 export function registerOrderPaymentTests(context: () => Context) {
   test("Order payments: verified signed decimals and chronology validation", async () => {
-    const { normalizedOrderPayment, orderPaymentDirtyUpdate } = await import("../lib/marketing/order-payments");
+    const { normalizedOrderPayment, orderPaymentDirtyUpdate, orderPaymentVerification } = await import("../lib/marketing/order-payments");
     for (const amount of ["247.99", "0", "-1.25"]) assert.equal(normalizedOrderPayment(snapshot(amount))?.amount, amount);
     for (const amount of ["", "NaN", "Infinity", "1e2", "1,000", " 12.00", "+1.00", 12])
       assert.equal(normalizedOrderPayment({ ...snapshot(), amount }), null);
     assert.equal(normalizedOrderPayment({ ...snapshot(), currency: "usd" }), null);
     assert.equal(normalizedOrderPayment({ ...snapshot(), sourceUpdatedAt: null }), null);
     assert.equal(normalizedOrderPayment({ ...snapshot(), checkedAt: ago(-10) }), null);
+    assert.equal(orderPaymentVerification({ payment: snapshot() }), "verified");
+    assert.equal(orderPaymentVerification({ payment: snapshot("42", ago(20), ago(6)) }), "stale");
+    assert.equal(orderPaymentVerification({ payment: snapshot(), paymentDirtyAt: ago(2) }), "unverified");
+    assert.equal(orderPaymentVerification({ revenue: "999.99", currency: "USD" }), "unverified");
     const dirty = ago(10);
     assert.deepEqual(orderPaymentDirtyUpdate({ paymentDirtyAt: dirty }, new Date(ago(11))), {});
     assert.deepEqual(orderPaymentDirtyUpdate({}, new Date(dirty)), { paymentDirtyAt: dirty });
@@ -90,8 +94,10 @@ export function registerOrderPaymentTests(context: () => Context) {
   test("Order payments: fresh cache and explicitly disabled refresh make no requests", async () => isolated(context(), "cache", async h => {
     const fresh = snapshot("88.18"), row = await h.create("910002", { payment: fresh, paymentDirtyAt: ago(20) });
     assert.deepEqual(object((await h.payments.ensureOrderPayments(h.prisma, [row]))[0].payload).payment, fresh);
-    const unknown = await h.create("910003", { payment: snapshot("99.00", ago(20), ago(6)) });
-    assert.equal(object((await h.payments.ensureOrderPayments(h.prisma, [unknown], { refresh: false }))[0].payload).payment, null);
+    const cached = snapshot("99.00", ago(20), ago(6)), stale = await h.create("910003", { payment: cached });
+    const result = object((await h.payments.ensureOrderPayments(h.prisma, [stale], { refresh: false }))[0].payload);
+    assert.deepEqual(result.payment, cached, "refresh age alone cannot erase previously verified receipts");
+    assert.equal(result.paymentStale, true);
     assert.equal(h.calls.length, 0);
   }));
 
@@ -109,7 +115,8 @@ export function registerOrderPaymentTests(context: () => Context) {
       orderStateAt: { financialStatus: verified.sourceUpdatedAt } });
     h.respond(ids => ({ data: { nodes: ids.map(id => node(id, "375.07", ago(20))) } }));
     const current = object((await h.payments.ensureOrderPayments(h.prisma, [row]))[0].payload);
-    assert.equal(current.payment, null, "expired evidence is not displayed as a current payment");
+    assert.deepEqual(current.payment, verified, "a failed refresh preserves last verified receipts");
+    assert.equal(current.paymentStale, true); assert.match(String(current.paymentError), /older/);
     const saved = object((await h.load(row)).payload);
     assert.deepEqual(saved.payment, verified, "a stale replica cannot destroy a newer monetary observation");
     assert.equal(saved.financialStatus, "partially_refunded"); assert.match(String(saved.paymentError), /older/);
@@ -201,17 +208,46 @@ export function registerOrderPaymentTests(context: () => Context) {
     const verified = snapshot("432.36", ago(10), ago(6)), older = ago(20);
     const row = await h.create("940004", { payment: verified });
     h.respond(() => { throw Error("Temporary payment outage"); });
-    assert.equal(object((await h.payments.ensureOrderPayments(h.prisma, [row]))[0].payload).payment, null);
+    const first = object((await h.payments.ensureOrderPayments(h.prisma, [row]))[0].payload);
+    assert.deepEqual(first.payment, verified); assert.equal(first.paymentStale, true);
+    assert.match(String(first.paymentError), /Temporary payment outage/);
     assert.deepEqual(object((await h.load(row)).payload).payment, verified, "the last source version survives failed refreshes");
     const realNow = Date.now;
     try {
       const later = realNow() + 6 * 60000; Date.now = () => later;
       h.respond(ids => ({ data: { nodes: ids.map(id => node(id, "375.07", older)) } }));
       const current = object((await h.payments.ensureOrderPayments(h.prisma, [await h.load(row)]))[0].payload);
-      assert.equal(current.payment, null); assert.match(String(current.paymentError), /older/);
+      assert.deepEqual(current.payment, verified); assert.equal(current.paymentStale, true); assert.match(String(current.paymentError), /older/);
       assert.deepEqual(object((await h.load(row)).payload).payment, verified);
       assert.equal(h.calls.length, 2);
     } finally { Date.now = realNow; }
+  }));
+
+  test("Order payments: refresh outages retain known money but not an invalidated webhook version", async () => isolated(context(), "stale-dirty", async h => {
+    const known = snapshot("380.00", ago(20), ago(6));
+    const stable = await h.create("940005", { payment: known }), dirty = await h.create("940006", { payment: known, paymentDirtyAt: ago(2) });
+    h.respond(() => { throw Error("Payment refresh is unavailable"); });
+    const [retained, pending] = (await h.payments.ensureOrderPayments(h.prisma, [stable, dirty])).map(row => object(row.payload));
+    assert.deepEqual(retained.payment, known); assert.equal(retained.paymentStale, true);
+    assert.match(String(retained.paymentError), /Payment refresh is unavailable/);
+    assert.equal(pending.payment, null); assert.equal(pending.paymentStale, false);
+    assert.deepEqual(object((await h.load(dirty)).payload).payment, known, "the source version remains recorded while its update awaits verification");
+    assert.equal(h.payments.orderPaymentVerification(retained), "stale");
+    assert.equal(h.payments.orderPaymentVerification(pending), "unverified");
+  }));
+
+  test("Order payments: a later successful refresh clears stale status and the retry error", async () => isolated(context(), "stale-recovery", async h => {
+    const known = snapshot("380.00", ago(20), ago(6)), row = await h.create("940007", { payment: known });
+    h.respond(() => ({ data: { nodes: [null] } }));
+    const retained = object((await h.payments.ensureOrderPayments(h.prisma, [row]))[0].payload);
+    assert.deepEqual(retained.payment, known); assert.equal(retained.paymentStale, true);
+    const saved = await h.load(row);
+    await h.prisma.marketingEvent.update({ where: { id: row.id }, data: { payload: h.store.json({ ...object(saved.payload), paymentCheckAt: ago(6) }) } });
+    h.respond(ids => ({ data: { nodes: ids.map(id => node(id, "432.36")) } }));
+    const refreshed = object((await h.payments.ensureOrderPayments(h.prisma, [row]))[0].payload);
+    assert.equal(object(refreshed.payment).amount, "432.36"); assert.equal(refreshed.paymentStale, false); assert.equal(refreshed.paymentError, null);
+    assert.equal(h.payments.orderPaymentVerification(refreshed), "verified");
+    assert.equal(object((await h.load(row)).payload).paymentError, undefined);
   }));
 
   test("Order payments: tenant scope cannot hydrate another store's order ID", async () => isolated(context(), "scope", async h => {
@@ -234,5 +270,26 @@ export function registerOrderPaymentTests(context: () => Context) {
     assert.equal(object(object((await h.load(recent)).payload).payment).amount, "247.99");
     assert.equal(object((await h.load(old)).payload).payment, null);
     assert.deepEqual(h.calls, [["gid://shopify/Order/960001"]]);
+  }));
+
+  test("Order payments: recently attempted stale orders cannot starve other due refreshes", async () => isolated(context(), "sweep-fairness", async h => {
+    const failed = await Promise.all(Array.from({ length: 100 }, (_, index) => h.create(String(970000 + index), {
+      payment: snapshot("380.00", ago(40), ago(30)),
+    })));
+    const waiting = await h.create("970100", { payment: snapshot("247.99", ago(40), ago(10)) });
+    h.respond(ids => ({ data: { nodes: ids.map(() => null) } }));
+    await h.payments.refreshOrderPayments();
+    assert.equal(h.calls[0].length, 100);
+    assert.ok(!h.calls[0].includes("gid://shopify/Order/970100"));
+    for (const row of failed) assert.match(String(object((await h.load(row)).payload).paymentError), /unavailable or outside/);
+    // The failed batch's retry delay has elapsed. Its latest attempt is still
+    // newer than this other order's verification, so the other order goes first.
+    await h.prisma.$executeRaw`UPDATE "MarketingEvent"
+      SET payload=payload || jsonb_build_object('paymentCheckAt', ${ago(6)}::text)
+      WHERE shop=${h.tenant} AND type='ORDER' AND id<>${waiting.id}`;
+    h.respond(ids => ({ data: { nodes: ids.map(id => node(id)) } }));
+    await h.payments.refreshOrderPayments(1);
+    assert.deepEqual(h.calls[1], ["gid://shopify/Order/970100"]);
+    assert.equal(h.payments.orderPaymentVerification((await h.load(waiting)).payload), "verified");
   }));
 }

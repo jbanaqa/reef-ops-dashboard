@@ -202,7 +202,7 @@ const { chromium } = require("playwright");
         const orders = Array.from({ length: 26 }, (_, i) => ({ id: `order-${i}`, orderId: String(40026 - i), label: `#${40026 - i}`, placedAt: "2026-10-18T01:00:00Z", amount: 10, currency: "USD", interaction: "CLICKED", interactedAt: "2026-10-17T21:00:00Z", customer: { id: "customer", name: "Coral Customer", email: "coral.customer@example.com" }, shopifyUrl: `https://corals-anonymous.myshopify.com/admin/orders/${40026 - i}` }));
         await route.fulfill({ json: {
           campaign: testRun || data.campaigns[0],
-          paymentVerification: { unverifiedOrders: testRun ? 0 : 3 },
+          paymentVerification: { unverifiedOrders: testRun ? 0 : 3, staleOrders: testRun ? 0 : 5 },
           totals: { messages: 26, queued: 0, sent: 26, delivered: 26, opened: 20, clicked: 10, ordered: testRun ? 0 : 26, skipped: 0, failed: 0, needsAttention: 0, revenue: testRun ? {} : { USD: 260 } },
           orders: testRun ? [] : orders.slice((orderPage - 1) * 25, orderPage * 25),
           ordersPage: { page: orderPage, pageSize: 25, total: testRun ? 0 : 26, pages: testRun ? 1 : 2 },
@@ -214,7 +214,7 @@ const { chromium } = require("playwright");
             days: Number(url.searchParams.get("days") || 30),
             since: "2026-08-22T00:00:00Z",
             attribution: data.settings.attribution,
-            paymentVerification: { unverifiedOrders: 2 },
+            paymentVerification: { unverifiedOrders: 2, staleOrders: 1 },
             totals: {
               messages: 120,
               sent: 100,
@@ -356,6 +356,7 @@ const { chromium } = require("playwright");
     assert.match(await ordersPanel.textContent(), /Credited after email click/);
     assert.match(await ordersPanel.textContent(), /All times Pacific/);
     assert.match(await ordersPanel.textContent(), /Shopify payments could not be verified for 3 orders\. Revenue and attribution may be incomplete\./);
+    assert.match(await ordersPanel.textContent(), /Using last verified Shopify payments for 5 orders; refresh pending\./);
     assert.match(await ordersPanel.textContent(), /Paid revenue is payments received minus refunds, including tax and shipping\. Currencies stay separate\./);
     assert.doesNotMatch(await ordersPanel.textContent(), /before refunds/i);
     for (const width of [1440, 390, 320]) {
@@ -511,6 +512,7 @@ const { chromium } = require("playwright");
     );
     await page.getByText("USD 821.50", { exact: true }).waitFor();
     await page.getByText("Shopify payments could not be verified for 2 orders. Revenue and attribution may be incomplete.", { exact: true }).waitFor();
+    await page.getByText("Using last verified Shopify payments for 1 order; refresh pending.", { exact: true }).waitFor();
     await page.getByText("Welcome Series", { exact: true }).waitFor();
     await page.getByText("Weekend coral sale", { exact: true }).waitFor();
     await page.getByLabel("Email open attribution days").fill("4");
