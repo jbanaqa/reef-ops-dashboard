@@ -1,5 +1,13 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Welcome backlog recovery with strict email spacing — November 1, 2026
+
+The user explicitly authorized sending overdue Welcome emails while preserving at least 16 hours between emails to the same recipient. A normal initial Welcome is intentionally exempt from recent-email spacing, so reviewed recovery runs can now set `WELCOME_RUN.data.respectRecentEmailSpacing=true`. This applies the existing local/imported-email history, reservation and deferral checks to the first offer too. Ordinary new signup behavior and existing later-step spacing stay unchanged. Do not advance future steps or clear UNKNOWN delivery reservations to drain this backlog.
+
+The reviewed Corals snapshot contained 306 overdue Welcome messages, including 127 initial offers; one overdue initial recipient had another email within 16 hours. Those 127 initial runs were marked and their pending first messages temporarily held while this guard deployed. Original deadlines and recovery evidence are outside Git in `C:/Users/GuestUser/.codex/artifacts/welcome-catchup-2026-11-01/`. Release only those still held for this recovery after both dashboard and scheduled worker deploy the guard; use the saved original deadlines and let normal worker checks postpone recent recipients. Campaigns remain cancelled. Verify deployed commits, cohort outcomes and recipient spacing before claiming completion.
+
+Validation: all 268 isolated marketing tests, TypeScript, changed-file lint and the production build pass. Added live-function regressions cover local/imported receipts, a newer send after the first deferral, exact deadline boundaries, no early coupon/provider calls, full follow-up rescheduling and two overdue reminders remaining at least 16 hours apart.
+
 ### Preserve verified revenue during Shopify refresh failures — October 23, 2026
 
 This corrects a regression in the payment rollout below. Corals Analytics fell from USD5,285.93 / 16 credited orders to USD2,011.10 / 8 orders when 100 saved payments exceeded the five-minute freshness interval and refresh failed. The saved #40735 payment was still USD247.99; its refresh error was an HTML response parsed as JSON. No financial evidence had been deleted, but expired snapshots were incorrectly excluded from reporting.

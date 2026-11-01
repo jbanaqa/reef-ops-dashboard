@@ -887,7 +887,8 @@ export async function runMarketing(onlyMessageId?: string) {
           m.channel === "EMAIL" &&
           (m.flowKey === "delivery-upsell" ||
             m.flowKey === "b2b-welcome" ||
-            (m.flowKey === "welcome" && m.flowStep === 0));
+            (m.flowKey === "welcome" && m.flowStep === 0 &&
+              welcomeRun?.respectRecentEmailSpacing !== true));
         const testBypassesRecentEmailSuppression =
           m.channel === "EMAIL" &&
           ((cartRun?.config.cart?.bypassRecentEmailSuppression === true &&

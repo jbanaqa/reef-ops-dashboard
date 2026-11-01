@@ -734,6 +734,90 @@ export function registerWelcomeTests(
       assert.equal((await message(paused.id, 0)).subject, config.steps[0].subject, "prepared retry preserves its original subject");
       assert.equal(((await message(paused.id, 0)).content as Content).couponCode, prepared.couponCode);
       assert.equal(((await message(paused.id, 0)).content as Content).couponExpiresAt, prepared.couponExpiresAt);
+
+      for (const [index, source] of ["local", "imported"].entries()) {
+        await t.test(`Welcome catch-up respects ${source} sends and spaces overdue reminders`, async () => {
+          time(130 + index * 20);
+          const enrolledAt = Date.now(), spacing = 16 * 3600000;
+          await signup(`welcome-catchup-${source}@example.com`);
+          const catchup = await profile(`welcome-catchup-${source}@example.com`);
+          const catchupWhere = { shop_kind_key: { shop, kind: "WELCOME_RUN", key: catchup.id } };
+          const savedRun = await prisma.marketingResource.findUniqueOrThrow({ where: catchupWhere });
+          await prisma.marketingResource.update({ where: catchupWhere, data: {
+            data: store.json({ ...savedRun.data as object, respectRecentEmailSpacing: true }),
+          } });
+          const previousSentAt = new Date(enrolledAt - 4 * 3600000);
+          if (source === "local") {
+            await prisma.marketingMessage.create({ data: {
+              shop, key: "welcome-catchup-earlier-campaign", profileId: catchup.id,
+              channel: "EMAIL", subject: "Earlier campaign", content: store.json(welcomeSteps[0].content),
+              dueAt: previousSentAt, sentAt: previousSentAt, status: "SENT",
+            } });
+          } else {
+            await store.atomic(tx => store.record(tx, {
+              key: "welcome-catchup-imported-email", type: "EXTERNAL_EMAIL_SENT",
+              payload: { email: catchup.email }, occurredAt: previousSentAt,
+            }));
+          }
+          const sendsBefore = deliveries.length, couponsBefore = createCount;
+          await run(catchup.id, 0);
+          let waiting = await message(catchup.id, 0);
+          assert.equal(waiting.status, "PENDING");
+          assert.equal(waiting.attempts, 0, "spacing deferral is not a provider attempt");
+          assert.match(waiting.error!, /16-hour email spacing/);
+          assert.equal(+waiting.dueAt, +previousSentAt + spacing + 1000);
+          assert.equal(deliveries.length, sendsBefore);
+          assert.equal(createCount, couponsBefore, "a deferred initial does not mint its coupon early");
+
+          if (source === "imported") {
+            const newerSendAt = new Date(enrolledAt + 2 * 3600000);
+            t.mock.timers.setTime(+newerSendAt);
+            await store.atomic(tx => store.record(tx, {
+              key: "welcome-catchup-newer-receipt", type: "EXTERNAL_EMAIL_SENT",
+              profileId: catchup.id, occurredAt: newerSendAt,
+            }));
+            t.mock.timers.setTime(+waiting.dueAt);
+            await run(catchup.id, 0);
+            waiting = await message(catchup.id, 0);
+            assert.equal(waiting.status, "PENDING");
+            assert.equal(+waiting.dueAt, +newerSendAt + spacing + 1000,
+              "a newer send after the first check moves the catch-up deadline again");
+            assert.equal(deliveries.length, sendsBefore);
+          }
+          t.mock.timers.setTime(+waiting.dueAt - 1);
+          await run(catchup.id, 0);
+          assert.equal((await message(catchup.id, 0)).status, "PENDING");
+          assert.equal(deliveries.length, sendsBefore, "catch-up cannot send before its spacing deadline");
+          t.mock.timers.setTime(+waiting.dueAt);
+          await run(catchup.id, 0);
+          const initialSent = await message(catchup.id, 0);
+          assert.equal(initialSent.status, "SENT");
+          assert.equal(deliveries.length, sendsBefore + 1);
+          assert.equal(+(await message(catchup.id, 1)).dueAt, +initialSent.sentAt! + 3 * DAY,
+            "sending a delayed initial preserves the full reminder schedule");
+
+          // Both discount reminders are genuinely overdue, but only one may send now.
+          t.mock.timers.setTime(+initialSent.sentAt! + 11 * DAY);
+          await run(catchup.id, 1);
+          const firstReminder = await message(catchup.id, 1);
+          assert.equal(firstReminder.status, "SENT");
+          await run(catchup.id, 2);
+          const finalWaiting = await message(catchup.id, 2);
+          assert.equal(finalWaiting.status, "PENDING");
+          assert.equal(+finalWaiting.dueAt, +firstReminder.sentAt! + spacing + 1000);
+          assert.equal(deliveries.length, sendsBefore + 2, "overdue reminders cannot send consecutively");
+          t.mock.timers.setTime(+firstReminder.sentAt! + spacing - 1);
+          await run(catchup.id, 2);
+          assert.equal((await message(catchup.id, 2)).status, "PENDING");
+          assert.equal(deliveries.length, sendsBefore + 2);
+          t.mock.timers.setTime(+finalWaiting.dueAt);
+          await run(catchup.id, 2);
+          const finalSent = await message(catchup.id, 2);
+          assert.equal(finalSent.status, "SENT");
+          assert.ok(+finalSent.sentAt! - +firstReminder.sentAt! >= spacing);
+          assert.equal(deliveries.length, sendsBefore + 3);
+        });
+      }
     } finally {
       t.mock.timers.reset();
       globalThis.fetch = fetchBefore;

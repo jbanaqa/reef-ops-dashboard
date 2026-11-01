@@ -14,6 +14,8 @@ export type WelcomeRun = {
   timezone: string;
   config: FlowConfig;
   testEmail?: string;
+  /** Reviewed backlog runs can apply ordinary email spacing to their first offer. */
+  respectRecentEmailSpacing?: boolean;
 };
 const runWhere = (profileId: string) => ({
   shop_kind_key: { shop: shop(), kind: "WELCOME_RUN", key: profileId },
