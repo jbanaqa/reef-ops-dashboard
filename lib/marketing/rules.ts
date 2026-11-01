@@ -1,5 +1,6 @@
 import { FilterXSS } from "xss";
 import { decode } from "he";
+import { normalizeMacroNewsletter, renderMacroNewsletter, type MacroNewsletter } from "./macro-newsletters";
 import { inSegmentSnapshot, inMasterMarketingAudience, masterEngagementAllowed, segmentSnapshot, type SegmentSnapshot, type MasterMarketing } from "./segment-snapshot";
 import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
 export const channels = [
@@ -15,6 +16,7 @@ export const emailLayouts = [
   "welcome",
   "welcome-social",
   "campaign-sale",
+  "macro-newsletter",
 ] as const;
 export type EmailLayout = (typeof emailLayouts)[number];
 export type CampaignEmailProduct = {
@@ -267,6 +269,7 @@ export type Content = {
   }[];
   productGridStyle?: ProductGridStyle;
   campaignLayout?: CampaignEmailLayout;
+  macroNewsletter?: MacroNewsletter;
 };
 export type MarketingOperations = {
   sendingEnabled: boolean;
@@ -762,7 +765,9 @@ export function content(value: unknown): Content {
   if (!value || typeof value !== "object")
     throw new Error("Message content is required.");
   const c = value as Content;
-  if (!c.heading?.trim() || (!c.body?.trim() && !(c.template === "welcome" && c.welcomeVariant === "reminder")) || c.body.length > 20000)
+  const macroNewsletter = normalizeMacroNewsletter(c.macroNewsletter);
+  if (c.layout === "macro-newsletter" && !macroNewsletter) throw new Error("Select an approved newsletter template.");
+  if (typeof c.heading !== "string" || typeof c.body !== "string" || (c.layout !== "macro-newsletter" && (!c.heading.trim() || (!c.body.trim() && !(c.template === "welcome" && c.welcomeVariant === "reminder")))) || c.body.length > 20000)
     throw new Error("Add a heading and message (up to 20,000 characters).");
   const scale = (value: unknown, legacyWidth: unknown, base: number) => {
     const fallback = legacyWidth != null ? Number(legacyWidth) / base : 1;
@@ -1055,6 +1060,7 @@ export function content(value: unknown): Content {
     })),
     productGridStyle: normalizedProductGridStyle,
     campaignLayout,
+    macroNewsletter,
   };
 }
 export function withBranding(c: Content, branding?: EmailBranding): Content {
@@ -1284,6 +1290,7 @@ export const defaultGeneratedEmailCopy = {
 export function footerBackgroundColor(c: Content) {
   if (c.footerBackgroundColor) return c.footerBackgroundColor;
   const layout = c.layout || c.template || "standard";
+  if (layout === "macro-newsletter") return "#102641";
   if (layout === "campaign-sale") return "#050505";
   if (layout === "welcome" || layout === "welcome-social") return "#f7f7f7";
   if (layout === "cart-recovery") return "#8bd8e2";
@@ -1558,6 +1565,8 @@ export function render(
   address = c.showPostalAddress ? address : "";
   const e = escapeHtml;
   const layout = c.layout || c.template || "standard";
+  if (layout === "macro-newsletter" && c.macroNewsletter)
+    return renderMacroNewsletter(c, unsubscribe, address, profileName);
   if (layout === "campaign-sale" && c.campaignLayout)
     return campaignSaleHtml(
       c,

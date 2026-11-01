@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { defaultMacroCampaignContent } from "./brands";
+import { macroNewsletterTemplates } from "./macro-newsletters";
 import { currentMarketingBrand } from "./context";
 import { macroSubscriberList } from "./macro-subscriber-eligibility";
 import { defaultMarketingSettings } from "./rules";
@@ -9,6 +10,7 @@ import { json, shop } from "./store";
 export async function seedMacroMarketing() {
   if (currentMarketingBrand() !== "macroalgae-farms") throw Error("Choose Macroalgae Farms for this workspace.");
   const resources = [
+    ...macroNewsletterTemplates().map(({ kind, key, name, data }) => ({ kind, key, name, data })),
     { kind: "SEGMENT", key: "mailable", name: "Macroalgae Farms subscribers", data: { list: macroSubscriberList } },
     { kind: "TEMPLATE", key: "macro-standard", name: "Macroalgae Farms standard", data: defaultMacroCampaignContent },
     { kind: "SETTINGS", key: "global", name: "Macroalgae Farms email settings", data: {

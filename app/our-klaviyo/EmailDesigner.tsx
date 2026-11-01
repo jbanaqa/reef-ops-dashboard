@@ -1,5 +1,4 @@
 "use client";
-/* eslint-disable @next/next/no-img-element */
 import { defaultMacroCampaignContent } from "@/lib/marketing/brands";
 import { useMarketingBrand } from "./MarketingBrand";
 import { useEffect, useRef, useState } from "react";
@@ -9,7 +8,6 @@ import {
   defaultCampaignContent,
   type EmailLayout,
   escapeHtml,
-  imageSource,
   footerBackgroundColor,
   footerTitle,
   defaultFooterCopyright,
@@ -21,6 +19,8 @@ import {
 import EmailPreview from "./EmailPreview";
 import RichEmailCopy from "./RichEmailCopy";
 import CampaignEmailFields from "./CampaignEmailFields";
+import Artwork from "./EmailArtwork";
+import MacroNewsletterFields from "./MacroNewsletterFields";
 
 const emailLayoutNames: Record<EmailLayout, string> = {
   standard: "Standard",
@@ -29,120 +29,8 @@ const emailLayoutNames: Record<EmailLayout, string> = {
   welcome: "Welcome offer",
   "welcome-social": "Welcome social",
   "campaign-sale": "Campaign sale",
+  "macro-newsletter": "Approved Macroalgae Farms newsletter",
 };
-
-function Artwork({
-  label,
-  value,
-  scale,
-  onChange,
-  onScale,
-  maxFileBytes = 3_700_000,
-}: {
-  label: string;
-  value?: string;
-  scale: number;
-  onChange: (value: string | undefined) => void;
-  onScale?: (value: number) => void;
-  maxFileBytes?: number;
-}) {
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const version = useRef(0);
-  useEffect(
-    () => () => {
-      version.current++;
-    },
-    [],
-  );
-  return (
-    <section className="mk-art-card">
-      <h3>{label}</h3>
-      <div className="mk-art-thumbnail">
-        {value ? (
-          <img src={value} alt={label + " artwork"} />
-        ) : (
-          <span>No image uploaded</span>
-        )}
-      </div>
-      <label className="mk-upload-button">
-        {loading ? "Uploading…" : value ? "Replace image" : "Upload image"}
-        <input
-          aria-label={label + " image"}
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            e.target.value = "";
-            if (!file) return;
-            const current = ++version.current;
-            setError("");
-            if (
-              !/^image\/(png|jpeg|webp|gif)$/.test(file.type) ||
-              file.size > maxFileBytes ||
-              Math.ceil(file.size / 3) * 4 + 40 > 5000000
-            ) {
-              setError(
-                `Use a PNG, JPEG, WebP, or GIF smaller than ${
-                  maxFileBytes <= 500_000 ? "500 KB" : "3.7 MB"
-                }.`,
-              );
-              return;
-            }
-            setLoading(true);
-            try {
-              const data = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result));
-                reader.onerror = () =>
-                  reject(new Error("Could not read this image."));
-                reader.readAsDataURL(file);
-              });
-              if (current === version.current) onChange(imageSource(data));
-            } catch {
-              if (current === version.current)
-                setError("Could not load this image. Please try another file.");
-            } finally {
-              if (current === version.current) setLoading(false);
-            }
-          }}
-        />
-      </label>
-      {value && (
-        <button
-          type="button"
-          className="mk-text-button"
-          onClick={() => {
-            version.current++;
-            setLoading(false);
-            onChange(undefined);
-          }}
-        >
-          Remove {label.toLowerCase()}
-        </button>
-      )}
-      {onScale && (
-        <label className="mk-art-scale">
-          Image size <span>{Math.round(scale * 100)}%</span>
-          <input
-            aria-label={label + " size"}
-            type="range"
-            min="0.25"
-            max="2.5"
-            step="0.05"
-            value={scale}
-            onChange={(e) => onScale(Number(e.target.value))}
-          />
-        </label>
-      )}
-      {error && (
-        <p className="mk-editor-error" role="alert">
-          {error}
-        </p>
-      )}
-    </section>
-  );
-}
 
 export default function EmailDesigner({
   title,
@@ -202,6 +90,7 @@ export default function EmailDesigner({
     "content" | "layout" | "artwork" | "footer" | "test"
   >("content");
   const visualLayout = content.layout || content.template || "standard";
+  const isNewsletter = visualLayout === "macro-newsletter" && !!content.macroNewsletter;
   const gridStyle = {
     ...defaultProductGridStyle,
     ...(content.productGridStyle || {}),
@@ -361,7 +250,15 @@ export default function EmailDesigner({
               ))}
           </nav>
           <div className="mk-designer-fields">
-            {panel === "content" &&
+            {panel === "content" && isNewsletter && <>
+              <section className="mk-editor-section">
+                <h3>Inbox details</h3>
+                <label>{subjectEditable ? "Subject" : "Preview subject"}<input readOnly={!subjectEditable} value={subject} onChange={event => onSubject(event.target.value)} /></label>
+                <label>Preview text<input value={content.preview || ""} onChange={event => changeContent("preview", event.target.value)} /></label>
+              </section>
+              <MacroNewsletterFields content={content} onChange={changeContent} panel="content" />
+            </>}
+            {panel === "content" && !isNewsletter &&
               (contentFields || (content.template === "campaign-sale" && visualLayout === "campaign-sale" ? (
                 <section className="mk-editor-section">
                   <h3>Inbox details</h3>
@@ -739,7 +636,8 @@ export default function EmailDesigner({
               )))}
             {panel === "layout" && (
               <>
-                <details className="mk-editor-section mk-editor-disclosure">
+                {isNewsletter && <section className="mk-editor-section"><h3>Approved newsletter layout</h3><p>The article arrangement stays consistent. Edit wording in Content, replace pictures in Artwork, and choose the products below.</p></section>}
+                {!isNewsletter && <details className="mk-editor-section mk-editor-disclosure">
                   <summary><span>Email layout</span><small>{emailLayoutNames[visualLayout]}</small></summary>
                   <div className="mk-editor-disclosure-body">
                   <p>
@@ -770,6 +668,7 @@ export default function EmailDesigner({
                       {!isMacro && <option value="welcome">Welcome offer</option>}
                       {!isMacro && <option value="welcome-social">Welcome social</option>}
                       <option value="campaign-sale">Campaign sale</option>
+                      {isMacro && content.macroNewsletter && <option value="macro-newsletter">Approved newsletter</option>}
                     </select>
                   </label>
                   {content.layout && (
@@ -778,7 +677,7 @@ export default function EmailDesigner({
                     </button>
                   )}
                   </div>
-                </details>
+                </details>}
                 {visualLayout === "welcome" && (
                   <details className="mk-editor-section mk-editor-disclosure">
                     <summary><span>Welcome illustration</span><small>Clownfish and coral background</small></summary>
@@ -1065,6 +964,7 @@ export default function EmailDesigner({
                     </div>
                   </details>
                 )}
+                {isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="products" />}
                 {visualLayout === "campaign-sale" && content.campaignLayout && (
                   <CampaignEmailFields
                     content={content}
@@ -1076,7 +976,8 @@ export default function EmailDesigner({
                 )}
               </>
             )}
-            {panel === "artwork" && (
+            {panel === "artwork" && isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="artwork" />}
+            {panel === "artwork" && !isNewsletter && (
               <>
                 <div className="mk-editor-section">
                   <h3>Brand artwork</h3>
@@ -1121,7 +1022,8 @@ export default function EmailDesigner({
                 />
               </>
             )}
-            {panel === "footer" && (
+            {panel === "footer" && isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="footer" />}
+            {panel === "footer" && !isNewsletter && (
               <section className="mk-editor-section">
                 <h3>Footer content</h3>
                 <p>

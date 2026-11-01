@@ -16,6 +16,8 @@ import {
 import FlowEditor from "../app/our-klaviyo/FlowEditor";
 import SettingsWorkspace from "../app/our-klaviyo/SettingsWorkspace";
 import CampaignEmailFields from "../app/our-klaviyo/CampaignEmailFields";
+import MacroNewsletterFields from "../app/our-klaviyo/MacroNewsletterFields";
+import { macroNewsletterContent } from "../lib/marketing/macro-newsletters";
 import CartTools from "../app/our-klaviyo/CartTools";
 import {
   defaultDeliveryUpsell,
@@ -717,6 +719,38 @@ test("campaign product grids keep independent editable tag rules through count, 
   view.rerender(<CampaignEmailFields content={saved} subject="Sale" onSubject={() => undefined} onChange={() => undefined} />);
   assert.equal((view.getAllByLabelText("Product tags (match any)")[0] as HTMLTextAreaElement).value, "Halloween 2026\nVIP sale");
   assert.equal((view.getAllByLabelText("Product tags (match any)")[1] as HTMLTextAreaElement).value, "Winter deal\nStaff's picks");
+});
+
+test("newsletter image uploads preserve product edits made while the file is loading", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  const originalReader = globalThis.FileReader;
+  const readers: { result: string; onload: (() => void) | null }[] = [];
+  class DelayedReader {
+    result = "data:image/png;base64,AQID";
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    readAsDataURL() { readers.push(this); }
+  }
+  globalThis.FileReader = DelayedReader as unknown as typeof FileReader;
+  let latest = macroNewsletterContent("nitrate");
+  function Editor() {
+    const [draft, setDraft] = React.useState(macroNewsletterContent("nitrate"));
+    latest = draft;
+    return <MacroNewsletterFields panel="products" content={draft} onChange={(key, value) => setDraft(current => ({ ...current, [key]: value }))} />;
+  }
+  try {
+    const view = testing.render(<Editor />);
+    const first = testing.within(view.container.querySelector(".mk-campaign-product-card") as HTMLElement);
+    testing.fireEvent.change(first.getByLabelText("Sea Lettuce (Ulva) photo image"), { target: { files: [new dom.window.File(["image"], "photo.png", { type: "image/png" })] } });
+    testing.fireEvent.change(first.getByLabelText("Price", { exact: true }), { target: { value: "$23.00" } });
+    testing.fireEvent.change(first.getByLabelText("Portion or option"), { target: { value: "Staff portion" } });
+    await testing.act(async () => { readers[0].onload?.(); });
+    assert.equal(latest.macroNewsletter!.products[0].image, "data:image/png;base64,AQID");
+    assert.equal(latest.macroNewsletter!.products[0].salePrice, "$23.00");
+    assert.equal(latest.macroNewsletter!.products[0].portion, "Staff portion");
+    assert.equal(latest.macroNewsletter!.products.length, 6);
+  } finally { globalThis.FileReader = originalReader; }
 });
 
 test("campaign design controls resize the logo and default product images", async () => {

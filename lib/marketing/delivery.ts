@@ -13,6 +13,7 @@ import {
 import { screenEmail } from "./email-screen";
 import { currentMarketingBrand, marketingEnv } from "./context";
 import { marketingBrand } from "./brands";
+import { macroNewsletterText } from "./macro-newsletters";
 
 export type DeliverySender = { name?: string; email?: string; replyTo?: string };
 
@@ -75,7 +76,7 @@ export function emailBody(
     const match = image?.match(
       /^data:image\/(png|jpeg|webp|gif);base64,([a-zA-Z0-9+/=]+)$/,
     );
-    if (match) {
+    if (match && (!(effectiveContent.layout === "macro-newsletter" && effectiveContent.macroNewsletter) || html.includes(image!))) {
       const id = "marketing-" + field;
       attachments.push({
         filename: field + "." + match[1],
@@ -85,10 +86,25 @@ export function emailBody(
       html = html.replaceAll(image!, "cid:" + id);
     }
   }
+  if (effectiveContent.macroNewsletter) {
+    const nestedImages = [
+      ...Object.values(effectiveContent.macroNewsletter.images).map(image => image.src),
+      ...effectiveContent.macroNewsletter.products.map(product => product.image || ""),
+    ];
+    for (const image of new Set(nestedImages)) {
+      const match = image.match(/^data:image\/(png|jpeg|webp|gif);base64,([a-zA-Z0-9+/=]+)$/);
+      if (!match || !html.includes(image)) continue;
+      const id = `marketing-newsletter-${attachments.length}`;
+      attachments.push({ filename: `${id}.${match[1]}`, content: match[2], content_id: id });
+      html = html.replaceAll(image, `cid:${id}`);
+    }
+  }
   return {
     html,
     attachments: attachments.length ? attachments : undefined,
-    text: [
+    text: effectiveContent.macroNewsletter && (effectiveContent.layout || effectiveContent.template) === "macro-newsletter"
+      ? macroNewsletterText(effectiveContent, m.unsubscribe, address, m.profileName)
+      : [
       effectiveContent.heading,
       textBody(effectiveContent, m.profileName),
       effectiveContent.couponCode

@@ -69,7 +69,10 @@ export function registerMacroSubscriberTests(context: () => Context) {
     }));
     await seedMacroMarketing(); await seedMacroMarketing();
     const resources = await h.prisma.marketingResource.findMany({ where: { shop: h.macroShop } });
-    assert.deepEqual(resources.map(row => row.kind).sort(), ["SEGMENT", "SETTINGS", "TEMPLATE"]);
+    assert.deepEqual(resources.map(row => row.kind).sort(), ["SEGMENT", "SETTINGS", "TEMPLATE", "TEMPLATE", "TEMPLATE", "TEMPLATE"]);
+    const newsletters = resources.filter(row => row.key.startsWith("macro-newsletter-"));
+    assert.deepEqual(newsletters.map(row => row.key).sort(), ["macro-newsletter-field-guide", "macro-newsletter-habitat", "macro-newsletter-nitrate"]);
+    assert.ok(newsletters.every(row => (row.data as { macroNewsletter?: { products: unknown[] } }).macroNewsletter?.products.length === 6));
     assert.doesNotMatch(JSON.stringify(resources), /Corals Anonymous|coralsanonymous\.com|Rr5yRa|klaviyoMailable/);
     const settings = resources.find(row => row.kind === "SETTINGS")!.data as { operations: Record<string, boolean> };
     assert.ok(Object.values(settings.operations).every(value => value === false));

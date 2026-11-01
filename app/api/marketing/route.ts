@@ -62,7 +62,7 @@ import { validateFlow } from "@/lib/marketing/flow-config";
 import { deliveryDateFromTags, deliveryUpsellDueAt } from "@/lib/marketing/delivery-upsell-config";
 import { enrollExistingWelcomeTest, removeProfileFromList } from "@/lib/marketing/profile-testing";
 import { shopifyGraphql } from "@/lib/marketing/shopify";
-import { resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
+import { manualNewsletterProducts, resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
 import { inspectOrderIdentity } from "@/lib/marketing/identity-review";
 import { deliveryReviewConfig, orderUpdateSkipReason } from "@/lib/marketing/order-update-review";
 import { currentMarketingBrand, marketingEnv, runWithMarketingBrand } from "@/lib/marketing/context";
@@ -656,6 +656,9 @@ async function getMarketing(request: Request) {
       return Response.json(await audienceDirectory(url), {
         headers: { "Cache-Control": "no-store" },
       });
+    if (view === "campaign-products") {
+      return Response.json({ products: await manualNewsletterProducts(url.searchParams.get("q") || "") }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (view === "preview") {
       const s = await loadMarketingSettings();
       return new Response(

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Generate and verify with disposable configuration. No deployment database is used.
 const { spawnSync } = require("node:child_process");
 const mode = process.argv[2];
@@ -13,5 +14,5 @@ run([require.resolve("prisma/build/index.js"), "generate"]);
 if (mode === "build") {
   run([require.resolve("next/dist/bin/next"), "build"]);
 } else {
-  run(["node_modules/tsx/dist/cli.mjs", "--tsconfig", "scripts/tsconfig.marketing-tests.json", "--test", "--test-timeout=60000", "scripts/marketing.test.ts", "scripts/marketing.editor.test.tsx", "scripts/marketing.integration.test.ts"]);
+  run(["node_modules/tsx/dist/cli.mjs", "--tsconfig", "scripts/tsconfig.marketing-tests.json", "--test", "--test-timeout=60000", "scripts/marketing.test.ts", "scripts/marketing.editor.test.tsx", "scripts/marketing.integration.test.ts", "scripts/macro-newsletters.test.ts"]);
 }

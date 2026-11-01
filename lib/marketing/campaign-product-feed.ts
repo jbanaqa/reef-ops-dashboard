@@ -6,6 +6,8 @@ import {
   type Content,
 } from "./rules";
 import { recommendationHistory } from "./cart-feed";
+import { currentMarketingBrand } from "./context";
+import type { NewsletterProduct } from "./macro-newsletters";
 
 type ShopifyProduct = {
   id: string;
@@ -209,6 +211,20 @@ function emailProduct(product: ShopifyProduct): CampaignEmailProduct {
     showCompareAtPrice: true,
     showButton: true,
   };
+}
+
+/** A bounded staff search returns choices, never a saved automatic feed. */
+export async function manualNewsletterProducts(value: string): Promise<NewsletterProduct[]> {
+  if (currentMarketingBrand() !== "macroalgae-farms") throw new Error("Choose Macroalgae Farms to select newsletter products.");
+  const term = value.trim().slice(0, 120);
+  if (!term) return [];
+  const query = `status:active AND title:"${term.replace(/[\\":()]/g, "\\$&")}"`;
+  const response = await shopifyGraphql<ProductsResponse>(PRODUCTS, { after: null, query, sortKey: "TITLE", reverse: false });
+  if (!response.data?.products) throw new Error("Shopify did not return the product catalogue.");
+  return response.data.products.nodes.filter(product => product.onlineStoreUrl && product.variants.nodes.some(variant => variant.availableForSale)).slice(0, 20).map(product => ({
+    ...emailProduct(product), url: `https://www.macroalgaefarms.com/products/${product.handle}`,
+    portion: "", pricePrefix: "From", alt: product.title, button: "View product", showCompareAtPrice: false,
+  }));
 }
 
 export async function resolveCampaignProductFeeds(

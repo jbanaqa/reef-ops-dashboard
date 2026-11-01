@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import EmailDesigner from "./EmailDesigner";
 import { flowEmailTemplates } from "@/lib/marketing/flow-email-templates";
+import { macroNewsletterDefinitions, macroNewsletterTemplates } from "@/lib/marketing/macro-newsletters";
 import FlowsWorkspace from "./FlowsWorkspace";
 import "./flows.css";
 import "./flow-results.css";
@@ -323,8 +324,8 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   );
   const templates: Resource[] = data
     ? [
-        ...(isMacro ? [] : flowEmailTemplates(data.resources)),
-        ...data.resources.filter((r) => r.kind === "TEMPLATE"),
+        ...(isMacro ? macroNewsletterTemplates(data.resources) : flowEmailTemplates(data.resources)),
+        ...data.resources.filter((r) => r.kind === "TEMPLATE").map(resource => ({ ...resource, subject: resource.subject || (isMacro ? macroNewsletterDefinitions.find(definition => resource.key === `macro-newsletter-${definition.design}`)?.subject : undefined) })),
       ]
     : [];
   const reusableTemplates = templates.filter((template) => !template.sourceFlow);
@@ -853,7 +854,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                             setCampaign({
                               ...campaign,
                               ...(template.subject ? { subject: template.subject } : {}),
-                              content: template.data as unknown as Content,
+                              content: structuredClone(template.data) as unknown as Content,
                             });
                         }}
                       >
