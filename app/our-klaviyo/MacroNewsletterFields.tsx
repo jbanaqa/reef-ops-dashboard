@@ -19,6 +19,7 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<NewsletterProduct[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
   const [error, setError] = useState("");
   const searchVersion = useRef(0);
   const update = (patch: Partial<typeof newsletter>) => {
@@ -62,19 +63,20 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
     {panel === "products" && <section className="mk-editor-section">
       <h3>Manually selected products</h3>
       <p>Add, edit, remove, or reorder products. These selections stay with this campaign.</p>
-      <label>Find a Macroalgae Farms product<input value={query} onChange={event => { searchVersion.current++; setQuery(event.target.value); setResults([]); setSearching(false); }} /></label>
+      <label>Find a Macroalgae Farms product<input value={query} onChange={event => { searchVersion.current++; setQuery(event.target.value); setResults([]); setSearching(false); setSearched(false); setError(""); }} /></label>
       <button type="button" disabled={searching || !query.trim()} onClick={async () => {
         const version = ++searchVersion.current;
-        setSearching(true); setError("");
+        setSearching(true); setSearched(false); setError("");
         try {
           const response = await marketingFetch(`/api/marketing?view=campaign-products&q=${encodeURIComponent(query.trim())}`);
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || "Could not load products.");
-          if (version === searchVersion.current) setResults(result.products || []);
+          if (version === searchVersion.current) { setResults(result.products || []); setSearched(true); }
         } catch (failure) { if (version === searchVersion.current) setError(failure instanceof Error ? failure.message : "Could not load products."); }
         finally { if (version === searchVersion.current) setSearching(false); }
       }}>{searching ? "Searching…" : "Search products"}</button>
       {error && <p role="alert" className="mk-editor-error">{error}</p>}
+      {searched && !results.length && <p role="status">No matching available products. Try a shorter product name, or add a product manually below.</p>}
       {results.map(product => <p key={product.id}>{product.title} · {product.salePrice} <button type="button" disabled={newsletter.products.length >= 40} onClick={() => update({ products: [...newsletter.products, { ...product, id: newId() }] })}>Add {product.title}</button></p>)}
       {newsletter.products.map((product, index) => <details className="mk-campaign-product-card" key={product.id}>
         <summary>{product.title || "Untitled product"}</summary>

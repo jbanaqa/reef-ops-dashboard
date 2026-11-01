@@ -216,9 +216,11 @@ function emailProduct(product: ShopifyProduct): CampaignEmailProduct {
 /** A bounded staff search returns choices, never a saved automatic feed. */
 export async function manualNewsletterProducts(value: string): Promise<NewsletterProduct[]> {
   if (currentMarketingBrand() !== "macroalgae-farms") throw new Error("Choose Macroalgae Farms to select newsletter products.");
-  const term = value.trim().slice(0, 120);
-  if (!term) return [];
-  const query = `status:active AND title:"${term.replace(/[\\":()]/g, "\\$&")}"`;
+  const terms = value.trim().slice(0, 120).match(/[\p{L}\p{N}]+/gu) || [];
+  if (!terms.length) return [];
+  // Prefix each literal word so partial names such as "Chaeto" find
+  // "Chaetomorpha" without interpreting staff input as search operators.
+  const query = `status:active AND ${terms.map(term => `title:${term}*`).join(" AND ")}`;
   const response = await shopifyGraphql<ProductsResponse>(PRODUCTS, { after: null, query, sortKey: "TITLE", reverse: false });
   if (!response.data?.products) throw new Error("Shopify did not return the product catalogue.");
   return response.data.products.nodes.filter(product => product.onlineStoreUrl && product.variants.nodes.some(variant => variant.availableForSale)).slice(0, 20).map(product => ({

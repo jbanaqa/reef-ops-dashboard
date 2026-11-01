@@ -5,6 +5,39 @@ import { content, render, defaultContent } from "../lib/marketing/rules";
 import { emailBody } from "../lib/marketing/delivery";
 import { macroNewsletterContent, macroNewsletterDefinitions, macroNewsletterTemplates, newsletterLink } from "../lib/marketing/macro-newsletters";
 import { resolveCampaignProductFeeds, manualNewsletterProducts } from "../lib/marketing/campaign-product-feed";
+import { runWithMarketingBrand } from "../lib/marketing/context";
+
+test("manual newsletter search matches partial names and imports available Macroalgae Farms products", async () => {
+  const keys = ["SPECIES_LIBRARY_SHOP_DOMAIN", "MACROALGAE_SHOPIFY_CLIENT_ID", "MACROALGAE_SHOPIFY_CLIENT_SECRET"];
+  const previous = keys.map(key => process.env[key]), oldFetch = globalThis.fetch;
+  Object.assign(process.env, { SPECIES_LIBRARY_SHOP_DOMAIN: "macroalgaefarms-newsletter-fixture.myshopify.com", MACROALGAE_SHOPIFY_CLIENT_ID: "fixture", MACROALGAE_SHOPIFY_CLIENT_SECRET: "fixture-secret" });
+  const queries: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    assert.equal(new URL(String(input)).hostname, "macroalgaefarms-newsletter-fixture.myshopify.com");
+    if (String(input).includes("/oauth/")) return Response.json({ access_token: "fixture-token", expires_in: 3600 });
+    const request = JSON.parse(String(init?.body));
+    queries.push(request.variables.query);
+    const product = { id: "gid://shopify/Product/1", title: "Chaetomorpha Refugium Macroalgae", handle: "chaeto", onlineStoreUrl: "https://www.macroalgaefarms.com/products/chaeto", featuredImage: { url: "https://cdn.shopify.com/chaeto.jpg" }, variants: { nodes: [ { id: "variant-1", availableForSale: true, price: "7.59", compareAtPrice: null, image: null } ] } };
+    return Response.json({ data: { products: { nodes: [product, { ...product, id: "unpublished", onlineStoreUrl: null }, { ...product, id: "unavailable", variants: { nodes: [{ ...product.variants.nodes[0], availableForSale: false }] } }], pageInfo: { hasNextPage: false, endCursor: null } } } });
+  };
+  try {
+    await runWithMarketingBrand("macroalgae-farms", async () => {
+      const products = await manualNewsletterProducts("Chaeto Refug");
+      assert.equal(queries[0], "status:active AND title:Chaeto* AND title:Refug*");
+      assert.equal(products.length, 1);
+      assert.equal(products[0].salePrice, "$7.59");
+      assert.equal(products[0].image, "https://cdn.shopify.com/chaeto.jpg");
+      assert.equal(products[0].url, "https://www.macroalgaefarms.com/products/chaeto");
+      await manualNewsletterProducts('Chaeto\") OR status:draft');
+      assert.equal(queries[1], "status:active AND title:Chaeto* AND title:OR* AND title:status* AND title:draft*");
+      assert.deepEqual(await manualNewsletterProducts("*:()"), []);
+      assert.equal(queries.length, 2);
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+    keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; });
+  }
+});
 
 for (const definition of macroNewsletterDefinitions) {
   test(`${definition.name}: all approved copy, images and six manual products survive save/reopen`, async () => {
