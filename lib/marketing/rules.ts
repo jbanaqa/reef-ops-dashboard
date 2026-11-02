@@ -1064,7 +1064,10 @@ export function content(value: unknown): Content {
   };
 }
 export function withBranding(c: Content, branding?: EmailBranding): Content {
-  if (!branding) return c;
+  const addressOverride = c.layout === "macro-newsletter" && typeof c.macroNewsletter?.showPostalAddress === "boolean"
+    ? { showPostalAddress: c.macroNewsletter.showPostalAddress }
+    : {};
+  if (!branding) return { ...c, ...addressOverride };
   const sharedFooter = branding.footerConfigured
     ? {
         footerImage: branding.footerImage,
@@ -1111,6 +1114,7 @@ export function withBranding(c: Content, branding?: EmailBranding): Content {
       ? { facebookIcon: branding.facebookIcon }
       : {}),
     ...sharedFooter,
+    ...addressOverride,
   };
 }
 export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
@@ -1137,7 +1141,8 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
       found.footerUnsubscribeLinkText = v.footerUnsubscribeLinkText;
     if (typeof v.footerCopyrightText === "string")
       found.footerCopyrightText = v.footerCopyrightText;
-    if (typeof v.showPostalAddress === "boolean")
+    const newsletter = v.layout === "macro-newsletter" ? v.macroNewsletter as MacroNewsletter | undefined : undefined;
+    if (typeof v.showPostalAddress === "boolean" && typeof newsletter?.showPostalAddress !== "boolean")
       found.showPostalAddress = v.showPostalAddress;
     if (typeof v.showFooterSocial === "boolean")
       found.showFooterSocial = v.showFooterSocial;
@@ -1151,8 +1156,8 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
       found.instagramIcon = v.instagramIcon;
     if (typeof v.facebookIcon === "string" && v.facebookIcon)
       found.facebookIcon = v.facebookIcon;
-    for (const child of Object.values(v)) {
-      if (child && typeof child === "object") visit(child);
+    for (const [key, child] of Object.entries(v)) {
+      if (key !== "macroNewsletter" && child && typeof child === "object") visit(child);
     }
   };
   visit(value);
@@ -1160,7 +1165,7 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
 }
 export function sharedEmailFooter(value: unknown): EmailBranding {
   const c = content(value);
-  return {
+  const footer: EmailBranding = {
     ...extractEmailBranding(c),
     footerConfigured: true,
     footerBackgroundColor: footerBackgroundColor(c),
@@ -1178,6 +1183,9 @@ export function sharedEmailFooter(value: unknown): EmailBranding {
     showFooterSocial: c.showFooterSocial !== false,
     showFooterCopyright: c.showFooterCopyright !== false,
   };
+  if (c.layout === "macro-newsletter" && typeof c.macroNewsletter?.showPostalAddress === "boolean")
+    delete footer.showPostalAddress;
+  return footer;
 }
 export function segment(value: unknown): Segment {
   const s = (value || {}) as Segment;

@@ -721,6 +721,27 @@ test("campaign product grids keep independent editable tag rules through count, 
   assert.equal((view.getAllByLabelText("Product tags (match any)")[1] as HTMLTextAreaElement).value, "Winter deal\nStaff's picks");
 });
 
+test("newsletter address checkbox stores a local choice without changing shared footer controls", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  let latest = macroNewsletterContent("nitrate");
+  latest.showPostalAddress = true;
+  function Editor() {
+    const [draft, setDraft] = React.useState(latest);
+    latest = draft;
+    return <MacroNewsletterFields panel="footer" content={draft} onChange={(key, value) => setDraft(current => ({ ...current, [key]: value }))} />;
+  }
+  const view = testing.render(<Editor />);
+  const toggle = view.getByLabelText("Show business address in this email") as HTMLInputElement;
+  assert.equal(toggle.checked, true);
+  testing.fireEvent.click(toggle);
+  assert.equal(latest.macroNewsletter!.showPostalAddress, false);
+  assert.equal(latest.showPostalAddress, true);
+  assert.equal(toggle.checked, false);
+  testing.fireEvent.click(toggle);
+  assert.equal(latest.macroNewsletter!.showPostalAddress, true);
+});
+
 test("newsletter image uploads preserve product edits made while the file is loading", async () => {
   const testing = await import("@testing-library/react");
   cleanup = testing.cleanup;

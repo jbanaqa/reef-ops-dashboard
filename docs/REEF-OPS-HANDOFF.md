@@ -1,5 +1,11 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Newsletter-specific footer address — November 2, 2026
+
+The three Macro newsletters now store an optional `macroNewsletter.showPostalAddress` choice. Footer > Show business address in this email changes only that campaign/template. Omitted choices keep inheriting shared branding. Shared branding extraction and footer saves omit an explicit local choice so saving a newsletter cannot change other emails. Preview, HTML delivery and plain text respect the override; the saved business address and provider setup requirements remain unchanged. All 282 isolated marketing tests, TypeScript, changed-file lint and production build pass, including local checkbox, normalization/render/delivery and actual campaign persistence checks.
+
+User is configuring and sending internal tests themselves; keep customer sending paused. They added Macro domain DNS in Squarespace and report all records verified in Resend, but tests still return 403. Dashboard has shared RESEND_API_KEY and no MACROALGAE_RESEND_API_KEY. Key values are redacted via Railway; account/team/domain permissions are not yet verified. Resend browser has no signed-in session. The app currently discards the provider response reason and exposes only status. Recommend checking that the verified domain belongs to the shared key's account/team and permitted domains, or configuring a separate sending-only Macro key on dashboard and runner. Do not replace the shared Corals key or send a new test without a recipient authorized by the user.
+
 ### Approved Macroalgae Farms campaign newsletters — November 1, 2026
 
 Three approved newsletter starters are available only in the Macroalgae Farms campaign picker and reusable template library: Nutrient management, Habitat article, and Species field guide. They preserve the approved centered logo header, navy footer, editorial section structure and compact six-product grid. The reviewed layouts and initial copy are retained in `lib/marketing/macro-newsletter-layouts.json`; the shared `macro-newsletters.ts` model renders them with inline styles, table column fallbacks and responsive overrides, without preview scripts or host controls.

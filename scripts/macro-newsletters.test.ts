@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { content, render, defaultContent } from "../lib/marketing/rules";
+import { content, render, defaultContent, withBranding, sharedEmailFooter } from "../lib/marketing/rules";
 import { emailBody } from "../lib/marketing/delivery";
 import { macroNewsletterContent, macroNewsletterDefinitions, macroNewsletterTemplates, newsletterLink } from "../lib/marketing/macro-newsletters";
 import { resolveCampaignProductFeeds, manualNewsletterProducts } from "../lib/marketing/campaign-product-feed";
@@ -100,6 +100,30 @@ test("built-in starters do not replace saved template edits or share mutable sta
   const a = macroNewsletterContent("nitrate"), b = macroNewsletterContent("nitrate");
   a.macroNewsletter!.products[0].title = "Campaign-specific edit";
   assert.notEqual(a.macroNewsletter!.products[0].title, b.macroNewsletter!.products[0].title);
+});
+
+test("newsletter address visibility survives save/reopen and overrides shared branding in preview and delivery", () => {
+  const address = "123 Newsletter Fixture Ave";
+  for (const definition of macroNewsletterDefinitions) {
+    for (const visible of [false, true]) {
+      const original = macroNewsletterContent(definition.design);
+      original.macroNewsletter!.showPostalAddress = visible;
+      const saved = content(JSON.parse(JSON.stringify(original)));
+      const branding = { footerConfigured: true, showPostalAddress: !visible };
+      assert.equal(saved.macroNewsletter!.showPostalAddress, visible);
+      assert.equal(withBranding(saved, branding).showPostalAddress, visible);
+      assert.equal(withBranding(saved).showPostalAddress, visible);
+      assert.equal(sharedEmailFooter(withBranding(saved, branding)).showPostalAddress, undefined, "Saving the footer cannot copy the local address choice into shared branding");
+      const html = render(saved, "https://app.example/unsubscribe", address, undefined, "Macroalgae Farms", branding);
+      const delivery = emailBody({ id: "address-preview", to: "staff@example.com", channel: "EMAIL", subject: "Preview", content: saved, branding, unsubscribe: "https://app.example/unsubscribe" }, address, "Macroalgae Farms");
+      assert.equal(html.includes(address), visible);
+      assert.equal(delivery.html.includes(address), visible);
+      assert.equal(delivery.text.includes(address), visible);
+      assert.equal(branding.showPostalAddress, !visible, "Campaign choice does not mutate the shared footer");
+      const other = macroNewsletterContent(definition.design);
+      assert.equal(withBranding(other, branding).showPostalAddress, !visible, "Other emails retain their shared setting");
+    }
+  }
 });
 
 test("newsletter fields reject external destinations, executable images and unsupported layouts", async () => {

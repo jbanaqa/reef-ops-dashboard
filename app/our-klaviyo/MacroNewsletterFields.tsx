@@ -57,7 +57,8 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
     {panel === "footer" && <section className="mk-editor-section">
       <h3>Subscription details</h3>
       <label>Unsubscribe link text<input value={content.footerUnsubscribeLinkText ?? "Unsubscribe"} onChange={event => onChange("footerUnsubscribeLinkText", event.target.value)} /></label>
-      <label><input type="checkbox" checked={content.showPostalAddress === true} onChange={event => onChange("showPostalAddress", event.target.checked)} /> Show business address in this email</label>
+      <label><input type="checkbox" checked={(newsletter.showPostalAddress ?? content.showPostalAddress) === true} onChange={event => update({ showPostalAddress: event.target.checked })} /> Show business address in this email</label>
+      <p>This choice applies only to this campaign or template. Your business address stays saved in Settings.</p>
       <p>The unsubscribe destination is added automatically for each recipient.</p>
     </section>}
     {panel === "products" && <section className="mk-editor-section">

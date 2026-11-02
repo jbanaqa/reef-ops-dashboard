@@ -6,6 +6,8 @@ export type NewsletterImage = { src: string; alt: string };
 export type NewsletterProduct = CampaignEmailProduct & { portion: string; pricePrefix: string; alt: string };
 export type MacroNewsletter = {
   design: MacroNewsletterDesign;
+  /** Omitted newsletters inherit the brand footer; an explicit choice stays local. */
+  showPostalAddress?: boolean;
   text: Record<string, string>;
   links: Record<string, string>;
   images: Record<string, NewsletterImage>;
@@ -68,7 +70,9 @@ export function normalizeMacroNewsletter(value: unknown): MacroNewsletter | unde
     };
   }
   if (!Array.isArray(input.products)) throw new Error("Select the newsletter products manually.");
-  return { design: definition.design, text, links, images, products: input.products.slice(0, 40).map((product, index) => ({
+  return { design: definition.design,
+    ...(typeof input.showPostalAddress === "boolean" ? { showPostalAddress: input.showPostalAddress } : {}),
+    text, links, images, products: input.products.slice(0, 40).map((product, index) => ({
     id: String(product.id || `newsletter-product-${index}`).slice(0, 100), title: String(product.title ?? "").slice(0, 200),
     url: newsletterLink(product.url), image: product.image ? imageSource(product.image) : undefined,
     alt: String(product.alt ?? "").slice(0, 300), portion: String(product.portion ?? "").slice(0, 200),

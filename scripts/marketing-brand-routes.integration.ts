@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import type { Context } from "./cart-launch.integration";
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { defaultMacroCampaignContent } from "../lib/marketing/brands";
+import { withBranding } from "../lib/marketing/rules";
 
 async function isolated(context: Context, work: (macroShop: string) => Promise<void>) {
   const keys = ["SPECIES_LIBRARY_SHOP_DOMAIN", "DASHBOARD_AUTH_DISABLED", "RESEND_API_KEY", "RESEND_WEBHOOK_SECRET", "MACROALGAE_RESEND_WEBHOOK_SECRET"];
@@ -26,13 +27,14 @@ export function registerMarketingBrandRouteTests(context: () => Context) {
     value.heading = "Staff's Halimeda article";
     value.macroNewsletter!.products[0].title = "Hand-picked aquarium product";
     value.macroNewsletter!.products[0].salePrice = "$22.00";
+    value.macroNewsletter!.showPostalAddress = false;
     value.macroNewsletter!.images["image-1"] = { src: "data:image/png;base64,AQID", alt: "Staff artwork" };
     const savedTemplate = await api.POST(request("macroalgae-farms", { action: "save-resource", kind: "TEMPLATE", key: "macro-newsletter-field-guide", name: "Staff field guide", data: value }));
     assert.equal(savedTemplate.status, 200);
     await runWithMarketingBrand("macroalgae-farms", seedMacroMarketing);
     const template = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: macroShop, kind: "TEMPLATE", key: "macro-newsletter-field-guide" } } });
     assert.equal((template.data as unknown as typeof value).heading, value.heading, "Repeated setup preserves staff edits");
-    const savedCampaign = await api.POST(request("macroalgae-farms", { action: "save-campaign", name: "Newsletter draft", subject: "A species article", content: value, audience: { version: 2, includeKeys: ["mailable"], excludeKeys: [] }, smartSending: true, recipientMode: "SEND_TIME" }));
+    const savedCampaign = await api.POST(request("macroalgae-farms", { action: "save-campaign", name: "Newsletter draft", subject: "A species article", content: value, brandingSource: withBranding(value, { footerConfigured: true, showPostalAddress: true }), audience: { version: 2, includeKeys: ["mailable"], excludeKeys: [] }, smartSending: true, recipientMode: "SEND_TIME" }));
     assert.equal(savedCampaign.status, 200);
     const result = await savedCampaign.json();
     const campaign = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: result.id } });
@@ -41,11 +43,13 @@ export function registerMarketingBrandRouteTests(context: () => Context) {
     const saved = campaign.content as unknown as typeof value;
     assert.equal(saved.heading, value.heading);
     assert.equal(saved.macroNewsletter!.products[0].salePrice, "$22.00");
+    assert.equal(saved.macroNewsletter!.showPostalAddress, false);
     assert.equal(saved.macroNewsletter!.images["image-1"].src, "data:image/png;base64,AQID");
     assert.equal(saved.campaignLayout, undefined);
     assert.equal(await prisma.marketingMessage.count({ where: { shop: macroShop } }), 0);
     const settings = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: macroShop, kind: "SETTINGS", key: "global" } } });
     assert.equal((settings.data as { operations: { sendingEnabled: boolean } }).operations.sendingEnabled, false);
+    assert.equal((settings.data as { branding: { showPostalAddress: boolean } }).branding.showPostalAddress, true, "Campaign address choice leaves the shared setting unchanged");
     assert.equal(await prisma.marketingResource.count({ where: { shop: process.env.SHOPIFY_SHOP_DOMAIN, key: { startsWith: "macro-newsletter-" } } }), 0);
   }));
 
