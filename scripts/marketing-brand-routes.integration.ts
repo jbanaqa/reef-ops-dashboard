@@ -5,6 +5,7 @@ import type { Context } from "./cart-launch.integration";
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { defaultMacroCampaignContent } from "../lib/marketing/brands";
 import { withBranding } from "../lib/marketing/rules";
+import { newsletterTextDocument } from "../lib/marketing/newsletter-rich-text";
 
 async function isolated(context: Context, work: (macroShop: string) => Promise<void>) {
   const keys = ["SPECIES_LIBRARY_SHOP_DOMAIN", "DASHBOARD_AUTH_DISABLED", "RESEND_API_KEY", "RESEND_WEBHOOK_SECRET", "MACROALGAE_RESEND_WEBHOOK_SECRET"];
@@ -25,6 +26,8 @@ export function registerMarketingBrandRouteTests(context: () => Context) {
     const api = await import("../app/api/marketing/route");
     const value = macroNewsletterContent("field-guide");
     value.heading = "Staff's Halimeda article";
+    value.macroNewsletter!.richText = { heading: newsletterTextDocument(value.heading) };
+    value.macroNewsletter!.richText.heading.content![0].content![0].marks = [{ type: "bold" }];
     value.macroNewsletter!.products[0].title = "Hand-picked aquarium product";
     value.macroNewsletter!.products[0].salePrice = "$22.00";
     value.macroNewsletter!.showPostalAddress = false;
@@ -42,6 +45,7 @@ export function registerMarketingBrandRouteTests(context: () => Context) {
     assert.equal(campaign.status, "DRAFT");
     const saved = campaign.content as unknown as typeof value;
     assert.equal(saved.heading, value.heading);
+    assert.deepEqual(saved.macroNewsletter!.richText, value.macroNewsletter!.richText);
     assert.equal(saved.macroNewsletter!.products[0].salePrice, "$22.00");
     assert.equal(saved.macroNewsletter!.showPostalAddress, false);
     assert.equal(saved.macroNewsletter!.images["image-1"].src, "data:image/png;base64,AQID");

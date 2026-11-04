@@ -1,13 +1,15 @@
 import layouts from "./macro-newsletter-layouts.json";
 import { escapeHtml, imageSource, personalize, safeUrl, type CampaignEmailProduct, type Content } from "./rules";
+import { newsletterFormattedText, newsletterTextLinks, normalizeNewsletterRichText, type NewsletterRichText } from "./newsletter-rich-text";
 
 export type MacroNewsletterDesign = "nitrate" | "habitat" | "field-guide";
 export type NewsletterImage = { src: string; alt: string };
-export type NewsletterProduct = CampaignEmailProduct & { portion: string; pricePrefix: string; alt: string };
+export type NewsletterProduct = CampaignEmailProduct & { portion: string; pricePrefix: string; alt: string; richText?: NewsletterRichText };
 export type MacroNewsletter = {
   design: MacroNewsletterDesign;
   /** Omitted newsletters inherit the brand footer; an explicit choice stays local. */
   showPostalAddress?: boolean;
+  richText?: NewsletterRichText;
   text: Record<string, string>;
   links: Record<string, string>;
   images: Record<string, NewsletterImage>;
@@ -70,7 +72,9 @@ export function normalizeMacroNewsletter(value: unknown): MacroNewsletter | unde
     };
   }
   if (!Array.isArray(input.products)) throw new Error("Select the newsletter products manually.");
+  const richText = normalizeNewsletterRichText(input.richText, ["heading", "body", ...definition.fields.filter(field => field.type === "text").map(field => field.key)]);
   return { design: definition.design,
+    ...(richText ? { richText } : {}),
     ...(typeof input.showPostalAddress === "boolean" ? { showPostalAddress: input.showPostalAddress } : {}),
     text, links, images, products: input.products.slice(0, 40).map((product, index) => ({
     id: String(product.id || `newsletter-product-${index}`).slice(0, 100), title: String(product.title ?? "").slice(0, 200),
@@ -79,16 +83,18 @@ export function normalizeMacroNewsletter(value: unknown): MacroNewsletter | unde
     pricePrefix: String(product.pricePrefix ?? "").slice(0, 80), salePrice: String(product.salePrice ?? "").slice(0, 80),
     button: String(product.button ?? "").slice(0, 80), showSalePrice: product.showSalePrice !== false, showButton: product.showButton !== false,
     showCompareAtPrice: false,
+    ...(product.richText ? { richText: normalizeNewsletterRichText(product.richText, ["title", "portion", "pricePrefix", "salePrice", "button"]) } : {}),
   })) };
 }
 
-function productsHtml(products: NewsletterProduct[]) {
+function productsHtml(products: NewsletterProduct[], name?: string) {
   const e = escapeHtml;
   const rows: string[] = [];
   for (let index = 0; index < products.length; index += 2) {
     const cells = products.slice(index, index + 2).map((product, column) => {
+      const formatted = (key: string, plain: string) => newsletterFormattedText(plain, product.richText?.[key], name, false);
       const link = (label: string, style = "") => product.url ? `<a href="${e(product.url)}" style="color:inherit;text-decoration:none;${style}">${label}</a>` : label;
-      return `<td class="nl-product-cell" width="50%" valign="top" style="width:50%;padding:0 ${column ? 0 : 12}px 19px ${column ? 12 : 0}px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="table-layout:fixed"><tr><td width="76" valign="top" style="width:76px">${product.image ? link(`<img src="${e(product.image)}" alt="${e(product.alt)}" width="76" height="76" style="display:block;width:76px;height:76px;object-fit:cover">`) : ""}</td><td valign="top" style="padding-left:12px;font-family:Arial,Helvetica,sans-serif;color:#102641"><h3 style="margin:0 0 4px;font-size:14px;font-weight:600;line-height:1.4">${link(e(product.title))}</h3><p style="margin:0 0 4px;color:#465c71;font-size:12px;line-height:1.4">${e(product.portion)}</p>${product.showSalePrice !== false ? `<p style="margin:0;font-size:13px;line-height:1.5;color:#465c71">${e(product.pricePrefix)}${product.pricePrefix ? " " : ""}<strong style="color:#102641;font-weight:600">${e(product.salePrice || "")}</strong></p>` : ""}${product.showButton !== false && product.button ? link(`<span>${e(product.button)}</span> <span aria-hidden="true">→</span>`, "display:inline-block;min-height:44px;line-height:44px;text-decoration:underline;text-underline-offset:4px;font-size:12px;color:#284b88") : ""}</td></tr></table></td>`;
+      return `<td class="nl-product-cell" width="50%" valign="top" style="width:50%;padding:0 ${column ? 0 : 12}px 19px ${column ? 12 : 0}px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="table-layout:fixed"><tr><td width="76" valign="top" style="width:76px">${product.image ? link(`<img src="${e(product.image)}" alt="${e(product.alt)}" width="76" height="76" style="display:block;width:76px;height:76px;object-fit:cover">`) : ""}</td><td valign="top" style="padding-left:12px;font-family:Arial,Helvetica,sans-serif;color:#102641"><h3 style="margin:0 0 4px;font-size:14px;font-weight:600;line-height:1.4">${link(formatted("title", product.title))}</h3><p style="margin:0 0 4px;color:#465c71;font-size:12px;line-height:1.4">${formatted("portion", product.portion)}</p>${product.showSalePrice !== false ? `<p style="margin:0;font-size:13px;line-height:1.5;color:#465c71">${formatted("pricePrefix", product.pricePrefix)}${product.pricePrefix ? " " : ""}<strong style="color:#102641;font-weight:600">${formatted("salePrice", product.salePrice || "")}</strong></p>` : ""}${product.showButton !== false && product.button ? link(`<span>${formatted("button", product.button)}</span> <span aria-hidden="true">→</span>`, "display:inline-block;min-height:44px;line-height:44px;text-decoration:underline;text-underline-offset:4px;font-size:12px;color:#284b88") : ""}</td></tr></table></td>`;
     });
     if (cells.length === 1) cells.push('<td class="nl-product-cell" width="50%"></td>');
     rows.push(`<tr>${cells.join("")}</tr>`);
@@ -102,14 +108,14 @@ export function renderMacroNewsletter(c: Content, unsubscribe: string, address: 
   const text = (value: string) => escapeHtml(personalize(value, name)).replace(/\r?\n/g, "<br>");
   const template = definition.html.replace(/<img\b[^>]*src="\[\[NL:image:([\w-]+)\]\]"[^>]*>/g, (markup, key: string) => newsletter.images[key]?.src ? markup : "");
   const body = template.replace(/\[\[NL:(\w+):([\w-]+)\]\]/g, (_token, type: string, key: string) => {
-    if (type === "text") return text(newsletter.text[key] || "");
+    if (type === "text") return newsletterFormattedText(newsletter.text[key] || "", newsletter.richText?.[key], name, definition.fields.find(field => field.key === key)?.multiline === true);
     if (type === "link") return escapeHtml(newsletter.links[key] || "#");
     if (type === "image") return escapeHtml(newsletter.images[key]?.src || "");
     if (type === "alt") return escapeHtml(newsletter.images[key]?.alt || "");
-    if (type === "products") return productsHtml(newsletter.products);
+    if (type === "products") return productsHtml(newsletter.products, name);
     if (type === "system") {
-      if (key === "heading") return text(c.heading);
-      if (key === "body") return text(c.body);
+      if (key === "heading") return newsletterFormattedText(c.heading, newsletter.richText?.heading, name);
+      if (key === "body") return newsletterFormattedText(c.body, newsletter.richText?.body, name);
       if (key === "unsubscribe") return escapeHtml(unsubscribe);
       if (key === "unsubscribeLabel") return text(c.footerUnsubscribeLinkText ?? "Unsubscribe");
       if (key === "address") return c.showPostalAddress && address ? `<p style="margin:12px 0 0;font:12px/1.7 Arial,sans-serif;color:inherit">${text(address)}</p>` : "";
@@ -125,6 +131,7 @@ export function macroNewsletterText(c: Content, unsubscribe: string, address: st
   return [c.heading, c.body,
     ...definition.fields.filter(field => field.type === "text").map(field => newsletter.text[field.key]),
     ...Object.values(newsletter.links),
+    ...new Set(Object.values(newsletter.richText || {}).flatMap(newsletterTextLinks)),
     ...newsletter.products.map(product => [product.title, product.portion, product.showSalePrice !== false ? [product.pricePrefix, product.salePrice].filter(Boolean).join(" ") : "", product.url].filter(Boolean).join(" · ")),
     c.showPostalAddress ? address : "", `${c.footerUnsubscribeLinkText ?? "Unsubscribe"}: ${unsubscribe}`,
   ].filter(Boolean).map(line => personalize(line, name)).join("\n\n");

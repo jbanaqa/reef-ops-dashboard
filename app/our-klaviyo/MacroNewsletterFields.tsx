@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Content } from "@/lib/marketing/rules";
 import { newsletterDefinition, type NewsletterProduct } from "@/lib/marketing/macro-newsletters";
 import Artwork from "./EmailArtwork";
+import NewsletterRichText from "./NewsletterRichText";
+import { type NewsletterTextNode } from "@/lib/marketing/newsletter-rich-text";
 import { useMarketingBrand } from "./MarketingBrand";
 
 const newId = () => `manual-${crypto.randomUUID()}`;
@@ -28,6 +30,20 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
   };
   const replaceImage = (key: string, patch: Partial<(typeof newsletter.images)[string]>) => update({ images: { ...latest.current.images, [key]: { ...latest.current.images[key], ...patch } } });
   const replaceProduct = (id: string, patch: Partial<NewsletterProduct>) => update({ products: latest.current.products.map(product => product.id === id ? { ...product, ...patch } : product) });
+  const textField = (key: string, label: string, plain: string, compact = false, allowLinks = true) => <NewsletterRichText
+    key={`${newsletter.design}-${key}`} label={label} text={plain} value={newsletter.richText?.[key]} compact={compact} allowLinks={allowLinks}
+    onChange={(doc: NewsletterTextNode, text: string) => {
+      if (key === "heading" || key === "body") {
+        onChange(key, text);
+        update({ richText: { ...latest.current.richText, [key]: doc } });
+      } else update({ text: { ...latest.current.text, [key]: text }, richText: { ...latest.current.richText, [key]: doc } });
+    }} />;
+  const productField = (product: NewsletterProduct, key: "title" | "portion" | "pricePrefix" | "salePrice" | "button", label: string) => <NewsletterRichText
+    key={`${product.id}-${key}`} label={label} text={product[key] || ""} value={product.richText?.[key]} compact allowLinks={false}
+    onChange={(doc, text) => {
+      const current = latest.current.products.find(item => item.id === product.id)!;
+      replaceProduct(product.id, { [key]: text, richText: { ...current.richText, [key]: doc } });
+    }} />;
   const move = (index: number, direction: -1 | 1) => {
     const products = [...newsletter.products];
     [products[index], products[index + direction]] = [products[index + direction], products[index]];
@@ -39,15 +55,16 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
   return <>
     {panel === "content" && <section className="mk-editor-section">
       <h3>Opening</h3>
-      <label>Heading<input aria-label="Heading" value={content.heading} onChange={event => onChange("heading", event.target.value)} /></label>
-      <label>Introduction<textarea aria-label="Introduction" rows={5} value={content.body} onChange={event => onChange("body", event.target.value)} /></label>
+      {textField("heading", "Heading", content.heading, true)}
+      {textField("body", "Introduction", content.body)}
+      <p className="nl-rich-help">Click a text field to show its formatting tools. Select words to style them; use Enter for paragraphs or Shift+Enter for a line break.</p>
     </section>}
     {groups.map(group => <details key={group} className="mk-editor-section mk-editor-disclosure">
       <summary>{group}</summary>
-      <div className="mk-editor-disclosure-body">{fields.filter(field => field.group === group).map((field, index) => <label key={field.key}>
-        {field.label}{fields.filter(other => other.group === group && other.label === field.label).length > 1 ? ` ${index + 1}` : ""}
-        {field.type === "link" ? <input type="url" aria-label={`${group} ${field.label} ${index + 1}`} value={newsletter.links[field.key] || ""} onChange={event => update({ links: { ...newsletter.links, [field.key]: event.target.value } })} /> : field.multiline ? <textarea rows={4} aria-label={`${group} ${field.label} ${index + 1}`} value={newsletter.text[field.key] || ""} onChange={event => update({ text: { ...newsletter.text, [field.key]: event.target.value } })} /> : <input aria-label={`${group} ${field.label} ${index + 1}`} value={newsletter.text[field.key] || ""} onChange={event => update({ text: { ...newsletter.text, [field.key]: event.target.value } })} />}
-      </label>)}</div>
+      <div className="mk-editor-disclosure-body">{fields.filter(field => field.group === group).map((field, index) => <div key={field.key}>
+        {field.type === "link" ? <label>{field.label}<input type="url" aria-label={`${group} ${field.label} ${index + 1}`} value={newsletter.links[field.key] || ""} onChange={event => update({ links: { ...newsletter.links, [field.key]: event.target.value } })} /></label>
+          : textField(field.key, `${group} ${field.label} ${index + 1}`, newsletter.text[field.key] || "", !field.multiline, field.multiline === true)}
+      </div>)}</div>
     </details>)}
     {panel === "artwork" && definition.fields.filter(field => field.type === "image").map(field => <div key={`${newsletter.design}-${field.key}`} className="mk-editor-section">
       <Artwork label={field.label} value={newsletter.images[field.key]?.src} scale={1} onChange={src => replaceImage(field.key, { src: src || "" })} />
@@ -81,12 +98,12 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
       {results.map(product => <p key={product.id}>{product.title} · {product.salePrice} <button type="button" disabled={newsletter.products.length >= 40} onClick={() => update({ products: [...newsletter.products, { ...product, id: newId() }] })}>Add {product.title}</button></p>)}
       {newsletter.products.map((product, index) => <details className="mk-campaign-product-card" key={product.id}>
         <summary>{product.title || "Untitled product"}</summary>
-        <label>Product name<input value={product.title} onChange={event => replaceProduct(product.id, { title: event.target.value })} /></label>
-        <label>Portion or option<input value={product.portion} onChange={event => replaceProduct(product.id, { portion: event.target.value })} /></label>
-        <label>Price prefix<input value={product.pricePrefix} onChange={event => replaceProduct(product.id, { pricePrefix: event.target.value })} /></label>
-        <label>Price<input value={product.salePrice || ""} onChange={event => replaceProduct(product.id, { salePrice: event.target.value })} /></label>
+        {productField(product, "title", "Product name")}
+        {productField(product, "portion", "Portion or option")}
+        {productField(product, "pricePrefix", "Price prefix")}
+        {productField(product, "salePrice", "Price")}
         <label>Product destination<input type="url" value={product.url} onChange={event => replaceProduct(product.id, { url: event.target.value })} /></label>
-        <label>Shopping link text<input value={product.button || ""} onChange={event => replaceProduct(product.id, { button: event.target.value })} /></label>
+        {productField(product, "button", "Shopping link text")}
         <Artwork label={`${product.title || "Product"} photo`} value={product.image} scale={1} onChange={image => replaceProduct(product.id, { image })} />
         <label>Product image URL<input type="url" value={product.image?.startsWith("data:") ? "" : product.image || ""} onChange={event => replaceProduct(product.id, { image: event.target.value })} /></label>
         <label>Image description<input value={product.alt} onChange={event => replaceProduct(product.id, { alt: event.target.value })} /></label>

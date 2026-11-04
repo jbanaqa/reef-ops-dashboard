@@ -30,6 +30,12 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@tiptap/core": "3.32.2",
+    "@tiptap/extension-text-align": "3.32.2",
+    "@tiptap/extension-text-style": "3.32.2",
+    "@tiptap/pm": "3.32.2",
+    "@tiptap/react": "3.32.2",
+    "@tiptap/starter-kit": "3.32.2",
     "he": "^1.2.0",
     "next": "16.3.4",
     "openai": "^6.45.0",

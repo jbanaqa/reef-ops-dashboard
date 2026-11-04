@@ -6,6 +6,57 @@ import { emailBody } from "../lib/marketing/delivery";
 import { macroNewsletterContent, macroNewsletterDefinitions, macroNewsletterTemplates, newsletterLink } from "../lib/marketing/macro-newsletters";
 import { resolveCampaignProductFeeds, manualNewsletterProducts } from "../lib/marketing/campaign-product-feed";
 import { runWithMarketingBrand } from "../lib/marketing/context";
+import { newsletterTextDocument, newsletterPlainText, normalizeNewsletterText, newsletterFormattedText, type NewsletterTextNode } from "../lib/marketing/newsletter-rich-text";
+
+test("newsletter rich text survives save/reopen and reaches preview, delivery and readable plain text in all three layouts", () => {
+  const doc: NewsletterTextNode = { type: "doc", content: [
+    { type: "paragraph", attrs: { indent: 2, textAlign: "right" }, content: [{ type: "text", text: 'Hi {{ first_name|default:"reef keeper" }} <script>', marks: [{ type: "bold" }, { type: "underline" }, { type: "textStyle", attrs: { color: "#284b88", fontFamily: "Georgia", fontSize: "18px", lineHeight: "1.75" } }] }] },
+    { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "A useful habitat" }] }] }] },
+    { type: "paragraph", content: [{ type: "text", text: "Species library", marks: [{ type: "link", attrs: { href: "https://www.macroalgaefarms.com/pages/species-library" } }] }] },
+  ] };
+  for (const definition of macroNewsletterDefinitions) {
+    const value = macroNewsletterContent(definition.design);
+    value.body = newsletterPlainText(doc);
+    value.macroNewsletter!.richText = { body: doc, heading: newsletterTextDocument(value.heading) };
+    const field = definition.fields.find(field => field.type === "text")!;
+    value.macroNewsletter!.text[field.key] = "Editable caption";
+    value.macroNewsletter!.richText[field.key] = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Editable caption", marks: [{ type: "italic" }] }] }] };
+    value.macroNewsletter!.products[0].title = "Formatted product";
+    value.macroNewsletter!.products[0].richText = { title: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Formatted product", marks: [{ type: "underline" }] }] }] } };
+    const saved = content(JSON.parse(JSON.stringify(value)));
+    assert.deepEqual(saved.macroNewsletter!.richText?.body, normalizeNewsletterText(doc));
+    const html = render(saved, "https://app.example/unsubscribe", "", "Alex Keeper", "Macroalgae Farms");
+    const parsed = new JSDOM(html).window.document;
+    assert.equal(parsed.querySelectorAll("script,p p,a a").length, 0);
+    assert.match(html, /margin-left:40px/);
+    assert.match(html, /text-align:right/);
+    assert.match(html, /font-size:18px/);
+    assert.ok(parsed.querySelector('span[role="list"]'));
+    assert.match(html, /<u><strong>|<strong>/);
+    assert.match(parsed.body.textContent!, /Hi Alex <script>/);
+    assert.equal(parsed.querySelector("h3 u")?.textContent, "Formatted product");
+    const delivered = emailBody({ id: "rich-preview", to: "staff@example.com", channel: "EMAIL", subject: "Rich preview", content: saved, profileName: "Alex Keeper", unsubscribe: "https://app.example/unsubscribe" }, "", "Macroalgae Farms");
+    assert.match(delivered.html, /margin-left:40px/);
+    assert.match(delivered.text, /Hi Alex <script>/);
+    assert.match(delivered.text, /A useful habitat/);
+    assert.doesNotMatch(delivered.text, /<strong>|<span|\[object Object\]/);
+    const olderEdit = { ...saved, body: "Later plain-text change" };
+    assert.match(render(olderEdit, "#unsubscribe", ""), /Later plain-text change/);
+    assert.doesNotMatch(render(olderEdit, "#unsubscribe", ""), /Hi Alex/);
+  }
+});
+
+test("newsletter rich text rejects executable content, external links, illegal structures and unbounded input", () => {
+  const node = (mark: { type: string; attrs?: Record<string, string> }) => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Safe", marks: [mark] }] }] });
+  for (const href of ["javascript:alert(1)", "https://evil.example/", "https://macroalgaefarms.com.evil.example/", "https://user:password@macroalgaefarms.com/"]) assert.throws(() => normalizeNewsletterText(node({ type: "link", attrs: { href } })));
+  assert.throws(() => normalizeNewsletterText({ type: "doc", content: [{ type: "iframe" }] }));
+  assert.throws(() => normalizeNewsletterText({ type: "doc", content: [{ type: "text", text: "Invalid child" }] }));
+  assert.throws(() => normalizeNewsletterText(newsletterTextDocument("x".repeat(20001))));
+  const stripped = normalizeNewsletterText(node({ type: "textStyle", attrs: { color: "red;background:url(javascript:alert(1))", fontFamily: "Evil;display:none", fontSize: "999px" } }));
+  assert.equal(newsletterFormattedText("Safe", stripped), "Safe");
+  const stale = newsletterTextDocument("Old copy");
+  assert.equal(newsletterFormattedText("<b>New plain copy</b>", stale), "&lt;b&gt;New plain copy&lt;/b&gt;");
+});
 
 test("manual newsletter search matches partial names and imports available Macroalgae Farms products", async () => {
   const keys = ["SPECIES_LIBRARY_SHOP_DOMAIN", "MACROALGAE_SHOPIFY_CLIENT_ID", "MACROALGAE_SHOPIFY_CLIENT_SECRET"];

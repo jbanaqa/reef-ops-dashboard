@@ -764,12 +764,12 @@ test("newsletter image uploads preserve product edits made while the file is loa
     const view = testing.render(<Editor />);
     const first = testing.within(view.container.querySelector(".mk-campaign-product-card") as HTMLElement);
     testing.fireEvent.change(first.getByLabelText("Sea Lettuce (Ulva) photo image"), { target: { files: [new dom.window.File(["image"], "photo.png", { type: "image/png" })] } });
-    testing.fireEvent.change(first.getByLabelText("Price", { exact: true }), { target: { value: "$23.00" } });
-    testing.fireEvent.change(first.getByLabelText("Portion or option"), { target: { value: "Staff portion" } });
+    testing.fireEvent.change(first.getByLabelText("Product destination"), { target: { value: "https://www.macroalgaefarms.com/products/staff-selection" } });
+    testing.fireEvent.click(first.getByLabelText("Show price"));
     await testing.act(async () => { readers[0].onload?.(); });
     assert.equal(latest.macroNewsletter!.products[0].image, "data:image/png;base64,AQID");
-    assert.equal(latest.macroNewsletter!.products[0].salePrice, "$23.00");
-    assert.equal(latest.macroNewsletter!.products[0].portion, "Staff portion");
+    assert.equal(latest.macroNewsletter!.products[0].url, "https://www.macroalgaefarms.com/products/staff-selection");
+    assert.equal(latest.macroNewsletter!.products[0].showSalePrice, false);
     assert.equal(latest.macroNewsletter!.products.length, 6);
   } finally { globalThis.FileReader = originalReader; }
 });
