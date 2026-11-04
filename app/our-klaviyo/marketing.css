@@ -87,3 +87,17 @@ button.mk-flow-node{font:inherit;text-align:left;cursor:pointer;color:inherit;wi
 .nl-rich-link { padding: 10px; border-bottom: 1px solid #d6e0e6; background: #f3f6f8; }
 .nl-rich-link label { font-size: 12px; }
 .nl-rich-help { font-size: 12px; line-height: 1.6; color: #536471; }
+
+/* Approved newsletter section visibility. */
+.nl-section-manager > p { font-size: 13px; line-height: 1.6; }
+.nl-section-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border, #d6e0e6); font-size: 13px; }
+.nl-section-row > span { min-width: 0; line-height: 1.5; }
+.nl-section-child { padding-left: 15px; border-left: 2px solid #d6e0e6; }
+.marketing .nl-section-row button { flex-shrink: 0; min-height: 34px; padding: 5px 9px; font-size: 12px; background: transparent; color: #284b88; border: 1px solid #d6e0e6; border-radius: 3px; }
+.nl-removed-sections { margin-top: 22px; }
+.nl-removed-sections h4 { margin: 0 0 5px; font-size: 13px; color: #536471; }
+.nl-removed-sections .nl-section-row > span { color: #536471; }
+.marketing .nl-restore-all { margin-top: 12px; font-size: 12px; }
+.nl-section-note { color: #536471; }
+.nl-section-status:empty { display: none; }
+.nl-section-status { font-size: 12px; color: #284b88; }

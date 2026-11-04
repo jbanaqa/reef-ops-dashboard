@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { Content } from "@/lib/marketing/rules";
-import { newsletterDefinition, type NewsletterProduct } from "@/lib/marketing/macro-newsletters";
+import { newsletterDefinition, newsletterFieldVisible, newsletterSectionRemoved, type NewsletterProduct } from "@/lib/marketing/macro-newsletters";
 import Artwork from "./EmailArtwork";
 import NewsletterRichText from "./NewsletterRichText";
+import NewsletterSections from "./NewsletterSections";
 import { type NewsletterTextNode } from "@/lib/marketing/newsletter-rich-text";
 import { useMarketingBrand } from "./MarketingBrand";
 
@@ -49,16 +50,18 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
     [products[index], products[index + direction]] = [products[index + direction], products[index]];
     update({ products });
   };
-  const fields = definition.fields.filter(field => field.type !== "image" && (panel === "footer" ? field.group === "Footer" : panel === "products" ? field.group === "Product grid" : panel === "content" && !["Footer", "Product grid"].includes(field.group)));
+  const fields = definition.fields.filter(field => newsletterFieldVisible(newsletter, field.key) && field.type !== "image" && (panel === "footer" ? field.group === "Footer" : panel === "products" ? field.group === "Product grid" : panel === "content" && !["Footer", "Product grid"].includes(field.group)));
   const groupOrder = ["Header", "Opening", "Featured macroalgae", "Habitat photographs", "Reference details", "Article", "Growth and care", "Aquarium care", "Product grid", "Footer"];
   const groups = [...new Set(fields.map(field => field.group))].sort((a, b) => groupOrder.indexOf(a) - groupOrder.indexOf(b));
   return <>
-    {panel === "content" && <section className="mk-editor-section">
+    {panel === "products" && <NewsletterSections newsletter={newsletter} onChange={hiddenSections => update({ hiddenSections })} />}
+    {panel === "content" && !newsletterSectionRemoved(newsletter, "opening") && <section className="mk-editor-section">
       <h3>Opening</h3>
       {textField("heading", "Heading", content.heading, true)}
       {textField("body", "Introduction", content.body)}
       <p className="nl-rich-help">Click a text field to show its formatting tools. Select words to style them; use Enter for paragraphs or Shift+Enter for a line break.</p>
     </section>}
+    {panel === "content" && <p className="nl-rich-help">Remove or restore whole sections under Layout → Sections in this email.</p>}
     {groups.map(group => <details key={group} className="mk-editor-section mk-editor-disclosure">
       <summary>{group}</summary>
       <div className="mk-editor-disclosure-body">{fields.filter(field => field.group === group).map((field, index) => <div key={field.key}>
@@ -66,7 +69,7 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
           : textField(field.key, `${group} ${field.label} ${index + 1}`, newsletter.text[field.key] || "", !field.multiline, field.multiline === true)}
       </div>)}</div>
     </details>)}
-    {panel === "artwork" && definition.fields.filter(field => field.type === "image").map(field => <div key={`${newsletter.design}-${field.key}`} className="mk-editor-section">
+    {panel === "artwork" && definition.fields.filter(field => field.type === "image" && newsletterFieldVisible(newsletter, field.key)).map(field => <div key={`${newsletter.design}-${field.key}`} className="mk-editor-section">
       <Artwork label={field.label} value={newsletter.images[field.key]?.src} scale={1} onChange={src => replaceImage(field.key, { src: src || "" })} />
       <label>Image URL<input type="url" value={newsletter.images[field.key]?.src.startsWith("data:") ? "" : newsletter.images[field.key]?.src || ""} placeholder="https://" onChange={event => replaceImage(field.key, { src: event.target.value })} /></label>
       <label>Image description<input value={newsletter.images[field.key]?.alt || ""} onChange={event => replaceImage(field.key, { alt: event.target.value })} /></label>
@@ -78,7 +81,8 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
       <p>This choice applies only to this campaign or template. Your business address stays saved in Settings.</p>
       <p>The unsubscribe destination is added automatically for each recipient.</p>
     </section>}
-    {panel === "products" && <section className="mk-editor-section">
+    {panel === "products" && newsletterSectionRemoved(newsletter, "products") && <p className="nl-rich-help">The product grid is removed from this email. Restore it above to edit its products.</p>}
+    {panel === "products" && !newsletterSectionRemoved(newsletter, "products") && <section className="mk-editor-section">
       <h3>Manually selected products</h3>
       <p>Add, edit, remove, or reorder products. These selections stay with this campaign.</p>
       <label>Find a Macroalgae Farms product<input value={query} onChange={event => { searchVersion.current++; setQuery(event.target.value); setResults([]); setSearching(false); setSearched(false); setError(""); }} /></label>

@@ -31,6 +31,7 @@ export function registerMarketingBrandRouteTests(context: () => Context) {
     value.macroNewsletter!.products[0].title = "Hand-picked aquarium product";
     value.macroNewsletter!.products[0].salePrice = "$22.00";
     value.macroNewsletter!.showPostalAddress = false;
+    value.macroNewsletter!.hiddenSections = ["care", "article-left"];
     value.macroNewsletter!.images["image-1"] = { src: "data:image/png;base64,AQID", alt: "Staff artwork" };
     const savedTemplate = await api.POST(request("macroalgae-farms", { action: "save-resource", kind: "TEMPLATE", key: "macro-newsletter-field-guide", name: "Staff field guide", data: value }));
     assert.equal(savedTemplate.status, 200);
@@ -48,6 +49,7 @@ export function registerMarketingBrandRouteTests(context: () => Context) {
     assert.deepEqual(saved.macroNewsletter!.richText, value.macroNewsletter!.richText);
     assert.equal(saved.macroNewsletter!.products[0].salePrice, "$22.00");
     assert.equal(saved.macroNewsletter!.showPostalAddress, false);
+    assert.deepEqual(saved.macroNewsletter!.hiddenSections, ["article-left", "care"]);
     assert.equal(saved.macroNewsletter!.images["image-1"].src, "data:image/png;base64,AQID");
     assert.equal(saved.campaignLayout, undefined);
     assert.equal(await prisma.marketingMessage.count({ where: { shop: macroShop } }), 0);

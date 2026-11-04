@@ -636,7 +636,7 @@ export default function EmailDesigner({
               )))}
             {panel === "layout" && (
               <>
-                {isNewsletter && <section className="mk-editor-section"><h3>Approved newsletter layout</h3><p>The article arrangement stays consistent. Edit wording in Content, replace pictures in Artwork, and choose the products below.</p></section>}
+                {isNewsletter && <section className="mk-editor-section"><h3>Newsletter layout</h3><p>Choose which sections to include. Remaining sections keep their approved layout. Edit their text in Content and pictures in Artwork.</p></section>}
                 {!isNewsletter && <details className="mk-editor-section mk-editor-disclosure">
                   <summary><span>Email layout</span><small>{emailLayoutNames[visualLayout]}</small></summary>
                   <div className="mk-editor-disclosure-body">

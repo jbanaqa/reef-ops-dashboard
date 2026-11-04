@@ -3,10 +3,75 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { content, render, defaultContent, withBranding, sharedEmailFooter } from "../lib/marketing/rules";
 import { emailBody } from "../lib/marketing/delivery";
-import { macroNewsletterContent, macroNewsletterDefinitions, macroNewsletterTemplates, newsletterLink } from "../lib/marketing/macro-newsletters";
+import { macroNewsletterContent, macroNewsletterDefinitions, macroNewsletterTemplates, newsletterLink, newsletterSectionHtml, newsletterSectionRemoved } from "../lib/marketing/macro-newsletters";
 import { resolveCampaignProductFeeds, manualNewsletterProducts } from "../lib/marketing/campaign-product-feed";
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { newsletterTextDocument, newsletterPlainText, normalizeNewsletterText, newsletterFormattedText, type NewsletterTextNode } from "../lib/marketing/newsletter-rich-text";
+
+test("removed newsletter sections collapse completely, preserve their content and restore exactly in every layout", () => {
+  for (const definition of macroNewsletterDefinitions) {
+    const original = macroNewsletterContent(definition.design);
+    const initial = render(original, "https://app.example/unsubscribe", "123 Ocean Ave");
+    for (const section of definition.sections) {
+      const edited = structuredClone(original);
+      edited.macroNewsletter!.hiddenSections = [section.id, section.id, "unknown-section"];
+      const saved = content(JSON.parse(JSON.stringify(edited)));
+      assert.deepEqual(saved.macroNewsletter!.hiddenSections, [section.id]);
+      assert.deepEqual(saved.macroNewsletter!.text, original.macroNewsletter!.text);
+      assert.deepEqual(saved.macroNewsletter!.products, original.macroNewsletter!.products);
+      assert.equal(newsletterSectionRemoved(saved.macroNewsletter!, section.id), true);
+      const structure = newsletterSectionHtml(saved.macroNewsletter!);
+      for (const key of section.fields) assert.ok(!structure.includes(`:${key}]]`), `${definition.design}/${section.id} removes the entire ${key} container`);
+      const html = render(saved, "https://app.example/unsubscribe", "123 Ocean Ave");
+      const doc = new JSDOM(html).window.document;
+      assert.ok(doc.querySelector('a[href="https://app.example/unsubscribe"]'));
+      assert.equal(doc.querySelectorAll("tr:empty,table:empty").length, 0);
+      assert.ok(!html.includes("NL:section:"));
+      saved.macroNewsletter!.hiddenSections = [];
+      assert.equal(render(saved, "https://app.example/unsubscribe", "123 Ocean Ave"), initial, "Restore returns to the approved arrangement and content");
+    }
+  }
+});
+
+test("removing an article column expands its sibling; removing all child rows leaves no empty article table", () => {
+  for (const design of ["habitat", "field-guide"] as const) {
+    for (const removed of ["article-left", "article-right"]) {
+      const value = macroNewsletterContent(design);
+      value.macroNewsletter!.hiddenSections = [removed];
+      const html = render(content(value), "https://app.example/unsubscribe", "");
+      const doc = new JSDOM(html).window.document;
+      const table = doc.querySelector(design === "habitat" ? ".mc-article" : ".mf-article")!;
+      const cells = table.querySelectorAll("tr:first-child > .nl-col");
+      assert.equal(cells.length, 1);
+      const cell = cells[0] as HTMLElement;
+      assert.equal(cell.style.width, "100%");
+      assert.equal(cell.style.paddingLeft, "0px");
+      assert.equal(cell.style.paddingRight, "0px");
+      assert.equal(cell.style.borderLeftWidth, "0px");
+    }
+    const value = macroNewsletterContent(design);
+    value.macroNewsletter!.hiddenSections = ["article-left", "article-right", "reading", ...(design === "habitat" ? ["field-note"] : [])];
+    const doc = new JSDOM(render(content(value), "#unsubscribe", "")).window.document;
+    assert.equal(doc.querySelector(design === "habitat" ? ".mc-article" : ".mf-article"), null);
+  }
+});
+
+test("removed content is excluded from both delivery formats and inline attachments", () => {
+  const value = macroNewsletterContent("nitrate");
+  value.heading = "REMOVED OPENING";
+  value.body = "REMOVED INTRODUCTION";
+  value.macroNewsletter!.text["text-2"] = "REMOVED FEATURE COPY";
+  value.macroNewsletter!.richText = { "text-2": { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "REMOVED FEATURE COPY", marks: [{ type: "link", attrs: { href: "https://www.macroalgaefarms.com/pages/removed-rich-link" } }] }] }] } };
+  value.macroNewsletter!.images["image-1"].src = "data:image/png;base64,AQID";
+  value.macroNewsletter!.products[0].title = "REMOVED PRODUCT";
+  value.macroNewsletter!.hiddenSections = ["opening", "feature", "products"];
+  const result = emailBody({ id: "removed-section-preview", to: "staff@example.com", channel: "EMAIL", subject: "Preview", content: content(value), unsubscribe: "https://app.example/unsubscribe" }, "123 Ocean Ave", "Macroalgae Farms");
+  for (const text of [result.html, result.text]) assert.doesNotMatch(text, /REMOVED|removed-rich-link/);
+  assert.ok(!result.attachments?.some(item => item.content === "AQID"));
+  assert.match(result.html, /What to watch as it grows/);
+  assert.match(result.text, /What to watch as it grows/);
+  assert.match(result.html, /Unsubscribe/);
+});
 
 test("newsletter rich text survives save/reopen and reaches preview, delivery and readable plain text in all three layouts", () => {
   const doc: NewsletterTextNode = { type: "doc", content: [

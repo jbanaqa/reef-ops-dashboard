@@ -742,6 +742,33 @@ test("newsletter address checkbox stores a local choice without changing shared 
   assert.equal(latest.macroNewsletter!.showPostalAddress, true);
 });
 
+test("newsletter sections can be removed and restored without deleting copy, artwork or products", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  let latest = macroNewsletterContent("field-guide");
+  const original = structuredClone(latest.macroNewsletter);
+  function Editor() {
+    const [draft, setDraft] = React.useState(latest);
+    latest = draft;
+    return <MacroNewsletterFields panel="products" content={draft} onChange={(key, value) => setDraft(current => ({ ...current, [key]: value }))} />;
+  }
+  const view = testing.render(<Editor />);
+  testing.fireEvent.click(view.getByRole("button", { name: "Remove Aquarium care section" }));
+  assert.deepEqual(latest.macroNewsletter!.hiddenSections, ["care"]);
+  testing.fireEvent.click(view.getByRole("button", { name: "Remove Species article section" }));
+  assert.equal(view.queryByRole("button", { name: "Remove Inside each segment section" }), null);
+  testing.fireEvent.click(view.getByRole("button", { name: "Restore Species article section" }));
+  assert.ok(view.getByRole("button", { name: "Remove Inside each segment section" }));
+  testing.fireEvent.click(view.getByRole("button", { name: "Remove Product grid section" }));
+  assert.equal(view.queryByRole("button", { name: "Search products" }), null);
+  assert.deepEqual(latest.macroNewsletter!.text, original!.text);
+  assert.deepEqual(latest.macroNewsletter!.images, original!.images);
+  assert.deepEqual(latest.macroNewsletter!.products, original!.products);
+  testing.fireEvent.click(view.getByRole("button", { name: "Restore all sections" }));
+  assert.deepEqual(latest.macroNewsletter!.hiddenSections, []);
+  assert.ok(view.getByRole("button", { name: "Search products" }));
+});
+
 test("newsletter image uploads preserve product edits made while the file is loading", async () => {
   const testing = await import("@testing-library/react");
   cleanup = testing.cleanup;

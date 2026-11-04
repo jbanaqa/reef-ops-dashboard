@@ -10,19 +10,48 @@ export type MacroNewsletter = {
   /** Omitted newsletters inherit the brand footer; an explicit choice stays local. */
   showPostalAddress?: boolean;
   richText?: NewsletterRichText;
+  hiddenSections?: string[];
   text: Record<string, string>;
   links: Record<string, string>;
   images: Record<string, NewsletterImage>;
   products: NewsletterProduct[];
 };
 export type NewsletterField = { key: string; type: "text" | "link" | "image"; group: string; label: string; multiline?: boolean };
-type Definition = { design: MacroNewsletterDesign; name: string; subject: string; preview: string; heading: string; body: string; fields: NewsletterField[]; defaults: Omit<MacroNewsletter, "design">; html: string; css: string };
+export type NewsletterSection = { id: string; label: string; parent?: string; fields: string[] };
+type Definition = { design: MacroNewsletterDesign; name: string; subject: string; preview: string; heading: string; body: string; fields: NewsletterField[]; defaults: Omit<MacroNewsletter, "design">; html: string; css: string; sections: NewsletterSection[]; collapses: { id: string; columns: string[]; single: Record<string, string>; empty: string }[] };
 export const macroNewsletterDefinitions = layouts.templates as unknown as Definition[];
 
 export function newsletterDefinition(design: unknown) {
   const found = macroNewsletterDefinitions.find(item => item.design === design);
   if (!found) throw new Error("Choose one of the three approved Macroalgae Farms newsletters.");
   return found;
+}
+
+export function newsletterSectionRemoved(newsletter: MacroNewsletter, id: string): boolean {
+  const section = newsletterDefinition(newsletter.design).sections.find(section => section.id === id);
+  return !!section && (!!newsletter.hiddenSections?.includes(id) || !!section.parent && newsletterSectionRemoved(newsletter, section.parent));
+}
+
+export function newsletterFieldVisible(newsletter: MacroNewsletter, key: string): boolean {
+  return !newsletterDefinition(newsletter.design).sections.some(section => section.fields.includes(key) && newsletterSectionRemoved(newsletter, section.id));
+}
+
+const sectionPattern = (id: string) => new RegExp(`<!--NL:section:${id}-->[\\s\\S]*?<!--/NL:section:${id}-->`, "g");
+
+/** Remove the complete approved container, including its table rows and spacing. */
+export function newsletterSectionHtml(newsletter: MacroNewsletter): string {
+  const definition = newsletterDefinition(newsletter.design);
+  let html = definition.html;
+  for (const collapse of definition.collapses) {
+    if (newsletterSectionRemoved(newsletter, collapse.id)) continue;
+    const columns = collapse.columns.filter(id => !newsletterSectionRemoved(newsletter, id));
+    if (columns.length === 1) html = html.replace(sectionPattern(collapse.id), () => collapse.single[columns[0]]);
+    if (!columns.length) html = html.replace(sectionPattern(collapse.id), () => collapse.empty);
+  }
+  for (const section of definition.sections) if (newsletterSectionRemoved(newsletter, section.id)) html = html.replace(sectionPattern(section.id), "");
+  return html.replace(/<!--\/?NL:section:[\w-]+-->/g, "")
+    .replace(/<tr>\s*<\/tr>/g, "")
+    .replace(/<table\b[^>]*>\s*(?:<tbody>\s*<\/tbody>)?\s*<\/table>/g, "");
 }
 
 /** Newsletter destinations stay on the brand's website; artwork may use HTTPS CDNs. */
@@ -75,6 +104,7 @@ export function normalizeMacroNewsletter(value: unknown): MacroNewsletter | unde
   const richText = normalizeNewsletterRichText(input.richText, ["heading", "body", ...definition.fields.filter(field => field.type === "text").map(field => field.key)]);
   return { design: definition.design,
     ...(richText ? { richText } : {}),
+    ...(Array.isArray(input.hiddenSections) ? { hiddenSections: definition.sections.filter(section => input.hiddenSections!.includes(section.id)).map(section => section.id) } : {}),
     ...(typeof input.showPostalAddress === "boolean" ? { showPostalAddress: input.showPostalAddress } : {}),
     text, links, images, products: input.products.slice(0, 40).map((product, index) => ({
     id: String(product.id || `newsletter-product-${index}`).slice(0, 100), title: String(product.title ?? "").slice(0, 200),
@@ -106,7 +136,7 @@ export function renderMacroNewsletter(c: Content, unsubscribe: string, address: 
   const newsletter = c.macroNewsletter!;
   const definition = newsletterDefinition(newsletter.design);
   const text = (value: string) => escapeHtml(personalize(value, name)).replace(/\r?\n/g, "<br>");
-  const template = definition.html.replace(/<img\b[^>]*src="\[\[NL:image:([\w-]+)\]\]"[^>]*>/g, (markup, key: string) => newsletter.images[key]?.src ? markup : "");
+  const template = newsletterSectionHtml(newsletter).replace(/<img\b[^>]*src="\[\[NL:image:([\w-]+)\]\]"[^>]*>/g, (markup, key: string) => newsletter.images[key]?.src ? markup : "");
   const body = template.replace(/\[\[NL:(\w+):([\w-]+)\]\]/g, (_token, type: string, key: string) => {
     if (type === "text") return newsletterFormattedText(newsletter.text[key] || "", newsletter.richText?.[key], name, definition.fields.find(field => field.key === key)?.multiline === true);
     if (type === "link") return escapeHtml(newsletter.links[key] || "#");
@@ -128,11 +158,11 @@ export function renderMacroNewsletter(c: Content, unsubscribe: string, address: 
 export function macroNewsletterText(c: Content, unsubscribe: string, address: string, name?: string) {
   const newsletter = c.macroNewsletter!;
   const definition = newsletterDefinition(newsletter.design);
-  return [c.heading, c.body,
-    ...definition.fields.filter(field => field.type === "text").map(field => newsletter.text[field.key]),
-    ...Object.values(newsletter.links),
-    ...new Set(Object.values(newsletter.richText || {}).flatMap(newsletterTextLinks)),
-    ...newsletter.products.map(product => [product.title, product.portion, product.showSalePrice !== false ? [product.pricePrefix, product.salePrice].filter(Boolean).join(" ") : "", product.url].filter(Boolean).join(" · ")),
+  return [newsletterFieldVisible(newsletter, "heading") ? c.heading : "", newsletterFieldVisible(newsletter, "body") ? c.body : "",
+    ...definition.fields.filter(field => field.type === "text" && newsletterFieldVisible(newsletter, field.key)).map(field => newsletter.text[field.key]),
+    ...Object.entries(newsletter.links).filter(([key]) => newsletterFieldVisible(newsletter, key)).map(([, value]) => value),
+    ...new Set(Object.entries(newsletter.richText || {}).filter(([key]) => newsletterFieldVisible(newsletter, key)).flatMap(([, value]) => newsletterTextLinks(value))),
+    ...(newsletterSectionRemoved(newsletter, "products") ? [] : newsletter.products.map(product => [product.title, product.portion, product.showSalePrice !== false ? [product.pricePrefix, product.salePrice].filter(Boolean).join(" ") : "", product.url].filter(Boolean).join(" · "))),
     c.showPostalAddress ? address : "", `${c.footerUnsubscribeLinkText ?? "Unsubscribe"}: ${unsubscribe}`,
   ].filter(Boolean).map(line => personalize(line, name)).join("\n\n");
 }
