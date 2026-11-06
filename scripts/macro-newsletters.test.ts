@@ -8,6 +8,44 @@ import { resolveCampaignProductFeeds, manualNewsletterProducts } from "../lib/ma
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { newsletterTextDocument, newsletterPlainText, normalizeNewsletterText, newsletterFormattedText, type NewsletterTextNode } from "../lib/marketing/newsletter-rich-text";
 
+test("all Macro product grids have intrinsic mobile wrapping, bounded CSS and a desktop Outlook fallback", () => {
+  for (const definition of macroNewsletterDefinitions) {
+    for (const count of [0, 1, 5, 6]) {
+      const value = macroNewsletterContent(definition.design);
+      value.macroNewsletter!.products = value.macroNewsletter!.products.slice(0, count);
+      const delivery = emailBody({ id: "hybrid-grid-preview", to: "staff@example.com", channel: "EMAIL", subject: "Preview", content: content(value), unsubscribe: "https://app.example/unsubscribe" }, "", "Macroalgae Farms");
+      const doc = new JSDOM(delivery.html).window.document;
+      assert.ok([...doc.querySelectorAll("style")].reduce((sum, style) => sum + style.textContent!.length, 0) < 6000, "Email styles stay comfortably below Gmail's CSS limit");
+      assert.match(doc.querySelector("style")!.textContent!, /\.nl-product-column\{display:block!important;width:100%!important;max-width:100%!important\}/);
+      const fallback = new JSDOM(delivery.html.replace(/<style>[\s\S]*?<\/style>/g, "")).window.document;
+      assert.equal(fallback.body.style.fontFamily, "Arial, Helvetica, sans-serif");
+      const columns = [...fallback.querySelectorAll<HTMLElement>(".nl-product-column")];
+      assert.equal(columns.length, count, "Odd product counts never create an empty mobile card");
+      assert.equal(fallback.querySelectorAll('.nl-product-grid td[width="50%"],.nl-product-grid .nl-product-cell').length, 0);
+      assert.deepEqual(columns.map(column => column.querySelector("h3")!.textContent), value.macroNewsletter!.products.map(product => product.title));
+      for (const column of columns) {
+        assert.equal(column.style.display, "inline-block");
+        assert.equal(column.style.width, "100%");
+        assert.equal(column.style.maxWidth, "278px");
+        assert.equal(column.style.fontSize, "14px");
+        assert.notEqual(column.style.lineHeight, "0");
+        assert.ok(column.querySelector<HTMLElement>('td[style*="overflow-wrap:anywhere"]'));
+        assert.equal(column.querySelector("img")!.getAttribute("width"), "76");
+      }
+      assert.equal(fallback.querySelectorAll(".nl-product-row").length, Math.ceil(count / 2));
+      if (count % 2) assert.equal(fallback.querySelector(".nl-product-row:last-child")!.children.length, 1);
+      const outlook = new JSDOM(delivery.html.replace(/<!--\[if mso\]>([\s\S]*?)<!\[endif\]-->/g, "$1")).window.document;
+      const outlookRows = [...outlook.querySelectorAll(".nl-product-row > table > tbody > tr")];
+      assert.equal(outlookRows.length, Math.ceil(count / 2));
+      for (const row of outlookRows) {
+        assert.equal(row.children.length, 2);
+        for (const cell of row.children) assert.equal(cell.getAttribute("width"), "278");
+      }
+      assert.ok(fallback.querySelector('a[href="https://app.example/unsubscribe"]'));
+    }
+  }
+});
+
 test("nitrate feature switches to one column in the delivered markup without relying on mobile styles", () => {
   const value = macroNewsletterContent("nitrate");
   const original = render(value, "https://app.example/unsubscribe", "");
