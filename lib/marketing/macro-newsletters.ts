@@ -11,6 +11,7 @@ export type MacroNewsletter = {
   showPostalAddress?: boolean;
   richText?: NewsletterRichText;
   hiddenSections?: string[];
+  featuredLayout?: "columns" | "stacked";
   text: Record<string, string>;
   links: Record<string, string>;
   images: Record<string, NewsletterImage>;
@@ -18,7 +19,7 @@ export type MacroNewsletter = {
 };
 export type NewsletterField = { key: string; type: "text" | "link" | "image"; group: string; label: string; multiline?: boolean };
 export type NewsletterSection = { id: string; label: string; parent?: string; fields: string[] };
-type Definition = { design: MacroNewsletterDesign; name: string; subject: string; preview: string; heading: string; body: string; fields: NewsletterField[]; defaults: Omit<MacroNewsletter, "design">; html: string; css: string; sections: NewsletterSection[]; collapses: { id: string; columns: string[]; single: Record<string, string>; empty: string }[] };
+type Definition = { design: MacroNewsletterDesign; name: string; subject: string; preview: string; heading: string; body: string; fields: NewsletterField[]; defaults: Omit<MacroNewsletter, "design">; html: string; stackedFeatureHtml?: string; css: string; sections: NewsletterSection[]; collapses: { id: string; columns: string[]; single: Record<string, string>; empty: string }[] };
 export const macroNewsletterDefinitions = layouts.templates as unknown as Definition[];
 
 export function newsletterDefinition(design: unknown) {
@@ -42,6 +43,8 @@ const sectionPattern = (id: string) => new RegExp(`<!--NL:section:${id}-->[\\s\\
 export function newsletterSectionHtml(newsletter: MacroNewsletter): string {
   const definition = newsletterDefinition(newsletter.design);
   let html = definition.html;
+  if (newsletter.design === "nitrate" && newsletter.featuredLayout === "stacked" && definition.stackedFeatureHtml)
+    html = html.replace(sectionPattern("feature"), () => definition.stackedFeatureHtml!);
   for (const collapse of definition.collapses) {
     if (newsletterSectionRemoved(newsletter, collapse.id)) continue;
     const columns = collapse.columns.filter(id => !newsletterSectionRemoved(newsletter, id));
@@ -105,6 +108,7 @@ export function normalizeMacroNewsletter(value: unknown): MacroNewsletter | unde
   return { design: definition.design,
     ...(richText ? { richText } : {}),
     ...(Array.isArray(input.hiddenSections) ? { hiddenSections: definition.sections.filter(section => input.hiddenSections!.includes(section.id)).map(section => section.id) } : {}),
+    ...(definition.design === "nitrate" && ["columns", "stacked"].includes(input.featuredLayout || "") ? { featuredLayout: input.featuredLayout } : {}),
     ...(typeof input.showPostalAddress === "boolean" ? { showPostalAddress: input.showPostalAddress } : {}),
     text, links, images, products: input.products.slice(0, 40).map((product, index) => ({
     id: String(product.id || `newsletter-product-${index}`).slice(0, 100), title: String(product.title ?? "").slice(0, 200),

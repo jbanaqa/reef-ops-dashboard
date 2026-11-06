@@ -1,5 +1,13 @@
 # Reef Ops / Our Klaviyo — account-switch handoff
 
+### Nitrate newsletter featured layout choice — November 5, 2026
+
+The Nutrient management newsletter now offers Layout > Featured macroalgae layout > Image and text arrangement: Two columns (image beside text) or One column (image above text). Optional `macroNewsletter.featuredLayout` stores `columns`/`stacked` only for the nitrate design; omitted/invalid values preserve the approved two-column version. The stacked variant uses two actual full-width table rows with inline widths, so the long article never reserves a blank image column even without responsive styles. The centered image stays at most 200px wide with natural height, its caption underneath, followed by full-width text with 18px separation. Existing copy, links, formatting, artwork and products are retained when switching or removing/restoring the feature.
+
+The JSON layout includes a prebuilt `stackedFeatureHtml` variant of only the featured section, using the same section boundaries and content tokens. The chat workspace helper `work/stack-nitrate-feature.cjs` regenerates this variant from the approved two-column feature. Existing saved templates/campaigns are not silently changed. The choice follows the existing normalization/save/snapshot/preview/delivery pipeline; deploy both dashboard and marketing runner. No migration, provider/sending setting change or customer/test email is needed.
+
+Validation: all 290 isolated marketing tests, TypeScript and changed-file lint pass. Coverage checks actual template/campaign persistence, rich copy retention, section restoration, invalid/other-design choices, exact two-column fallback and delivered single-column markup with head styles removed. Browser review confirms save/reopen, a longer article, a compact uncropped 200px image, full-width text (556px desktop / 335px at 375px mobile) and no horizontal overflow. Test/build evidence uses `work/newsletter-stacked-*` in the chat workspace.
+
 ### Removable Macro newsletter sections — November 4, 2026
 
 Layout > Sections in this email now offers Remove/Restore and Restore all sections for the three approved newsletters. Choices stay in optional `macroNewsletter.hiddenSections`; removing keeps text, artwork, rich formatting and product selections available for restoration. Existing emails without the field keep every approved section. Content and Artwork omit fields for removed sections, and the product editor returns after restoring the product grid. The footer with recipient-specific subscription links remains present.

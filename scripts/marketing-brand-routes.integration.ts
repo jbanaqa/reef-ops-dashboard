@@ -56,6 +56,17 @@ export function registerMarketingBrandRouteTests(context: () => Context) {
     const settings = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: macroShop, kind: "SETTINGS", key: "global" } } });
     assert.equal((settings.data as { operations: { sendingEnabled: boolean } }).operations.sendingEnabled, false);
     assert.equal((settings.data as { branding: { showPostalAddress: boolean } }).branding.showPostalAddress, true, "Campaign address choice leaves the shared setting unchanged");
+    const nitrate = macroNewsletterContent("nitrate");
+    nitrate.macroNewsletter!.featuredLayout = "stacked";
+    const nitrateTemplateResponse = await api.POST(request("macroalgae-farms", { action: "save-resource", kind: "TEMPLATE", key: "macro-newsletter-nitrate", name: "Staff nitrate article", data: nitrate }));
+    assert.equal(nitrateTemplateResponse.status, 200);
+    const nitrateTemplate = await prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: macroShop, kind: "TEMPLATE", key: "macro-newsletter-nitrate" } } });
+    assert.equal((nitrateTemplate.data as unknown as typeof nitrate).macroNewsletter!.featuredLayout, "stacked");
+    const nitrateCampaignResponse = await api.POST(request("macroalgae-farms", { action: "save-campaign", name: "Nitrate draft", subject: "Nitrate article", content: nitrate, audience: { version: 2, includeKeys: ["mailable"], excludeKeys: [] }, smartSending: true, recipientMode: "SEND_TIME" }));
+    assert.equal(nitrateCampaignResponse.status, 200);
+    const nitrateCampaign = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: (await nitrateCampaignResponse.json()).id } });
+    assert.equal((nitrateCampaign.content as unknown as typeof nitrate).macroNewsletter!.featuredLayout, "stacked");
+    assert.equal(await prisma.marketingMessage.count({ where: { shop: macroShop } }), 0);
     assert.equal(await prisma.marketingResource.count({ where: { shop: process.env.SHOPIFY_SHOP_DOMAIN, key: { startsWith: "macro-newsletter-" } } }), 0);
   }));
 

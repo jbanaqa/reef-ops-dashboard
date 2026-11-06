@@ -55,6 +55,14 @@ export default function MacroNewsletterFields({ content, onChange, panel }: {
   const groups = [...new Set(fields.map(field => field.group))].sort((a, b) => groupOrder.indexOf(a) - groupOrder.indexOf(b));
   return <>
     {panel === "products" && <NewsletterSections newsletter={newsletter} onChange={hiddenSections => update({ hiddenSections })} />}
+    {panel === "products" && newsletter.design === "nitrate" && !newsletterSectionRemoved(newsletter, "feature") && <section className="mk-editor-section">
+      <h3>Featured macroalgae layout</h3>
+      <label>Image and text arrangement<select value={newsletter.featuredLayout || "columns"} onChange={event => update({ featuredLayout: event.target.value === "stacked" ? "stacked" : "columns" })}>
+        <option value="columns">Two columns — image beside text</option>
+        <option value="stacked">One column — image above text</option>
+      </select></label>
+      <p>One column keeps the image compact and uncropped, followed by full-width text. Switching layouts keeps all your content and formatting.</p>
+    </section>}
     {panel === "content" && !newsletterSectionRemoved(newsletter, "opening") && <section className="mk-editor-section">
       <h3>Opening</h3>
       {textField("heading", "Heading", content.heading, true)}

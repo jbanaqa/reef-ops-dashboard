@@ -769,6 +769,33 @@ test("newsletter sections can be removed and restored without deleting copy, art
   assert.ok(view.getByRole("button", { name: "Search products" }));
 });
 
+test("nitrate featured layout can switch and survives section removal and restoration", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  let latest = macroNewsletterContent("nitrate");
+  const original = structuredClone(latest.macroNewsletter);
+  function Editor() {
+    const [draft, setDraft] = React.useState(latest);
+    latest = draft;
+    return <MacroNewsletterFields panel="products" content={draft} onChange={(key, value) => setDraft(current => ({ ...current, [key]: value }))} />;
+  }
+  const view = testing.render(<Editor />);
+  const select = view.getByRole("combobox", { name: "Image and text arrangement" }) as HTMLSelectElement;
+  assert.equal(select.value, "columns");
+  testing.fireEvent.change(select, { target: { value: "stacked" } });
+  assert.equal(latest.macroNewsletter!.featuredLayout, "stacked");
+  testing.fireEvent.click(view.getByRole("button", { name: "Remove Featured macroalgae section" }));
+  assert.equal(view.queryByRole("combobox", { name: "Image and text arrangement" }), null);
+  testing.fireEvent.click(view.getByRole("button", { name: "Restore Featured macroalgae section" }));
+  assert.equal((view.getByRole("combobox", { name: "Image and text arrangement" }) as HTMLSelectElement).value, "stacked");
+  testing.fireEvent.change(view.getByRole("combobox", { name: "Image and text arrangement" }), { target: { value: "columns" } });
+  assert.equal(latest.macroNewsletter!.featuredLayout, "columns");
+  assert.deepEqual(latest.macroNewsletter!.text, original!.text);
+  assert.deepEqual(latest.macroNewsletter!.richText, original!.richText);
+  assert.deepEqual(latest.macroNewsletter!.images, original!.images);
+  assert.deepEqual(latest.macroNewsletter!.products, original!.products);
+});
+
 test("newsletter image uploads preserve product edits made while the file is loading", async () => {
   const testing = await import("@testing-library/react");
   cleanup = testing.cleanup;

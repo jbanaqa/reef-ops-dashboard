@@ -8,6 +8,54 @@ import { resolveCampaignProductFeeds, manualNewsletterProducts } from "../lib/ma
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { newsletterTextDocument, newsletterPlainText, normalizeNewsletterText, newsletterFormattedText, type NewsletterTextNode } from "../lib/marketing/newsletter-rich-text";
 
+test("nitrate feature switches to one column in the delivered markup without relying on mobile styles", () => {
+  const value = macroNewsletterContent("nitrate");
+  const original = render(value, "https://app.example/unsubscribe", "");
+  value.macroNewsletter!.text["text-2"] = "Long staff article. ".repeat(100);
+  value.macroNewsletter!.richText = { "text-2": newsletterTextDocument(value.macroNewsletter!.text["text-2"]) };
+  const before = structuredClone(value.macroNewsletter!);
+  value.macroNewsletter!.featuredLayout = "stacked";
+  const saved = content(JSON.parse(JSON.stringify(value)));
+  assert.equal(saved.macroNewsletter!.featuredLayout, "stacked");
+  assert.deepEqual(saved.macroNewsletter!.text, before.text);
+  assert.deepEqual(saved.macroNewsletter!.richText, before.richText);
+  assert.deepEqual(saved.macroNewsletter!.images, before.images);
+  assert.deepEqual(saved.macroNewsletter!.products, before.products);
+  const result = emailBody({ id: "stacked-feature-preview", to: "staff@example.com", channel: "EMAIL", subject: "Preview", content: saved, unsubscribe: "https://app.example/unsubscribe" }, "", "Macroalgae Farms");
+  const doc = new JSDOM(result.html.replace(/<style>[\s\S]*?<\/style>/g, "")).window.document;
+  const rows = doc.querySelectorAll(".nl-feature-stacked > tbody > tr");
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.equal(row.children.length, 1);
+    assert.equal((row.firstElementChild as HTMLElement).style.width, "100%");
+    assert.equal(row.firstElementChild!.getAttribute("width"), "100%");
+  }
+  assert.ok(rows[0].querySelector(".mw-feature-image"));
+  assert.ok(rows[1].querySelector(".mw-feature-details"));
+  const image = rows[0].querySelector("img")!;
+  assert.equal(image.getAttribute("width"), "200");
+  assert.equal(image.getAttribute("height"), null);
+  assert.equal(image.style.height, "auto");
+  assert.equal(image.style.objectFit, "contain");
+  assert.match(rows[1].textContent!, /Long staff article/);
+  assert.match(result.text, /Long staff article/);
+  assert.ok(doc.querySelector('a[href="https://app.example/unsubscribe"]'));
+  saved.macroNewsletter!.hiddenSections = ["feature"];
+  assert.equal(new JSDOM(render(saved, "#unsubscribe", "")).window.document.querySelector(".mw-feature-section"), null);
+  saved.macroNewsletter!.hiddenSections = [];
+  assert.match(render(saved, "#unsubscribe", ""), /nl-feature-stacked/);
+  const unchanged = macroNewsletterContent("nitrate");
+  unchanged.macroNewsletter!.featuredLayout = "columns";
+  assert.equal(render(content(unchanged), "https://app.example/unsubscribe", ""), original);
+  (unchanged.macroNewsletter as unknown as { featuredLayout: string }).featuredLayout = "invalid";
+  assert.equal(content(unchanged).macroNewsletter!.featuredLayout, undefined);
+  for (const design of ["habitat", "field-guide"] as const) {
+    const other = macroNewsletterContent(design);
+    other.macroNewsletter!.featuredLayout = "stacked";
+    assert.equal(content(other).macroNewsletter!.featuredLayout, undefined);
+  }
+});
+
 test("removed newsletter sections collapse completely, preserve their content and restore exactly in every layout", () => {
   for (const definition of macroNewsletterDefinitions) {
     const original = macroNewsletterContent(definition.design);
