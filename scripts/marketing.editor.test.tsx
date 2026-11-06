@@ -15,6 +15,7 @@ import {
 } from "../lib/marketing/rules";
 import FlowEditor from "../app/our-klaviyo/FlowEditor";
 import SettingsWorkspace from "../app/our-klaviyo/SettingsWorkspace";
+import MarketingBrandWorkspace from "../app/our-klaviyo/MarketingBrand";
 import CampaignEmailFields from "../app/our-klaviyo/CampaignEmailFields";
 import MacroNewsletterFields from "../app/our-klaviyo/MacroNewsletterFields";
 import { macroNewsletterContent } from "../lib/marketing/macro-newsletters";
@@ -244,6 +245,41 @@ test("settings presents the resumable Klaviyo audience backfill", async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+test("Macro subscriber settings show automatic checks and pause them without changing sending preferences", async () => {
+  const testing = await import("@testing-library/react");
+  cleanup = testing.cleanup;
+  const original = globalThis.fetch;
+  let sync = { configured: true, automatic: true, running: false, phase: "complete", checked: 665, imported: 485, updated: 0,
+    suppressed: 0, skipped: 180, errors: 0, issues: [], nextRunAt: "2026-11-06T08:00:00.000Z" };
+  const actions: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    assert.equal(new URL(String(input), "https://app.example").searchParams.get("brand"), "macroalgae-farms");
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body));
+      actions.push(body.action);
+      if (body.action === "pause-shopify-subscribers") sync = { ...sync, automatic: false, running: false, nextRunAt: "" };
+      else if (body.action === "sync-shopify-subscribers") sync = { ...sync, automatic: true, running: true, phase: "customers", nextRunAt: "" };
+      else throw Error("Unexpected subscriber setting action");
+    }
+    return Response.json(sync);
+  };
+  try {
+    const settings = { ...defaultMarketingSettings, organizationName: "Macroalgae Farms", sender: { name: "Macroalgae Farms", email: "staff@macroalgaefarms.com", replyTo: "" }, operations: { ...defaultMarketingSettings.operations, sendingEnabled: false, ingestEnabled: true } };
+    const view = testing.render(<MarketingBrandWorkspace tab="settings" initialBrand="macroalgae-farms"><SettingsWorkspace data={{ settings, setup: { emailReady: true }, resources: [], messageCounts: [] }} refresh={async () => {}} /></MarketingBrandWorkspace>);
+    assert.ok(await view.findByText("Automatic sync enabled"));
+    assert.ok(view.getByRole("button", { name: "Sync now" }));
+    assert.ok(view.getByText(/Next check:/));
+    testing.fireEvent.click(view.getByRole("button", { name: "Pause automatic sync" }));
+    assert.ok(await view.findByRole("button", { name: "Sync Shopify subscribers" }));
+    assert.equal(view.queryByRole("button", { name: "Pause automatic sync" }), null);
+    testing.fireEvent.click(view.getByRole("button", { name: "Sync Shopify subscribers" }));
+    assert.ok(await view.findByRole("button", { name: "Pause sync" }));
+    assert.ok(view.getByText("Syncing in the background"));
+    assert.deepEqual(actions, ["pause-shopify-subscribers", "sync-shopify-subscribers"]);
+    assert.equal(settings.operations.sendingEnabled, false);
+    assert.equal(settings.operations.ingestEnabled, true);
+  } finally { globalThis.fetch = original; }
 });
 afterEach(() => cleanup?.());
 test("cart results show delivery failures, credited orders, timestamped messages and refreshed data", async () => {

@@ -3,6 +3,7 @@ import "./email-screen.test";
 import "./marketing-context.test";
 import "./order-value.test";
 import "./shopify-client.test";
+import "./macroalgae-shopify-client.test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { proxy } from "../proxy";

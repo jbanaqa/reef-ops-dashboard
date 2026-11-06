@@ -11,6 +11,8 @@ type Issue = { customerId: string; email?: string; error: string };
 type Sync = {
   phase: "customers" | "complete";
   running: boolean;
+  automatic?: boolean;
+  nextRunAt?: string;
   cursor?: string;
   checked: number;
   imported: number;
@@ -41,6 +43,12 @@ const query = `query MarketingShopifySubscribers($after: String) {
   }
 }`;
 const where = () => ({ shop: shop(), kind: "SHOPIFY_SUBSCRIBER_SYNC", key: "customers" });
+const reconciliationInterval = 60 * 60 * 1000;
+const retryInterval = 5 * 60 * 1000;
+const newSweep = (running: boolean, automatic: boolean): Sync => ({
+  phase: "customers", running, automatic, checked: 0, imported: 0, updated: 0,
+  suppressed: 0, skipped: 0, errors: 0, issues: [], startedAt: new Date().toISOString(),
+});
 const configured = () => !!(marketingEnv("SHOPIFY_CLIENT_ID") && marketingEnv("SHOPIFY_CLIENT_SECRET"));
 const assertMacro = () => {
   if (currentMarketingBrand() !== "macroalgae-farms") throw Error("Shopify subscriber sync is available in Macroalgae Farms.");
@@ -56,6 +64,7 @@ export async function shopifySubscriberStatus() {
   const state = resource?.data as Sync | undefined;
   return {
     configured: configured(), phase: state?.phase || "not-started", running: state?.running === true,
+    automatic: state?.automatic === true, nextRunAt: state?.nextRunAt,
     checked: state?.checked || 0, imported: state?.imported || 0, updated: state?.updated || 0,
     suppressed: state?.suppressed || 0, skipped: state?.skipped || 0, errors: state?.errors || 0,
     issues: state?.issues || [], startedAt: state?.startedAt, completedAt: state?.completedAt,
@@ -71,9 +80,9 @@ export async function setShopifySubscriberSyncRunning(running: boolean) {
     const row = await tx.marketingResource.findUnique({ where: { shop_kind_key: where() } });
     const old = row?.data as Sync | undefined;
     const next: Sync = !old || (running && old.phase === "complete")
-      ? { phase: "customers", running, checked: 0, imported: 0, updated: 0, suppressed: 0, skipped: 0, errors: 0,
-          issues: [], startedAt: new Date().toISOString() }
-      : { ...old, running };
+      ? newSweep(running, running)
+      : { ...old, running, automatic: running };
+    delete next.nextRunAt;
     if (running) delete next.error;
     await tx.marketingResource.upsert({ where: { shop_kind_key: where() },
       create: { ...where(), name: "Shopify email subscriber sync", data: json(next) }, update: { data: json(next) } });
@@ -143,14 +152,18 @@ async function importCustomer(tx: Tx, customer: Customer, state: Sync, checkedAt
   if (existing) state.updated++; else state.imported++;
 }
 
-/** One compact Shopify page per worker run; never enrolls or sends a flow. */
+/** One compact page per worker run, with opted-in recurring sweeps and checkpoint retries. */
 export async function syncShopifySubscribers(): Promise<ShopifySubscriberSyncStatus> {
   assertMacro();
   const state = await atomic(async tx => {
     const row = await tx.marketingResource.findUnique({ where: { shop_kind_key: where() } });
     const old = row?.data as Sync | undefined;
-    if (!old?.running || old.phase === "complete" || (old.leaseUntil && new Date(old.leaseUntil) > new Date())) return null;
-    const next: Sync = { ...old, issues: [...old.issues], leaseOwner: randomUUID(), leaseUntil: new Date(Date.now() + 300000).toISOString() };
+    if (!old || (old.leaseUntil && new Date(old.leaseUntil) > new Date())) return null;
+    if ((!old.running || old.phase === "complete") &&
+        (!old.automatic || !old.nextRunAt || !(Date.parse(old.nextRunAt) <= Date.now()))) return null;
+    const next: Sync = { ...(old.phase === "complete" ? newSweep(true, true) : old), running: true,
+      issues: old.phase === "complete" ? [] : [...old.issues], leaseOwner: randomUUID(), leaseUntil: new Date(Date.now() + 300000).toISOString() };
+    delete next.nextRunAt;
     await tx.marketingResource.update({ where: { id: row!.id }, data: { data: json(next) } });
     return next;
   });
@@ -177,6 +190,7 @@ export async function syncShopifySubscribers(): Promise<ShopifySubscriberSyncSta
       next.cursor = cursor || undefined;
       next.lastBatchAt = checkedAt;
       next.running = saved.running;
+      next.automatic = saved.automatic;
       if (!cursor) {
         // Only a complete successful sweep can remove a customer missing from Shopify.
         // A paused or failed page never prunes unseen members.
@@ -187,6 +201,7 @@ export async function syncShopifySubscribers(): Promise<ShopifySubscriberSyncSta
           WHERE shop = ${shop()} AND ${macroSubscriberList} = ANY(lists)
             AND properties->'shopifyEmailConsent'->>'checkedAt' < ${next.startedAt}`);
         next.phase = "complete"; next.running = false; next.completedAt = checkedAt;
+        if (next.automatic) next.nextRunAt = new Date(Date.parse(checkedAt) + reconciliationInterval).toISOString();
       }
       delete next.leaseOwner; delete next.leaseUntil; delete next.error;
       await tx.marketingResource.update({ where: { id: row.id }, data: { data: json(next) } });
@@ -197,6 +212,8 @@ export async function syncShopifySubscribers(): Promise<ShopifySubscriberSyncSta
       const saved = row.data as Sync;
       if (saved.leaseOwner !== state.leaseOwner) return;
       const next = { ...saved, running: false, error: error instanceof Error ? error.message : "Shopify subscriber sync paused." };
+      if (saved.automatic) next.nextRunAt = new Date(Date.now() + retryInterval).toISOString();
+      else delete next.nextRunAt;
       delete next.leaseOwner; delete next.leaseUntil;
       await tx.marketingResource.update({ where: { id: row.id }, data: { data: json(next) } });
     });

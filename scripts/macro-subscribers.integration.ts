@@ -56,7 +56,115 @@ async function isolated(context: Context, name: string, work: (h: Harness) => Pr
   }
 }
 
+async function makeSyncDue(h: Harness) {
+  const row = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: {
+    shop: h.macroShop, kind: "SHOPIFY_SUBSCRIBER_SYNC", key: "customers",
+  } } });
+  await h.prisma.marketingResource.update({ where: { id: row.id }, data: { data: {
+    ...(row.data as object), nextRunAt: new Date(Date.now() - 1000).toISOString(),
+  } } });
+}
+
 export function registerMacroSubscriberTests(context: () => Context) {
+  test("Macro subscribers: opted-in hourly reconciliation adds later subscribers without changing sending or Corals", async () => isolated(context(), "automatic", async h => {
+    const { seedMacroMarketing } = await import("../lib/marketing/macro-seed"); await seedMacroMarketing();
+    const sync = await import("../lib/marketing/shopify-subscribers");
+    const settingsWhere = { shop_kind_key: { shop: h.macroShop, kind: "SETTINGS", key: "global" } };
+    const settings = await h.prisma.marketingResource.findUniqueOrThrow({ where: settingsWhere });
+    const corals = await runWithMarketingBrand("corals-anonymous", () => h.store.atomic(async tx => {
+      const p = await h.store.identify(tx, { email: "recurring-corals@example.com" });
+      await h.store.consent(tx, p.id, "EMAIL", "UNSUBSCRIBED", "provider", new Date(), "BOUNCED");
+      return tx.marketingProfile.findUniqueOrThrow({ where: { id: p.id }, include: { consents: true } });
+    }));
+    assert.equal((await sync.shopifySubscriberStatus()).automatic, false);
+    await sync.syncShopifySubscribers(); assert.equal(h.requests.length, 0, "reading/running a new workspace cannot enable automatic synchronization");
+    h.respond(page([customer("101", "first-recurring@example.com")]));
+    const started = await sync.setShopifySubscriberSyncRunning(true);
+    assert.equal(started.automatic, true); assert.equal(started.nextRunAt, undefined);
+    const first = await sync.syncShopifySubscribers();
+    assert.equal(first.running, false); assert.equal(first.automatic, true); assert.equal(first.checked, 1);
+    assert.equal(Date.parse(first.nextRunAt!) - Date.parse(first.completedAt!), 3600000);
+    await sync.syncShopifySubscribers(); assert.equal(h.requests.length, 1, "completed automatic scans wait until the next reconciliation is due");
+    await makeSyncDue(h);
+    h.respond(page([customer("101", "first-recurring@example.com"), customer("102", "later-recurring@example.com")]));
+    const second = await sync.syncShopifySubscribers();
+    assert.equal(second.phase, "complete"); assert.equal(second.automatic, true); assert.equal(second.running, false);
+    assert.equal(second.checked, 2, "a new sweep resets page statistics");
+    assert.equal(second.imported, 1); assert.equal(second.updated, 1);
+    assert.equal(h.requests.at(-1)!.after, null, "periodic reconciliation starts at the beginning of Shopify's current customers");
+    assert.equal(await h.prisma.marketingProfile.count({ where: { shop: h.macroShop, lists: { has: macroSubscriberList } } }), 2);
+    assert.deepEqual(await h.prisma.marketingResource.findUniqueOrThrow({ where: settingsWhere }), settings);
+    assert.deepEqual(await h.prisma.marketingProfile.findUniqueOrThrow({ where: { id: corals.id }, include: { consents: true } }), corals);
+    assert.equal(await h.prisma.marketingMessage.count({ where: { shop: h.macroShop } }), 0);
+    assert.equal(await h.prisma.marketingResource.count({ where: { shop: h.macroShop, kind: { in: ["FLOW", "WELCOME_RUN", "WELCOME_COUPON"] } } }), 0);
+  }));
+
+  test("Macro subscribers: automatic errors retry the same checkpoint after five minutes", async () => isolated(context(), "automatic-retry", async h => {
+    const { seedMacroMarketing } = await import("../lib/marketing/macro-seed"); await seedMacroMarketing();
+    const sync = await import("../lib/marketing/shopify-subscribers");
+    h.respond(page([customer("111", "before-retry@example.com")], "retry-cursor"));
+    await sync.setShopifySubscriberSyncRunning(true); await sync.syncShopifySubscribers();
+    h.respond(async () => { throw Error("Shopify is temporarily unavailable."); });
+    const beforeFailure = Date.now(), failed = await sync.syncShopifySubscribers();
+    assert.equal(failed.running, false); assert.equal(failed.automatic, true); assert.equal(failed.checked, 1);
+    assert.equal(failed.phase, "customers"); assert.match(failed.error!, /temporarily unavailable/);
+    assert.ok(Date.parse(failed.nextRunAt!) >= beforeFailure + 300000);
+    const requests = h.requests.length;
+    await sync.syncShopifySubscribers(); assert.equal(h.requests.length, requests, "a worker cannot hammer Shopify before the retry time");
+    await makeSyncDue(h);
+    h.respond(page([customer("112", "after-retry@example.com")]));
+    const completed = await sync.syncShopifySubscribers();
+    assert.equal(completed.phase, "complete"); assert.equal(completed.checked, 2); assert.equal(completed.imported, 2);
+    assert.equal(completed.error, undefined); assert.equal(completed.automatic, true);
+    assert.equal(h.requests.at(-1)!.after, "retry-cursor");
+    assert.equal(await h.prisma.marketingProfile.count({ where: { shop: h.macroShop, lists: { has: macroSubscriberList } } }), 2);
+    assert.equal(await h.prisma.marketingMessage.count({ where: { shop: h.macroShop } }), 0);
+  }));
+
+  test("Macro subscribers: legacy paused scans remain manual and an explicit pause disables due restarts", async () => isolated(context(), "automatic-pause", async h => {
+    const { seedMacroMarketing } = await import("../lib/marketing/macro-seed"); await seedMacroMarketing();
+    const sync = await import("../lib/marketing/shopify-subscribers");
+    await h.prisma.marketingResource.create({ data: { shop: h.macroShop, kind: "SHOPIFY_SUBSCRIBER_SYNC", key: "customers", name: "Legacy subscriber scan", data: {
+      phase: "customers", running: false, checked: 200, imported: 147, updated: 0, suppressed: 0, skipped: 53, errors: 0,
+      issues: [], cursor: "legacy-cursor", startedAt: new Date(Date.now() - 86400000).toISOString(), error: "Temporary Shopify error",
+    } } });
+    await sync.syncShopifySubscribers(); assert.equal(h.requests.length, 0);
+    const resumed = await sync.setShopifySubscriberSyncRunning(true);
+    assert.equal(resumed.automatic, true); assert.equal(resumed.checked, 200); assert.equal(resumed.error, undefined);
+    h.respond(page([customer("121", "resumed-legacy@example.com")], "legacy-next"));
+    await sync.syncShopifySubscribers(); assert.equal(h.requests.at(-1)!.after, "legacy-cursor");
+    const paused = await sync.setShopifySubscriberSyncRunning(false);
+    assert.equal(paused.automatic, false); assert.equal(paused.running, false); assert.equal(paused.nextRunAt, undefined);
+    const requests = h.requests.length;
+    await makeSyncDue(h); await sync.syncShopifySubscribers(); assert.equal(h.requests.length, requests);
+    await sync.setShopifySubscriberSyncRunning(true);
+    h.respond(page([])); await sync.syncShopifySubscribers(); assert.equal(h.requests.at(-1)!.after, "legacy-next");
+    const completePaused = await sync.setShopifySubscriberSyncRunning(false);
+    assert.equal(completePaused.phase, "complete"); assert.equal(completePaused.automatic, false); assert.equal(completePaused.nextRunAt, undefined);
+    await makeSyncDue(h); await sync.syncShopifySubscribers(); assert.equal(h.requests.length, requests + 1, "pausing a completed sweep prevents future automatic scans too");
+  }));
+
+  test("Macro subscribers: a pause during the last page or a failed lookup cannot re-enable automatic synchronization", async () => {
+    for (const failed of [false, true]) await isolated(context(), `automatic-inflight-${failed}`, async h => {
+      const { seedMacroMarketing } = await import("../lib/marketing/macro-seed"); await seedMacroMarketing();
+      const sync = await import("../lib/marketing/shopify-subscribers");
+      let release!: (value: unknown) => void, reject!: (error: Error) => void, began!: () => void;
+      const called = new Promise<void>(resolve => { began = resolve; });
+      h.respond(() => { began(); return new Promise((resolve, fail) => { release = resolve; reject = fail; }); });
+      await sync.setShopifySubscriberSyncRunning(true);
+      const inFlight = sync.syncShopifySubscribers(); await called;
+      await sync.setShopifySubscriberSyncRunning(false);
+      if (failed) reject(Error("Temporary lookup error after staff paused."));
+      else release(page([customer("131", "paused-terminal-page@example.com")]));
+      const result = await inFlight;
+      assert.equal(result.phase, failed ? "customers" : "complete");
+      assert.equal(result.running, false); assert.equal(result.automatic, false); assert.equal(result.nextRunAt, undefined);
+      const requests = h.requests.length;
+      await makeSyncDue(h); await sync.syncShopifySubscribers(); assert.equal(h.requests.length, requests);
+      assert.equal(await h.prisma.marketingMessage.count({ where: { shop: h.macroShop } }), 0);
+    });
+  });
+
   test("Macro subscribers: separate seed, subscribed-only profiles, source proof and sticky suppression", async () => isolated(context(), "seed", async h => {
     const { seedMacroMarketing } = await import("../lib/marketing/macro-seed");
     const sync = await import("../lib/marketing/shopify-subscribers");

@@ -11,6 +11,19 @@ function required(name: string) {
   return value;
 }
 
+async function responseJson(response: Response, operation: string): Promise<Record<string, unknown>> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error(`Macroalgae Shopify ${operation} returned HTTP ${response.status} with a non-JSON response.`);
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    throw new Error(`Macroalgae Shopify ${operation} returned HTTP ${response.status} with an invalid response.`);
+  if (!response.ok) throw new Error(`Macroalgae Shopify ${operation} request failed with HTTP ${response.status}.`);
+  return body as Record<string, unknown>;
+}
+
 async function requestAccessToken() {
   const shop = assertSpeciesLibraryShop();
   const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
@@ -23,10 +36,9 @@ async function requestAccessToken() {
     }),
     cache: "no-store",
   });
-  const body = await response.json() as { access_token?: unknown; expires_in?: unknown };
-  if (!response.ok || typeof body.access_token !== "string" || !body.access_token) {
-    throw new Error(`Macroalgae Shopify access token request failed with status ${response.status}.`);
-  }
+  const body = await responseJson(response, "authentication");
+  if (typeof body.access_token !== "string" || !body.access_token)
+    throw new Error("Macroalgae Shopify authentication response did not include an access token.");
   const expiresIn = Number(body.expires_in);
   tokenCache = {
     accessToken: body.access_token,
@@ -50,31 +62,26 @@ export async function macroalgaeGraphql<T>(query: string, variables?: Record<str
   if (normalizeShopDomain(shop) !== normalizeShopDomain(required("SPECIES_LIBRARY_SHOP_DOMAIN"))) {
     throw new Error("Macroalgae Shopify boundary mismatch.");
   }
-  const perform = async (accessToken: string) => {
-    const response = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
+  const perform = (accessToken: string) =>
+    fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": accessToken },
       body: JSON.stringify({ query, variables }),
       cache: "no-store",
     });
-    let body: { errors?: Array<{ message?: string }> };
-    try {
-      body = await response.json() as typeof body;
-    } catch {
-      throw new Error(`Macroalgae Shopify GraphQL returned status ${response.status} with an invalid response body.`);
-    }
-    return { response, body };
-  };
 
-  let result = await perform(await getAccessToken());
-  if (result.response.status === 401) {
-    tokenCache = null;
-    result = await perform(await requestAccessToken());
+  const accessToken = await getAccessToken();
+  let response = await perform(accessToken);
+  if (response.status === 401) {
+    // A delayed rejection must not discard a newer token or bypass a shared refresh.
+    if (tokenCache?.accessToken === accessToken) tokenCache = null;
+    response = await perform(await getAccessToken());
   }
-  const { response, body } = result;
-  if (!response.ok || body.errors?.length) {
-    const details = body.errors?.map((error) => error.message).filter(Boolean).join("; ");
-    throw new Error(details || `Macroalgae Shopify GraphQL request failed with status ${response.status}.`);
+  const body = await responseJson(response, "GraphQL");
+  if (Array.isArray(body.errors) && body.errors.length) {
+    const codes = [...new Set(body.errors.flatMap((error: { extensions?: { code?: unknown } }) =>
+      typeof error?.extensions?.code === "string" && /^[A-Z0-9_]{1,64}$/.test(error.extensions.code) ? [error.extensions.code] : []))];
+    throw new Error("Macroalgae Shopify GraphQL returned errors" + (codes.length ? ` (${codes.join(", ")})` : "") + ".");
   }
   return body as T;
 }

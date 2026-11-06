@@ -6,7 +6,7 @@ import SenderIdentity from "./SenderIdentity";
 import { useMarketingAction, useMarketingBrand, useMarketingRequest, useMarketingUnsavedChanges } from "./MarketingBrand";
 
 type SubscriberSync = {
-  configured: boolean; running: boolean; phase: "not-started" | "customers" | "complete";
+  configured: boolean; running: boolean; automatic?: boolean; nextRunAt?: string; phase: "not-started" | "customers" | "complete";
   checked: number; imported: number; updated: number; suppressed: number; skipped: number; errors: number;
   lastBatchAt?: string; startedAt?: string; completedAt?: string; error?: string;
   issues: { customerId: string; email?: string; error: string }[];
@@ -50,13 +50,16 @@ export default function MacroSettingsWorkspace({ data, refresh }: { data: Settin
       <h3>Shopify email subscribers</h3>
       <p>Sync email consent from {brand.storefrontOrigin.replace("https://", "")}. Only subscribed customers enter this brand’s marketing audience; unsubscribes and blocked addresses stay excluded. No messages are sent by this sync.</p>
       {!subscribers ? <p>Checking the Shopify connection…</p> : <>
-        <dl className="sw-backfill-stats"><div><dt>Status</dt><dd>{subscribers.running ? "Syncing in the background" : subscribers.phase === "complete" ? "Sync complete" : subscribers.phase === "not-started" ? "Not started" : "Paused"}</dd></div><div><dt>Customers checked</dt><dd>{subscribers.checked.toLocaleString()}</dd></div><div><dt>Added</dt><dd>{subscribers.imported.toLocaleString()}</dd></div><div><dt>Updated</dt><dd>{subscribers.updated.toLocaleString()}</dd></div><div><dt>Suppressed</dt><dd>{subscribers.suppressed.toLocaleString()}</dd></div><div><dt>Needs review</dt><dd>{subscribers.errors.toLocaleString()}</dd></div></dl>
+        <dl className="sw-backfill-stats"><div><dt>Status</dt><dd>{subscribers.running ? "Syncing in the background" : subscribers.automatic ? subscribers.error ? "Retry scheduled" : "Automatic sync enabled" : subscribers.phase === "complete" ? "Sync complete" : subscribers.phase === "not-started" ? "Not started" : "Paused"}</dd></div><div><dt>Customers checked</dt><dd>{subscribers.checked.toLocaleString()}</dd></div><div><dt>Added</dt><dd>{subscribers.imported.toLocaleString()}</dd></div><div><dt>Updated</dt><dd>{subscribers.updated.toLocaleString()}</dd></div><div><dt>Suppressed</dt><dd>{subscribers.suppressed.toLocaleString()}</dd></div><div><dt>Needs review</dt><dd>{subscribers.errors.toLocaleString()}</dd></div></dl>
         <p className="sw-hint">Last update: {when(subscribers.lastBatchAt || subscribers.completedAt)}. You can leave this page while syncing.</p>
+        <p className="sw-hint">{subscribers.automatic ? `Automatic checks are on.${subscribers.nextRunAt ? ` Next ${subscribers.error ? "retry" : "check"}: ${when(subscribers.nextRunAt)}.` : " The current check will continue in the background."} Completed checks repeat hourly; interrupted connections retry automatically.` : "Start a sync to catch up with Shopify and keep automatic checks running. Pause sync stops those checks until you continue."}</p>
         {subscribers.error && <p className="sw-warning">{subscribers.error}</p>}
         {!subscribers.configured && <p className="sw-warning">Connect the Macroalgae Farms Shopify store before syncing.</p>}
         <div className="sw-import-actions"><button disabled={!!busy || !subscribers.configured} className="sw-primary" onClick={() => void run("sync", async () => {
           setSubscribers(await action<SubscriberSync>({ action: subscribers.running ? "pause-shopify-subscribers" : "sync-shopify-subscribers" }));
-        }, subscribers.running ? "Subscriber sync paused." : "Subscriber sync queued. It will continue in the background.")}>{busy === "sync" ? "Updating…" : subscribers.running ? "Pause sync" : subscribers.phase === "customers" ? "Continue sync" : "Sync Shopify subscribers"}</button><a href={href("/our-klaviyo/audiences")}>View subscribers →</a></div>
+        }, subscribers.running ? "Subscriber sync and automatic checks paused." : "Subscriber sync queued. Automatic checks will keep it current.")}>{busy === "sync" ? "Updating…" : subscribers.running ? "Pause sync" : subscribers.phase === "customers" ? "Continue sync" : subscribers.automatic ? "Sync now" : "Sync Shopify subscribers"}</button>{subscribers.automatic && !subscribers.running && <button disabled={!!busy} onClick={() => void run("pause-sync", async () => {
+          setSubscribers(await action<SubscriberSync>({ action: "pause-shopify-subscribers" }));
+        }, "Subscriber sync and automatic checks paused.")}>Pause automatic sync</button>}<a href={href("/our-klaviyo/audiences")}>View subscribers →</a></div>
         {!!subscribers.issues?.length && <details><summary>Customers to review</summary>{subscribers.issues.map((issue, index) => <p key={`${issue.customerId}-${index}`}>{issue.email || issue.customerId}: {issue.error}</p>)}</details>}
       </>}
     </section>
