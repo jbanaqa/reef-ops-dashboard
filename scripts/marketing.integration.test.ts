@@ -78,7 +78,7 @@ before(async () => {
   console.log("integration: applying migrations");
   const migrations = (await readdir("prisma/migrations"))
     .filter((x) =>
-      /baseline|add_product_inventory_state|add_our_klaviyo|marketing_flow_branch|marketing_webhook_inbox|campaign_delivery_options|campaign_test_runs/.test(
+      /baseline|add_product_inventory_state|add_our_klaviyo|marketing_flow_branch|marketing_webhook_inbox|campaign_delivery_options|campaign_test_runs|campaign_archiving/.test(
         x,
       ),
     )

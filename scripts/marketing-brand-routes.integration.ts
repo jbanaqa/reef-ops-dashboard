@@ -4,8 +4,9 @@ import crypto from "node:crypto";
 import type { Context } from "./cart-launch.integration";
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { defaultMacroCampaignContent } from "../lib/marketing/brands";
-import { withBranding } from "../lib/marketing/rules";
+import { defaultContent, withBranding } from "../lib/marketing/rules";
 import { newsletterTextDocument } from "../lib/marketing/newsletter-rich-text";
+import { paidOrderFixture } from "./paid-order.fixture";
 
 async function isolated(context: Context, work: (macroShop: string) => Promise<void>) {
   const keys = ["SPECIES_LIBRARY_SHOP_DOMAIN", "DASHBOARD_AUTH_DISABLED", "RESEND_API_KEY", "RESEND_WEBHOOK_SECRET", "MACROALGAE_RESEND_WEBHOOK_SECRET"];
@@ -18,7 +19,133 @@ async function isolated(context: Context, work: (macroShop: string) => Promise<v
 }
 const request = (brand: string, body: unknown) => new Request("https://dashboard.example/api/marketing?brand=" + brand, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
+async function isolatedCampaigns(context: Context, work: (coralsShop: string, macroShop: string) => Promise<void>) {
+  const previousShop = process.env.SHOPIFY_SHOP_DOMAIN;
+  const coralsShop = "corals-campaigns-" + crypto.randomUUID() + ".myshopify.com";
+  process.env.SHOPIFY_SHOP_DOMAIN = coralsShop;
+  try { await isolated(context, macroShop => work(coralsShop, macroShop)); }
+  finally {
+    if (previousShop === undefined) delete process.env.SHOPIFY_SHOP_DOMAIN;
+    else process.env.SHOPIFY_SHOP_DOMAIN = previousShop;
+  }
+}
+
 export function registerMarketingBrandRouteTests(context: () => Context) {
+  test("Brand routes: campaign archiving and restoration are visual only across every lifecycle and both brands", async () => isolatedCampaigns(context(), async (coralsShop, macroShop) => {
+    const { prisma, store } = context();
+    const api = await import("../app/api/marketing/route");
+    const get = async (brand: string, query = "") => {
+      const response = await api.GET(new Request("https://dashboard.example/api/marketing?brand=" + brand + query));
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    for (const [brand, shop] of [["corals-anonymous", coralsShop], ["macroalgae-farms", macroShop]] as const) {
+      const profile = await prisma.marketingProfile.create({ data: { shop, email: "archive-history@example.com", name: "Campaign history" } });
+      const campaigns = [];
+      for (const status of ["DRAFT", "SCHEDULED", "SENDING", "COMPLETED", "CANCELLED"]) {
+        const campaign = await prisma.marketingCampaign.create({ data: {
+          shop, name: status + " preserved", subject: "Archived campaign", content: store.json(defaultContent),
+          audience: { version: 2, includeKeys: ["mailable"], excludeKeys: [] }, status,
+          scheduledAt: status === "DRAFT" ? null : new Date(Date.now() - 7200000),
+          expandedAt: ["SENDING", "COMPLETED", "CANCELLED"].includes(status) ? new Date(Date.now() - 7200000) : null,
+        } });
+        campaigns.push(campaign);
+        if (status !== "DRAFT") {
+          const sentAt = new Date(Date.now() - 7200000);
+          const message = await prisma.marketingMessage.create({ data: {
+            shop, key: "archive-message:" + crypto.randomUUID(), profileId: profile.id, campaignId: campaign.id,
+            channel: "EMAIL", subject: campaign.subject, content: store.json(campaign.content),
+            status: status === "COMPLETED" ? "SENT" : status === "CANCELLED" ? "CANCELLED" : status === "SENDING" ? "SENDING" : "PENDING",
+            dueAt: sentAt, sentAt: status === "COMPLETED" ? sentAt : null,
+          } });
+          if (status === "COMPLETED") {
+            await prisma.marketingEvent.createMany({ data: [
+              { shop, key: "archive-open:" + message.id, type: "OPENED", profileId: profile.id, messageId: message.id, occurredAt: new Date(Date.now() - 3600000) },
+              { shop, key: "archive-order:" + message.id, type: "ORDER", profileId: profile.id, occurredAt: new Date(Date.now() - 1800000), payload: paidOrderFixture({ orderId: String(Date.now()), orderLabel: "#archive-sale", revenue: "125.50", currency: "USD" }) },
+            ] });
+          }
+        }
+      }
+      const messages = await prisma.marketingMessage.findMany({ where: { shop }, orderBy: { id: "asc" } });
+      const completed = campaigns.find(campaign => campaign.status === "COMPLETED")!;
+      const beforeReport = await get(brand, "&view=campaign-report&id=" + completed.id);
+      const beforeAnalytics = await get(brand, "&view=analytics");
+      assert.deepEqual(beforeReport.totals.revenue, { USD: 125.5 });
+      assert.equal(beforeReport.totals.sent, 1);
+      for (const campaign of campaigns) {
+        assert.equal((await api.POST(request(brand, { action: "archive-campaign", id: campaign.id }))).status, 200);
+        const once = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: campaign.id } });
+        assert.ok(once.archivedAt);
+        assert.equal((await api.POST(request(brand, { action: "archive-campaign", id: campaign.id }))).status, 200);
+        const twice = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: campaign.id } });
+        assert.equal(twice.archivedAt?.toISOString(), once.archivedAt.toISOString(), "Repeat archive keeps the original archive time");
+        assert.deepEqual({ ...twice, archivedAt: campaign.archivedAt, updatedAt: campaign.updatedAt }, campaign,
+          "Archive preserves delivery status, timing, targeting and content");
+      }
+      const visible = await get(brand);
+      assert.equal(visible.campaignVisibility, "current");
+      assert.equal(visible.campaigns.length, 0);
+      assert.equal(visible.archivedCampaignCount, 5);
+      assert.equal(visible.campaignNames[completed.id], completed.name, "Overview keeps lightweight names for archived message history");
+      const archived = await get(brand, "&campaignVisibility=archived");
+      assert.equal(archived.campaignVisibility, "archived");
+      assert.equal(archived.campaigns.length, 5);
+      assert.ok(archived.campaigns.every((campaign: { archivedAt: string }) => campaign.archivedAt));
+      const afterReport = await get(brand, "&view=campaign-report&id=" + completed.id);
+      const afterAnalytics = await get(brand, "&view=analytics");
+      assert.deepEqual(afterReport, beforeReport, "Archived campaign results and its order ledger remain available");
+      assert.deepEqual(afterAnalytics.totals, beforeAnalytics.totals);
+      assert.deepEqual(afterAnalytics.rows, beforeAnalytics.rows, "Analytics still includes archived campaign history");
+      assert.deepEqual(await prisma.marketingMessage.findMany({ where: { shop }, orderBy: { id: "asc" } }), messages, "Archive does not cancel pending messages or touch sent history");
+      for (const campaign of campaigns) {
+        assert.equal((await api.POST(request(brand, { action: "restore-campaign", id: campaign.id }))).status, 200);
+        assert.equal((await api.POST(request(brand, { action: "restore-campaign", id: campaign.id }))).status, 200);
+      }
+      const restored = await get(brand);
+      assert.equal(restored.campaigns.length, 5);
+      assert.equal(restored.archivedCampaignCount, 0);
+      assert.equal((await get(brand, "&campaignVisibility=archived")).campaigns.length, 0);
+      assert.deepEqual(await prisma.marketingMessage.findMany({ where: { shop }, orderBy: { id: "asc" } }), messages);
+    }
+  }));
+
+  test("Brand routes: campaign visibility filters before the list limit and rejects other brands, test runs and missing IDs", async () => isolatedCampaigns(context(), async (coralsShop, macroShop) => {
+    const { prisma, store } = context();
+    const api = await import("../app/api/marketing/route");
+    for (const [brand, otherBrand, shop] of [["corals-anonymous", "macroalgae-farms", coralsShop], ["macroalgae-farms", "corals-anonymous", macroShop]] as const) {
+      const oldest = await prisma.marketingCampaign.create({ data: {
+        shop, name: "Older visible draft", subject: "Visible", content: store.json(defaultContent), audience: {}, createdAt: new Date(Date.now() - 86400000),
+      } });
+      await prisma.marketingCampaign.createMany({ data: Array.from({ length: 105 }, (_, index) => ({
+        id: "archived-" + crypto.randomUUID(), shop, name: "Archived " + index, subject: "Hidden", content: store.json(defaultContent), audience: {}, archivedAt: new Date(),
+      })) });
+      const testRun = await prisma.marketingCampaign.create({ data: {
+        shop, name: "Scheduled campaign test", subject: "Test", content: store.json(defaultContent), audience: {}, testOfCampaignId: oldest.id, status: "SCHEDULED",
+      } });
+      const list = async (query = "") => {
+        const response = await api.GET(new Request("https://dashboard.example/api/marketing?brand=" + brand + query));
+        assert.equal(response.status, 200);
+        return response.json();
+      };
+      const visible = await list();
+      assert.deepEqual(visible.campaigns.map((campaign: { id: string }) => campaign.id), [oldest.id], "A full page of newer archives cannot crowd out a visible draft");
+      assert.equal(visible.archivedCampaignCount, 105);
+      const archives = await list("&campaignVisibility=archived");
+      assert.equal(archives.campaigns.length, 100);
+      assert.equal(archives.archivedCampaignCount, 105);
+      assert.ok(archives.campaigns.every((campaign: { id: string }) => campaign.id !== oldest.id && campaign.id !== testRun.id));
+      assert.equal(archives.campaignTests.length, 1, "Campaign test history remains separate");
+      for (const action of ["archive-campaign", "restore-campaign"]) {
+        assert.equal((await api.POST(request(otherBrand, { action, id: oldest.id }))).status, 400);
+        assert.equal((await api.POST(request(brand, { action, id: testRun.id }))).status, 400);
+        assert.equal((await api.POST(request(brand, { action, id: "missing-campaign" }))).status, 400);
+        assert.equal((await api.POST(request(brand, { action }))).status, 400);
+      }
+      assert.equal((await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: oldest.id } })).archivedAt, null);
+      assert.equal((await prisma.marketingCampaign.findUniqueOrThrow({ where: { id: testRun.id } })).archivedAt, null);
+    }
+  }));
+
   test("Brand routes: approved newsletters save as editable Macro templates and campaign drafts without customer messages", async () => isolated(context(), async macroShop => {
     const { prisma } = context();
     const { macroNewsletterContent } = await import("../lib/marketing/macro-newsletters");

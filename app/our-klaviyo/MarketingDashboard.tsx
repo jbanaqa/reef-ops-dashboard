@@ -1,7 +1,7 @@
 "use client";
 import { useMarketingBrand } from "./MarketingBrand";
 import { defaultMacroCampaignContent, type MarketingBrand } from "@/lib/marketing/brands";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import EmailDesigner from "./EmailDesigner";
 import { flowEmailTemplates } from "@/lib/marketing/flow-email-templates";
@@ -59,6 +59,7 @@ type Campaign = {
   status: string;
   scheduledAt: string | null;
   createdAt?: string;
+  archivedAt?: string | null;
   content: Content;
   audience: Record<string, unknown>;
   smartSendingHours: number;
@@ -100,6 +101,9 @@ type Data = {
   profiles: Profile[];
   nextCursor: string | null;
   campaigns: Campaign[];
+  campaignNames?: Record<string, string>;
+  campaignVisibility?: "current" | "archived";
+  archivedCampaignCount?: number;
   campaignTests?: Campaign[];
   resources: Resource[];
   settings: MarketingSettings;
@@ -310,6 +314,8 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [campaignStep, setCampaignStep] = useState(0);
   const [campaignSearch, setCampaignSearch] = useState("");
+  const [campaignView, setCampaignView] = useState<"current" | "archived">("current");
+  const loadSequence = useRef(0);
   const [campaignReport, setCampaignReport] = useState<CampaignReport | null>(null);
   const [testCampaignId, setTestCampaignId] = useState<string | null>(null);
   const [dismissalDraft, setDismissalDraft] = useState<boolean | null>(null);
@@ -359,12 +365,14 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     });
     setAudienceCount(null);
   };
-  const load = useCallback(async () => {
-    const r = await marketingFetch("/api/marketing", { cache: "no-store" });
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const sequence = ++loadSequence.current;
+    const r = await marketingFetch(`/api/marketing?campaignVisibility=${campaignView}`, { cache: "no-store", signal });
     const d = await r.json();
+    if (signal?.aborted || sequence !== loadSequence.current) return;
     if (!r.ok) throw new Error(d.error);
     setData(d);
-  }, [marketingFetch]);
+  }, [marketingFetch, campaignView]);
   const hasActiveCampaignTest = !!data?.campaignTests?.some((test) =>
     ["PENDING", "SENDING"].includes(test.messages?.[0]?.status || ""),
   );
@@ -377,20 +385,12 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   }, [tab, hasActiveCampaignTest, load]);
   useEffect(() => {
     const controller = new AbortController();
-    marketingFetch("/api/marketing", { cache: "no-store", signal: controller.signal })
-      .then(async (r) => {
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error);
-        return d;
-      })
-      .then((d: Data) => {
-        setData(d);
-      })
+    load(controller.signal)
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, [marketingFetch]);
+  }, [load]);
   useEffect(() => {
     setHasUnsavedChanges(editingEmail || campaignOpen || !!resource || brandingDraft !== null);
     return () => setHasUnsavedChanges(false);
@@ -420,6 +420,28 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
     setCampaign((c) => ({ ...c, id: r.id }));
     return r.id;
   };
+  const changeCampaignView = (view: "current" | "archived") => {
+    setCampaignView(view);
+    setCampaignSearch("");
+    setCampaignReport(null);
+    setTestCampaignId(null);
+    setError("");
+    setNotice("");
+  };
+  const changeCampaignArchive = (item: Campaign, archive: boolean) => run(async () => {
+    await action({ action: archive ? "archive-campaign" : "restore-campaign", id: item.id });
+    if (testCampaignId === item.id) setTestCampaignId(null);
+    if (campaignReport?.campaign.id === item.id) setCampaignReport(null);
+  }, archive
+    ? ["SCHEDULED", "SENDING"].includes(item.status)
+      ? "Campaign archived. Scheduled or in-progress delivery continues."
+      : "Campaign archived. You can restore it from Archived."
+    : "Campaign restored to Current.");
+  const archivedCampaignView = campaignView === "archived";
+  const campaignViewReady = (data?.campaignVisibility || "current") === campaignView;
+  const visibleCampaigns = (data?.campaigns || []).filter((item) =>
+    `${item.name} ${item.subject}`.toLowerCase().includes(campaignSearch.trim().toLowerCase()),
+  );
   const editingContent = withBranding(
     previewingCampaign
       ? previewingCampaign.content
@@ -625,6 +647,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                   data.campaignTests?.find(
                                     (c) => c.id === m.campaignId,
                                   )?.name ||
+                                  (m.campaignId ? data.campaignNames?.[m.campaignId] : undefined) ||
                                   "Form"}
                               </small>
                             </td>
@@ -678,6 +701,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                 {campaignOpen ? <button onClick={() => setCampaignOpen(false)}>Back to campaigns</button> : (
                   <button
                     onClick={() => {
+                      changeCampaignView("current");
                       setCampaign(newCampaign());
                       setAt("");
                       setAudienceCount(null);
@@ -1038,10 +1062,14 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                   <div className="mk-campaign-library-heading">
                     <div>
                       <p className="mk-eyebrow">CAMPAIGN LIBRARY</p>
-                      <h2>Your campaigns</h2>
+                      <h2>{archivedCampaignView ? "Archived campaigns" : "Your campaigns"}</h2>
                     </div>
-                    <span className="mk-status">{data.campaigns.length}</span>
+                    <div className="mk-campaign-view" role="group" aria-label="Campaign view">
+                      <button type="button" aria-pressed={!archivedCampaignView} disabled={busy} onClick={() => changeCampaignView("current")}>Current</button>
+                      <button type="button" aria-pressed={archivedCampaignView} disabled={busy} onClick={() => changeCampaignView("archived")}>Archived ({data.archivedCampaignCount || 0})</button>
+                    </div>
                   </div>
+                  <p className="mk-campaign-archive-hint">Archive to hide a campaign from Current. Email history and analytics stay available; archiving does not stop delivery.</p>
                   {campaignReport && (
                     <section className="mk-campaign-report" aria-label={`${campaignReport.campaign.name} results`}>
                       <div className="mk-campaign-report-heading">
@@ -1079,16 +1107,23 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       )}
                     </section>
                   )}
+                  {!campaignViewReady ? (
+                    <div className="mk-campaign-empty" role="status">
+                      {error ? <><strong>Campaigns could not be loaded</strong><button disabled={busy} onClick={() => run(() => load(), "Campaigns loaded")}>Try again</button></> : "Loading campaigns…"}
+                    </div>
+                  ) : <>
                   {!!data.campaigns.length && <label>Search campaigns<input type="search" placeholder="Search by campaign name or subject" value={campaignSearch} onChange={(event) => setCampaignSearch(event.target.value)} /></label>}
                   {!data.campaigns.length ? (
                     <div className="mk-campaign-empty">
-                      <strong>No campaigns yet</strong>
-                      <span>Create an email, choose your audience, and schedule your first campaign.</span>
-                      <button className="mk-campaign-primary" onClick={() => { setCampaign(newCampaign()); setAt(""); setAudienceCount(null); setCampaignStep(0); setCampaignOpen(true); }}>Create your first campaign</button>
+                      <strong>{archivedCampaignView ? "No archived campaigns" : data.archivedCampaignCount ? "No current campaigns" : "No campaigns yet"}</strong>
+                      <span>{archivedCampaignView ? "Campaigns you archive will appear here. Restore one whenever you need it." : data.archivedCampaignCount ? "Open Archived to restore a campaign, or create a new one." : "Create an email, choose your audience, and schedule your first campaign."}</span>
+                      {!archivedCampaignView && <button className="mk-campaign-primary" onClick={() => { setCampaign(newCampaign()); setAt(""); setAudienceCount(null); setCampaignStep(0); setCampaignOpen(true); }}>Create {data.archivedCampaignCount ? "a new" : "your first"} campaign</button>}
                     </div>
+                  ) : !visibleCampaigns.length ? (
+                    <div className="mk-campaign-empty"><strong>No matching campaigns</strong><button onClick={() => setCampaignSearch("")}>Clear search</button></div>
                   ) : (
                     <div className="mk-campaign-list">
-                      {data.campaigns.filter((item) => `${item.name} ${item.subject}`.toLowerCase().includes(campaignSearch.toLowerCase())).map((item) => {
+                      {visibleCampaigns.map((item) => {
                         const statusCounts = data.messageCounts.filter(
                           (count) => count.campaignId === item.id,
                         );
@@ -1099,7 +1134,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                           .filter((count) => count.status === "PENDING")
                           .reduce((total, count) => total + count._count, 0);
                         return (
-                          <article className="mk-campaign-card" key={item.id}>
+                          <article className="mk-campaign-card" key={item.id} aria-label={`${item.name} campaign`}>
                             <div className="mk-campaign-card-heading">
                               <span className={`mk-campaign-status mk-campaign-status-${item.status.toLowerCase()}`}>
                                 {item.status.toLowerCase()}
@@ -1118,7 +1153,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                               {pending > 0 && <span>{pending} pending</span>}
                             </div>
                             <div className="mk-actions">
-                              {item.status === "DRAFT" && (
+                              {!archivedCampaignView && item.status === "DRAFT" && (
                                 <button
                                   onClick={() => {
                                     setCampaign(campaignForm(item, data.resources, brand.id));
@@ -1136,7 +1171,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                               >
                                 View email
                               </button>
-                              <button
+                              {!archivedCampaignView && <button
                                 aria-expanded={testCampaignId === item.id}
                                 aria-controls={`campaign-test-${item.id}`}
                                 onClick={() =>
@@ -1146,9 +1181,10 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                 }
                               >
                                 Send test
-                              </button>
+                              </button>}
                               <button
                                 onClick={() => {
+                                  changeCampaignView("current");
                                   setCampaignOpen(true);
                                   setCampaignStep(0);
                                   setCampaign({
@@ -1193,6 +1229,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                                   Cancel
                                 </button>
                               )}
+                              <button disabled={busy} onClick={() => changeCampaignArchive(item, !archivedCampaignView)}>
+                                {archivedCampaignView ? "Restore" : "Archive"}
+                              </button>
                             </div>
                             {testCampaignId === item.id && (
                               <div id={`campaign-test-${item.id}`} className="mk-campaign-test mk-campaign-test-card">
@@ -1250,6 +1289,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       })}
                     </div>
                   )}
+                  </>}
                 </aside>}
               </div>
             </div>

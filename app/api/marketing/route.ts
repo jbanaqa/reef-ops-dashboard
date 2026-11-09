@@ -689,9 +689,11 @@ async function getMarketing(request: Request) {
     const mailableAudience = await prisma.marketingResource.findUnique({
       where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key: "mailable" } },
     });
+    const campaignVisibility = url.searchParams.get("campaignVisibility") === "archived" ? "archived" : "current";
     const [
       profiles,
       campaigns,
+      archivedCampaignCount,
       campaignTests,
       resources,
       counts,
@@ -728,10 +730,16 @@ async function getMarketing(request: Request) {
         include: { consents: true },
       }),
       prisma.marketingCampaign.findMany({
-        where: { shop: shop(), testOfCampaignId: null },
-        orderBy: { createdAt: "desc" },
+        where: {
+          shop: shop(), testOfCampaignId: null,
+          archivedAt: campaignVisibility === "archived" ? { not: null } : null,
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 100,
         include: { _count: { select: { messages: true } } },
+      }),
+      prisma.marketingCampaign.count({
+        where: { shop: shop(), testOfCampaignId: null, archivedAt: { not: null } },
       }),
       prisma.marketingCampaign.findMany({
         where: { shop: shop(), testOfCampaignId: { not: null } },
@@ -770,6 +778,10 @@ async function getMarketing(request: Request) {
         _count: true,
       }),
     ]);
+    const campaignNames = Object.fromEntries((await prisma.marketingCampaign.findMany({
+      where: { shop: shop(), id: { in: [...new Set(messageCounts.flatMap(count => count.campaignId ? [count.campaignId] : []))] } },
+      select: { id: true, name: true },
+    })).map(campaign => [campaign.id, campaign.name]));
     const settings = await loadMarketingSettings();
     const inboxRows = await prisma.marketingWebhookInbox.findMany({
         where: { shop: shop(), status: { not: "DONE" } },
@@ -858,6 +870,9 @@ async function getMarketing(request: Request) {
         profiles,
         nextCursor: profiles.length === 100 ? profiles[99].id : null,
         campaigns,
+        campaignNames,
+        archivedCampaignCount,
+        campaignVisibility,
         campaignTests,
         resources,
         settings,
@@ -897,7 +912,7 @@ async function postMarketing(request: Request) {
     if (raw.length > 12000000) throw new Error("Request too large.");
     const b = JSON.parse(raw);
     if (currentMarketingBrand() === "macroalgae-farms") {
-      const campaignActions = new Set(["initialize", "preview", "preview-campaign-feeds", "test-email", "run-campaign-test", "send-test-message-now", "cancel-test-message", "clear-unsent-test-messages", "run-delivery", "import", "save-settings", "audience-count", "suppress", "save-campaign", "schedule", "send-now", "cancel", "save-resource", "sync-shopify-subscribers", "pause-shopify-subscribers", "register-shopify-webhooks", "process-inbox"]);
+      const campaignActions = new Set(["initialize", "preview", "preview-campaign-feeds", "test-email", "run-campaign-test", "send-test-message-now", "cancel-test-message", "clear-unsent-test-messages", "run-delivery", "import", "save-settings", "audience-count", "suppress", "save-campaign", "schedule", "send-now", "cancel", "archive-campaign", "restore-campaign", "save-resource", "sync-shopify-subscribers", "pause-shopify-subscribers", "register-shopify-webhooks", "process-inbox"]);
       if (!campaignActions.has(b.action) || (b.action === "save-resource" && !["SEGMENT", "TEMPLATE"].includes(b.kind)))
         throw Error("Macroalgae Farms currently supports campaigns. Corals Anonymous flows and signup forms are separate.");
       await seed();
@@ -1229,6 +1244,26 @@ async function postMarketing(request: Request) {
         recipients,
         sendingEnabled: setup(s.operations, s.postalAddress, s.sender).sendingEnabled,
       });
+    }
+    if (b.action === "archive-campaign" || b.action === "restore-campaign") {
+      if (typeof b.id !== "string" || !b.id.trim())
+        throw new Error("Choose a campaign first.");
+      const archiving = b.action === "archive-campaign";
+      await atomic(async (tx) => {
+        const campaign = await tx.marketingCampaign.findFirst({
+          where: { id: b.id, shop: shop(), testOfCampaignId: null },
+          select: { id: true },
+        });
+        if (!campaign) throw new Error("Campaign not found.");
+        await tx.marketingCampaign.updateMany({
+          where: {
+            id: campaign.id, shop: shop(), testOfCampaignId: null,
+            archivedAt: archiving ? null : { not: null },
+          },
+          data: { archivedAt: archiving ? new Date() : null },
+        });
+      });
+      return Response.json({ ok: true });
     }
     if (b.action === "cancel") {
       await atomic(async (tx) => {
