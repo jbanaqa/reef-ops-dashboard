@@ -124,7 +124,7 @@ async function loadMarketingSettings() {
   });
   return updated;
 }
-async function saveDiscoveredBranding(value: unknown, footerSource?: unknown) {
+async function saveDiscoveredBranding(value: unknown, footerSource?: unknown, options: { preserveExistingLogo?: boolean } = {}) {
   const extracted = extractEmailBranding(value);
   const discovered = footerSource
     ? { ...extracted, ...sharedEmailFooter(footerSource) }
@@ -136,6 +136,14 @@ async function saveDiscoveredBranding(value: unknown, footerSource?: unknown) {
       };
   if (!Object.keys(discovered).length) return;
   const existing = await loadMarketingSettings();
+  // A flow's saved steps can contain older, email-specific artwork. Main flow
+  // saves may discover a missing header, but only an explicit designer save
+  // should replace an already configured shared header and its matching scale.
+  if (options.preserveExistingLogo && !footerSource && existing.branding.logo) {
+    delete discovered.logo;
+    delete discovered.logoScale;
+    if (!Object.keys(discovered).length) return;
+  }
   const updated = marketingSettings({
     ...existing,
     branding: { ...existing.branding, ...discovered },
@@ -1360,7 +1368,7 @@ async function postMarketing(request: Request) {
           enabled: !!b.enabled,
         },
       });
-      await saveDiscoveredBranding(data, b.brandingSource);
+      await saveDiscoveredBranding(data, b.brandingSource, { preserveExistingLogo: b.kind === "FLOW" });
       await atomic((tx) =>
         record(tx, {
           key: `staff:${crypto.randomUUID()}`,
