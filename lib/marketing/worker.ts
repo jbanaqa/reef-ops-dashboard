@@ -1,4 +1,7 @@
 import { cartEmailNextAllowed } from "./cart-schedule";
+import { emailReservationScope, emailSpacingHistory, isIndependentCartEmail } from "./email-spacing";
+import { cartStepIndex, isCartCondition } from "./cart-sequence";
+import { ensureCartDiscount, CartDiscountStopped } from "./cart-discount";
 import { authorizeDelivery } from "./send-guard";
 import { cartTestBlock, type CartConfig } from "./cart-config";
 import { customerMarketingFlows, masterAudienceAllows } from "./master-audience";
@@ -483,7 +486,7 @@ export async function runMarketing(onlyMessageId?: string) {
       }
     }
     let shopifyOrder: Date | null = null;
-    if (candidate.flowCondition?.startsWith("cart-v1:")) {
+    if (isCartCondition(candidate.flowCondition)) {
       try {
         cartRun = await loadCart(candidate.key);
         const p = await prisma.marketingProfile.findUniqueOrThrow({
@@ -764,6 +767,13 @@ export async function runMarketing(onlyMessageId?: string) {
                 }),
               );
             }
+            const sequenceIndex = cartStepIndex(m.flowCondition);
+            if (cartRun.sequenceVersion === 2 && sequenceIndex !== null && m.attempts === 0) {
+              const step = cartRun.config.steps[sequenceIndex];
+              m.subject = step.subject;
+              m.content = JSON.parse(JSON.stringify({ ...step.content,
+                url: cartRun.url, products: [], couponCode: undefined }));
+            }
             const purchased = [m.profile.lastOrderAt, shopifyOrder].some(
               (d) => d && m.triggerAt && d >= m.triggerAt,
             );
@@ -845,7 +855,7 @@ export async function runMarketing(onlyMessageId?: string) {
         await advanceCart(tx, m);
         return null;
       }
-      if (cartRun && m.channel === "EMAIL") {
+      if (cartRun && cartRun.sequenceVersion !== 2 && m.channel === "EMAIL") {
         const next = cartEmailNextAllowed(cartRun.config.cart!, (m.profile.properties as { timezone?: string }).timezone);
         if (next) { deferred = "Outside cart email sending hours"; deferredUntil = next; }
       }
@@ -885,7 +895,7 @@ export async function runMarketing(onlyMessageId?: string) {
       ) {
         const intentBypassesRecentEmailSuppression =
           m.channel === "EMAIL" &&
-          (m.flowKey === "delivery-upsell" ||
+          (isIndependentCartEmail(m) || m.flowKey === "delivery-upsell" ||
             m.flowKey === "b2b-welcome" ||
             (m.flowKey === "welcome" && m.flowStep === 0 &&
               welcomeRun?.respectRecentEmailSpacing !== true));
@@ -897,8 +907,7 @@ export async function runMarketing(onlyMessageId?: string) {
             (welcomeRun?.testEmail === m.profile.email &&
               liveWelcomeConfig?.testEmail === m.profile.email &&
               liveWelcomeConfig.bypassRecentEmailSuppression === true));
-        // In-flight and uncertain outcomes remain hard holds against duplicates,
-        // including messages whose user intent exempts them from ordinary spacing.
+        // Preserve duplicate protection inside each independent sending group.
         const reservation = await tx.marketingMessage.findFirst({
           where: {
             shop: shop(),
@@ -909,6 +918,7 @@ export async function runMarketing(onlyMessageId?: string) {
                 ? "EMAIL"
                 : { in: ["SMS_MARKETING", "SMS_TRANSACTIONAL"] },
             AND: [
+              ...(m.channel === "EMAIL" ? [emailReservationScope(m)] : []),
               {
                 OR: [
                   { flowKey: null },
@@ -944,6 +954,7 @@ export async function runMarketing(onlyMessageId?: string) {
                   ? "EMAIL"
                   : { in: ["SMS_MARKETING", "SMS_TRANSACTIONAL"] },
               AND: [
+                ...(m.channel === "EMAIL" ? [emailSpacingHistory()] : []),
                 {
                   OR: [
                     { flowKey: null },
@@ -1216,16 +1227,26 @@ export async function runMarketing(onlyMessageId?: string) {
             await prisma.marketingResource.delete({ where: { id: ready.id } });
             ready = null;
           }
+          const offerPercentage = cartRun.sequenceVersion === 2
+            ? message.flowCondition === "cart-v2:discount10" ? 10 : message.flowCondition === "cart-v2:discount15" ? 15 : null
+            : null;
+          const preparedProducts = ready ? null : await cartProducts(cartRun);
+          // Check the same allocation again on a prepared retry; never mint a
+          // second code or send an expired/redeemed offer from a cached design.
+          const sharedOffer = offerPercentage
+            ? await ensureCartDiscount(cartRunKey(message.key), message.profileId, offerPercentage, cartRun.config.cart!.couponHours ?? 168)
+            : null;
           if (ready) message.content = JSON.parse(JSON.stringify(await resolveCartContent(prisma, shop(), ready.data)));
           else {
-            const products = await cartProducts(cartRun);
-            const couponCode =
-              message.flowCondition === "cart-v1:final-no"
+            const products = preparedProducts!;
+            const couponCode = sharedOffer?.code ||
+              (message.flowCondition === "cart-v1:final-no"
                 ? await cartCoupon(message.id)
-                : undefined;
+                : undefined);
             message.content = JSON.parse(
               JSON.stringify(
-                content({ ...c, url: cartRun.url, products, couponCode }),
+                content({ ...c, url: cartRun.url, products, couponCode,
+                  ...(sharedOffer ? { couponExpiresAt: sharedOffer.endsAt } : {}) }),
               ),
             );
             await prisma.marketingResource.create({
@@ -1297,7 +1318,7 @@ export async function runMarketing(onlyMessageId?: string) {
             continue;
           }
           const dependency = await cartDependency(prisma, message, beforeSend);
-          const quietUntil = cartEmailNextAllowed(beforeSend.config.cart!, (latest.profile.properties as { timezone?: string }).timezone);
+          const quietUntil = beforeSend.sequenceVersion === 2 ? null : cartEmailNextAllowed(beforeSend.config.cart!, (latest.profile.properties as { timezone?: string }).timezone);
           if (beforeSend.observedAt !== cartRun.observedAt || dependency || quietUntil) {
             await prisma.marketingMessage.update({ where: { id: message.id }, data: {
               status: "PENDING", dueAt: new Date(Math.max(Date.now() + 60000, +(dependency || 0), +(quietUntil || 0))),
@@ -1347,6 +1368,13 @@ export async function runMarketing(onlyMessageId?: string) {
             continue;
           }
         } catch (error) {
+          if (error instanceof CartDiscountStopped) {
+            await atomic(async tx => {
+              await cancelCart(tx, cartRunKey(message.key), error.message);
+              await tx.marketingMessage.update({ where: { id: message.id }, data: { status: "CANCELLED", error: error.message } });
+            });
+            continue;
+          }
           throw new DeliveryError(
             "Email preparation: " +
               (error instanceof Error ? error.message : "failed"),

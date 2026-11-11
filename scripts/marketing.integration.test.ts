@@ -23,6 +23,10 @@ import { registerOrderPaymentTests } from "./order-payments.integration";
 import { registerMacroSubscriberTests } from "./macro-subscribers.integration";
 import { registerMarketingBrandRouteTests } from "./marketing-brand-routes.integration";
 import { registerMarketingBrandWorkerTests } from "./marketing-brands.integration";
+import { registerCartIsolationTests } from "./cart-isolation.integration";
+import { registerCartSequenceTests } from "./cart-sequence.integration";
+import { registerCartDiscountTests } from "./cart-discount.integration";
+import { registerCartThreeStepReportTests } from "./cart-three-step-report.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -66,6 +70,10 @@ registerOrderPaymentTests(() => ({ prisma, store, ingest, worker }));
 registerMacroSubscriberTests(() => ({ prisma, store, ingest, worker }));
 registerMarketingBrandRouteTests(() => ({ prisma, store, ingest, worker }));
 registerMarketingBrandWorkerTests(() => ({ prisma, store, ingest, worker }));
+registerCartIsolationTests(() => ({ prisma, store, ingest, worker }));
+registerCartSequenceTests(() => ({ prisma, store, ingest, worker }));
+registerCartDiscountTests(() => ({ prisma, store, ingest, worker }));
+registerCartThreeStepReportTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {
@@ -2625,7 +2633,7 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       "CANCELLED",
     );
 
-    // A different checkout can re-enter immediately; recent email now postpones rather than loses it.
+    // A different checkout can re-enter immediately; cart recovery is independent of recent email.
     latestOrder = null;
     await ingest.ingestShopify("checkouts/create", "cart-reentry", {
       token: "cart-second-checkout",
@@ -2646,12 +2654,11 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
       where: {
         profileId: p.id,
         flowCondition: "cart-v1:first",
-        status: "PENDING",
+        status: "SENT",
       },
       orderBy: { triggerAt: "desc" },
     });
-    assert.match(spaced.error || "", /16-hour email spacing/);
-    assert.ok(spaced.dueAt > new Date());
+    assert.equal(spaced.error, null);
 
     const p4 = await make("cart1004");
     await store.atomic((tx) =>
@@ -2666,9 +2673,8 @@ test("cart v1 uses sequential waits, both purchase-history branches, real coupon
     const externalWait = await prisma.marketingMessage.findFirstOrThrow({
       where: { profileId: p4.id, flowCondition: "cart-v1:first" },
     });
-    assert.equal(externalWait.status, "PENDING");
-    assert.match(externalWait.error || "", /16-hour email spacing/);
-    assert.ok(externalWait.dueAt > new Date());
+    assert.equal(externalWait.status, "SENT", "External email receipts do not delay cart recovery");
+    assert.equal(externalWait.error, null);
 
     // A lost mutation response does not create a second discount on retry.
     const fetchBeforeLoss = globalThis.fetch;
@@ -3865,7 +3871,18 @@ test("send this test step now advances only the selected email and keeps deliver
   });
   const previous = globalThis.fetch;
   let purchased = false;
+  const earlyTestCoupons = new Map<string, { id: string; codeDiscount: { title: string } }>();
   globalThis.fetch = async (input, init) => {
+    if (String(input).includes("/graphql.json")) {
+      const body = JSON.parse(String(init?.body));
+      if (body.query.includes("CartCouponLookup"))
+        return Response.json({ data: { codeDiscountNodeByCode: earlyTestCoupons.get(body.variables.code) || null } });
+      if (body.query.includes("CartCouponCreate")) {
+        const coupon = { id: "gid://shopify/DiscountCodeNode/early-test", codeDiscount: { title: body.variables.input.title } };
+        earlyTestCoupons.set(body.variables.input.code, coupon);
+        return Response.json({ data: { discountCodeBasicCreate: { codeDiscountNode: { id: coupon.id }, userErrors: [] } } });
+      }
+    }
     if (
       String(input).includes("/graphql.json") &&
       String(init?.body).includes("CartOrderCheck")
@@ -3983,12 +4000,13 @@ test("send this test step now advances only the selected email and keeps deliver
       "completed steps cannot resend",
     );
     const followup = await api.POST(request(last.id));
+    const followupResult = await followup.json();
     assert.equal(
-      (await followup.json()).status,
-      "PENDING",
-      "16-hour spacing postpones rather than cancels the follow-up",
+      followupResult.status,
+      "SENT",
+      "Cart tests follow their own explicitly advanced wait without a 16-hour hold: " + JSON.stringify(followupResult),
     );
-    assert.equal(sent.length, before + 1);
+    assert.equal(sent.length, before + 2);
 
     const rows = await enrollTest("purchase-before-early-test");
     const purchaseFirst = rows.find(
@@ -4005,7 +4023,7 @@ test("send this test step now advances only the selected email and keeps deliver
       ).error || "",
       /purchased/,
     );
-    assert.equal(sent.length, before + 1);
+    assert.equal(sent.length, before + 2);
     purchased = false;
 
     const pending = await enrollTest("paused-early-test");

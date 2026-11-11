@@ -11,9 +11,11 @@ import { saveCartConfig, resolveCartConfig, saveCartContent } from "./cart-stora
 import { CART_EXPIRY_MINUTES, CART_UNAVAILABLE_REASON } from "./cart-config";
 import { cartMerchandiseBlock, isCartServiceLine, isCartMerchandiseBlock, type CartMerchandise } from "./cart-merchandise";
 import { stageCartAbandonment, verifyCartAbandonmentAccess, type CartAbandonment } from "./cart-abandonment";
+import { cartSequenceVersion, cartStage, cartPreviousStage, cartNextStage, cartStageMinutes, cartStepIndex, isCartCondition } from "./cart-sequence";
 
 export type CartRun = {
   config: FlowConfig;
+  sequenceVersion?: 2;
   profileId?: string;
   testEmail?: string;
   productIds: string[];
@@ -96,7 +98,7 @@ export async function cancelCart(tx: Tx, runKey: string, reason: string) {
     } });
   }
   await tx.marketingMessage.updateMany({ where: { shop: shop(), flowKey: "abandoned-cart",
-    key: { in: [runKey + ":sms", runKey + ":first", runKey + ":final"] }, status: "PENDING" }, data: { status: "CANCELLED", error: reason } });
+    key: { in: ["sms", "first", "final", "discount10", "discount15"].map(stage => runKey + ":" + stage) }, status: "PENDING" }, data: { status: "CANCELLED", error: reason } });
 }
 
 /** Read ownership/activity inside the claim and again immediately before sending. */
@@ -208,10 +210,12 @@ export async function enrollCart(
     profile.email !== config.cart.testEmail
   )
     return false;
+  const sequenceVersion = config.cart?.recoveryVersion === 2 ? 2 : 1;
   const sms =
-    setup().smsReady && !config.cart?.testEmail && !!profile.phone && eligible(smsConsent);
+    sequenceVersion !== 2 && setup().smsReady && !config.cart?.testEmail && !!profile.phone && eligible(smsConsent);
   const run = {
     configRef: await saveCartConfig(tx, shop(), config),
+    ...(sequenceVersion === 2 ? { sequenceVersion: 2 } : {}),
     ...(config.cart?.testEmail ? { testEmail: config.cart.testEmail } : {}),
     profileId,
     url,
@@ -235,7 +239,10 @@ export async function enrollCart(
   await record(tx, { key: "cart-abandonment:" + profileId + ":" + abandonment.id,
     type: "CART_ABANDONMENT_CONFIRMED", profileId, occurredAt: abandonedAt,
     payload: { abandonmentId: abandonment.id, checkoutId: abandonment.checkoutId } });
-  const rows = [
+  const rows = sequenceVersion === 2 ? config.steps.map((step, index) => ({
+    id: ["first", "discount10", "discount15"][index], channel: "EMAIL", subject: step.subject, c: step.content,
+    minutes: config.steps.slice(0, index + 1).reduce((sum, item) => sum + item.minutes, 0),
+  })) : [
     ...(sms
       ? [
           {
@@ -271,7 +278,8 @@ export async function enrollCart(
       key: base + ":" + row.id,
       profileId,
       flowKey: "abandoned-cart",
-      flowCondition: "cart-v1:" + row.id,
+      flowCondition: `cart-v${sequenceVersion}:` + row.id,
+      ...(sequenceVersion === 2 ? { flowStep: cartStepIndex(`cart-v2:${row.id}`) } : {}),
       channel: row.channel,
       subject: row.subject,
       content: await saveCartContent(tx, shop(), { ...row.c, url, products: [], couponCode: undefined }),
@@ -310,6 +318,8 @@ export async function loadCart(key: string): Promise<CartRun> {
     config: configRef ? await resolveCartConfig(prisma, shop(), configRef) : stored.config,
   };
   if (!run.config) throw new Error("Checkout has no active recovery run");
+  if ((cartSequenceVersion(run) === 2) !== (run.config.cart?.recoveryVersion === 2))
+    throw new Error("Checkout recovery sequence version does not match its saved configuration");
   if (!run.profileId) {
     const message = await prisma.marketingMessage.findUnique({
       where: { key },
@@ -324,19 +334,30 @@ export async function loadCart(key: string): Promise<CartRun> {
   });
   if (flow?.data && (flow.data as { cart?: unknown }).cart) {
     const live = validateFlow("abandoned-cart", flow.data);
+    // A new sequence must not rewrite the copy or delays of an already entered legacy run.
+    const sameLegacySequence = cartSequenceVersion(run) === 1 && live.cart?.recoveryVersion !== 2;
+    const sameThreeStepSequence = cartSequenceVersion(run) === 2 && live.cart?.recoveryVersion === 2;
+    const savedCart = run.config.cart!;
     run.config = {
       ...run.config,
-      steps: run.config.steps.map((step, index) =>
-        index === 0
+      steps: sameLegacySequence || sameThreeStepSequence ? run.config.steps.map((step, index) =>
+        index === 0 || sameThreeStepSequence
           ? {
               ...step,
-              subject: live.steps[0].subject,
-              content: live.steps[0].content,
+              subject: live.steps[index].subject,
+              content: live.steps[index].content,
             }
           : step,
-      ),
-      orderBranch: live.orderBranch,
-      cart: live.cart,
+      ) : run.config.steps,
+      orderBranch: sameLegacySequence ? live.orderBranch : run.config.orderBranch,
+      cart: { ...savedCart,
+        minimumSubtotal: live.cart!.minimumSubtotal,
+        productCount: live.cart!.productCount,
+        testEmail: live.cart!.testEmail,
+        bypassRecentEmailSuppression: live.cart!.bypassRecentEmailSuppression,
+        sendStartHour: cartSequenceVersion(run) === 2 ? 0 : live.cart!.sendStartHour,
+        sendEndHour: cartSequenceVersion(run) === 2 ? 24 : live.cart!.sendEndHour,
+      },
     };
   }
   return run;
@@ -377,10 +398,12 @@ export async function cartDependency(
   const wait = current ? await tx.marketingResource.findUnique({ where: {
     shop_kind_key: { shop: shop(), kind: "CART_WAIT", key: current.id },
   } }) : null;
-  const stage = m.flowCondition?.split(":")[1];
-  const previous = stage === "sms" ? null : await tx.marketingMessage.findUnique({
-    where: { key: cartRunKey(m.key) + (stage === "first" ? ":sms" : ":first") },
-  });
+  const stage = cartStage(m.flowCondition), previousStage = cartPreviousStage(m.flowCondition);
+  const previous = previousStage ? await tx.marketingMessage.findUnique({
+    where: { key: cartRunKey(m.key) + ":" + previousStage },
+  }) : null;
+  if (cartSequenceVersion(run) === 2 && previousStage && (!previous || previous.status !== "SENT" || !previous.sentAt))
+    return new Date(Date.now() + 60000);
   if (previous && ["PENDING", "SENDING", "UNKNOWN"].includes(previous.status))
     return new Date(Math.max(Date.now() + 60000, +previous.dueAt));
   const savedWait = wait?.data as { dueAt?: string; testAdvance?: boolean } | undefined;
@@ -388,7 +411,7 @@ export async function cartDependency(
   const inactivity = new Date(+new Date(run.abandonment?.abandonedAt || "") + (stage === "sms" ? run.config.smsMinutes ?? 30 : run.config.steps[0].minutes) * 60000);
   let due = +inactivity;
   if (previous && !savedWait?.dueAt) {
-    const minutes = stage === "first" ? run.config.steps[0].minutes : (run.config.branchMinutes ?? 1440);
+    const minutes = cartStageMinutes(run.config, m.flowCondition);
     due = Math.max(due, +(previous.sentAt || previous.updatedAt) + minutes * 60000);
   }
   if (savedWait?.dueAt) due = Math.max(due, +new Date(savedWait.dueAt));
@@ -397,6 +420,13 @@ export async function cartDependency(
 
 /** A cancelled or failed first email can never become a final offer. */
 export async function cartSequenceStop(tx: Tx, key: string, condition: string | null) {
+  if (condition?.startsWith("cart-v2:")) {
+    const previousStage = cartPreviousStage(condition);
+    if (!previousStage) return null;
+    const previous = await tx.marketingMessage.findUnique({ where: { key: cartRunKey(key) + ":" + previousStage } });
+    return !previous || ["CANCELLED", "FAILED"].includes(previous.status) || (previous.status === "SENT" && !previous.sentAt)
+      ? "Previous cart reminder was not sent" : null;
+  }
   if (!condition?.startsWith("cart-v1:final")) return null;
   const first = await tx.marketingMessage.findUnique({ where: { key: cartRunKey(key) + ":first" } });
   return !first || ["CANCELLED", "FAILED"].includes(first.status) || (first.status === "SENT" && !first.sentAt) ? "First reminder was not sent" : null;
@@ -594,21 +624,22 @@ export async function advanceCart(
   message: { key: string; flowCondition: string | null },
   completedAt = new Date(),
 ) {
-  if (!message.flowCondition?.startsWith("cart-v1:")) return;
-  const stage = message.flowCondition.split(":")[1];
-  if (stage !== "sms" && stage !== "first") return;
-  if (stage === "first") {
+  if (!isCartCondition(message.flowCondition)) return;
+  const stage = cartStage(message.flowCondition), nextStage = cartNextStage(message.flowCondition);
+  if (!nextStage) return;
+  const sequenceVersion = message.flowCondition?.startsWith("cart-v2:") ? 2 : 1;
+  if (sequenceVersion === 2 || stage === "first") {
     const first = await tx.marketingMessage.findUnique({ where: { key: message.key } });
     if (first?.status !== "SENT" || !first.sentAt) {
       if (first && ["CANCELLED", "FAILED"].includes(first.status))
-        await cancelCart(tx, cartRunKey(message.key), "First reminder was not sent");
+        await cancelCart(tx, cartRunKey(message.key), sequenceVersion === 2 ? "Previous cart reminder was not sent" : "First reminder was not sent");
       return;
     }
     completedAt = first.sentAt;
   }
   const next = await tx.marketingMessage.findUnique({
     where: {
-      key: cartRunKey(message.key) + (stage === "sms" ? ":first" : ":final"),
+      key: cartRunKey(message.key) + ":" + nextStage,
     },
   });
   if (!next || next.status !== "PENDING") return;
@@ -623,8 +654,15 @@ export async function advanceCart(
     },
   });
   const live = validateFlow("abandoned-cart", row?.data);
-  const delay =
-    stage === "sms" ? live.steps[0].minutes : (live.branchMinutes ?? 1440);
+  let config = live;
+  if (sequenceVersion === 2 || live.cart?.recoveryVersion === 2) {
+    const saved = await tx.marketingResource.findUniqueOrThrow({ where: {
+      shop_kind_key: { shop: shop(), kind: "CART_RUN", key: cartRunKey(message.key) },
+    } });
+    const run = saved.data as unknown as CartRun & { configRef?: string };
+    config = run.configRef ? await resolveCartConfig(tx, shop(), run.configRef) : run.config;
+  }
+  const delay = cartStageMinutes(config, `cart-v${sequenceVersion}:${nextStage}`);
   const dueAt = new Date(+completedAt + delay * 60000);
   await tx.marketingResource.create({
     data: {

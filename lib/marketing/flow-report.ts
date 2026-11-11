@@ -18,7 +18,8 @@ type Metrics = {
 const metrics = (): Metrics => ({ sent: 0, recipients: 0, delivered: 0, opened: 0, clicked: 0,
   bounced: 0, complained: 0, unsubscribed: 0, waiting: 0, stopped: 0, needsAttention: 0,
   orders: 0, convertedRecipients: 0, revenue: {} });
-const cartNames: Record<string, string> = { first: "Email #1 · Soft push", "final-yes": "Email #2 · Another soft push",
+const cartNames: Record<string, string> = { "v2-first": "Email #1 · Cart reminder", "v2-discount10": "Email #2 · 10% offer",
+  "v2-discount15": "Email #3 · 15% final offer", first: "Email #1 · Soft push", "final-yes": "Email #2 · Another soft push",
   "final-no": "Email #2 · Discount offer", final: "Follow-up · awaiting decision" };
 const eventMetric = { DELIVERED: "delivered", OPENED: "opened", CLICKED: "clicked", BOUNCED: "bounced",
   COMPLAINED: "complained", UNSUBSCRIBED: "unsubscribed" } as const;
@@ -35,6 +36,10 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
   const now = new Date(), since = new Date(+now - days * DAY);
   const attribution = await attributionConfiguration(prisma);
   const name = flowKey === "welcome" ? "Welcome" : "Abandoned Cart";
+  const cartFlow = flowKey === "abandoned-cart" ? await prisma.marketingResource.findUnique({
+    where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" } }, select: { data: true },
+  }) : null;
+  const currentCartVersion = (cartFlow?.data as { cart?: { recoveryVersion?: number } } | undefined)?.cart?.recoveryVersion;
   const totals = metrics();
   const steps = (flowKey === "welcome" ? welcomeLabels.map((label, index) => [String(index), label])
     : Object.entries(cartNames)).map(([key, label]) => ({ key, label, ...metrics() }));
@@ -43,7 +48,7 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
   for (const row of [totals, ...steps]) { recipientSets.set(row, new Set()); buyerSets.set(row, new Set()); }
   const stepFor = (message: { flowStep: number | null; flowCondition: string | null }) => {
     const key = flowKey === "welcome" ? String(message.flowStep ?? 0)
-      : message.flowCondition?.replace("cart-v1:", "") || "first";
+      : message.flowCondition?.replace(/^cart-v2:/, "v2-").replace(/^cart-v1:/, "") || "first";
     if (!byKey.has(key)) {
       const row = { key, label: flowKey === "welcome" ? "Welcome email" : "Cart email", ...metrics() };
       steps.push(row); byKey.set(key, row); recipientSets.set(row, new Set()); buyerSets.set(row, new Set());
@@ -158,7 +163,10 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
   const buyerProfiles = new Set([...details.values()].flatMap(detail => detail.profileId || []));
   for (const message of sentMessages.values()) {
     if (flowKey === "welcome" || !buyerProfiles.has(message.profileId)) continue;
-    const key = message.id;
+    if (message.flowCondition === "cart-v2:first") continue;
+    const key = message.flowCondition?.startsWith("cart-v2:")
+      ? message.key.slice(0, message.key.lastIndexOf(":"))
+      : message.id;
     const list = couponMessages.get(key) || [];
     list.push({ profileId: message.profileId, sentAt: message.sentAt! }); couponMessages.set(key, list);
   }
@@ -197,7 +205,16 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
   orders.sort((a, b) => b.placedAt.localeCompare(a.placedAt) || b.id.localeCompare(a.id));
   const pageSize = 25, pages = Math.max(1, Math.ceil(orders.length / pageSize));
   const page = Math.min(Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1, pages);
-  return { flowKey, name, days, since: since.toISOString(), generatedAt: now.toISOString(), attribution, totals, steps, paymentVerification: { unverifiedOrders: unverifiedOrderIds.size, staleOrders: staleOrderIds.size },
+  const hasActivity = (row: Metrics) => row.sent + row.waiting + row.stopped + row.needsAttention + row.orders > 0;
+  const showThreeStepCart = currentCartVersion === 2 || steps.some(row => row.key.startsWith("v2-") && hasActivity(row));
+  const visibleSteps = flowKey === "welcome" ? steps : steps.filter(row => row.key.startsWith("v2-") === showThreeStepCart || hasActivity(row));
+  if (showThreeStepCart) {
+    const legacyLabels = new Map(visibleSteps.filter(row => !row.key.startsWith("v2-")).map(row => [row.label, "Legacy · " + row.label]));
+    for (const row of visibleSteps) row.label = legacyLabels.get(row.label) || row.label;
+    for (const order of orders) order.step = legacyLabels.get(order.step) || order.step;
+    for (const message of recent) message.step = legacyLabels.get(message.step) || message.step;
+  }
+  return { flowKey, name, days, since: since.toISOString(), generatedAt: now.toISOString(), attribution, totals, steps: visibleSteps, paymentVerification: { unverifiedOrders: unverifiedOrderIds.size, staleOrders: staleOrderIds.size },
     orders: orders.slice((page - 1) * pageSize, page * pageSize), ordersPage: { page, pageSize, total: orders.length, pages }, evidence,
     activity: recent.map(({ sortAt: _sortAt, ...message }) => { void _sortAt; return message; }),
     reasons: [...reasons].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([reason, count]) => ({ reason, count })),

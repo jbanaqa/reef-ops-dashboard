@@ -8,6 +8,7 @@ import {
   footerTitle,
   footerCopyright,
   defaultGeneratedEmailCopy,
+  couponExpiryDate,
   personalize,
 } from "./rules";
 import { screenEmail } from "./email-screen";
@@ -124,7 +125,9 @@ export function emailBody(
             defaultGeneratedEmailCopy.couponExpiry
           ).replace(
             "{{ coupon_expires }}",
-            effectiveContent.couponExpiresAt,
+            effectiveContent.template === "cart-recovery" || effectiveContent.layout === "cart-recovery"
+              ? couponExpiryDate(effectiveContent.couponExpiresAt)
+              : effectiveContent.couponExpiresAt,
           )
         : undefined,
       (effectiveContent.products || [])

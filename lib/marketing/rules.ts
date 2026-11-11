@@ -653,10 +653,15 @@ export function couponTimeLeft(expiresAt?: string, now = new Date()) {
   const days = Math.max(1, Math.ceil((new Date(expiresAt).getTime() - +now) / DAY));
   return `${days} ${days === 1 ? "day" : "days"}`;
 }
+export function couponExpiryDate(expiresAt: string) {
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "America/Los_Angeles" }).format(new Date(expiresAt));
+}
 export function textBody(c: Content, name = "") {
   return personalize(
     (c.bodyHtml !== undefined ? htmlText(c.bodyHtml) : c.body)
-      .replaceAll("{{ coupon_expires }}", c.couponExpiresAt || c.couponExpiryFallbackText || defaultGeneratedEmailCopy.couponExpiryFallback)
+      .replaceAll("{{ coupon_expires }}", c.couponExpiresAt
+        ? c.template === "cart-recovery" || c.layout === "cart-recovery" ? couponExpiryDate(c.couponExpiresAt) : c.couponExpiresAt
+        : c.couponExpiryFallbackText || defaultGeneratedEmailCopy.couponExpiryFallback)
       .replaceAll("{{ coupon_time_left }}", couponTimeLeft(c.couponExpiresAt)),
     name,
   );
@@ -1872,6 +1877,9 @@ export function render(
     };
   }
   if (layout === "cart-recovery") {
+    const expiryLine = c.couponExpiresAt && c.couponExpiryText !== ""
+      ? (c.couponExpiryText ?? defaultGeneratedEmailCopy.couponExpiry).replaceAll("{{ coupon_expires }}", couponExpiryDate(c.couponExpiresAt))
+      : "";
     const copy =
       c.bodyHtml !== undefined
         ? personalize(c.bodyHtml, profileName, true)
@@ -1931,7 +1939,7 @@ export function render(
           e(c.couponCode) +
           '</p><p style="font-size:12px">' +
           e(c.couponTerms ?? defaultGeneratedEmailCopy.cartCouponTerms) +
-          "</p>"
+          "</p>" + (expiryLine ? '<p style="font-size:12px">' + e(expiryLine) + "</p>" : "")
         : "") +
       '</td></tr></table></td></tr><tr><td align="center" style="padding:9px 20px 43px;background:' +
       e(bandColor) +

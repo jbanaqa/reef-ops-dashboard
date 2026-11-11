@@ -68,6 +68,12 @@ export function flowProgress(
       const step = (m: Message) =>
         m.flowCondition?.startsWith("welcome-v1:")
           ? welcomeLabels[Number(m.flowCondition.split(":")[1])] || m.subject
+          : m.flowCondition === "cart-v2:first"
+            ? "Email #1 · Cart reminder"
+          : m.flowCondition === "cart-v2:discount10"
+            ? "Email #2 · 10% offer"
+          : m.flowCondition === "cart-v2:discount15"
+            ? "Email #3 · 15% final offer"
           : m.flowCondition === "cart-v1:first"
             ? "First reminder"
             : m.flowCondition?.startsWith("cart-v1:final")

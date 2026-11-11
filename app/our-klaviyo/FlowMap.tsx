@@ -359,6 +359,31 @@ function CartMap({
       ↓
     </span>
   );
+  if (f.cart?.recoveryVersion === 2) return (
+    <div className="mk-cart-map" aria-label={resource.name + " automation map"}>
+      {node("trigger", "trigger", "Shopify confirms an abandoned checkout", "Start once per checkout. Updates alone do not restart recovery.")}
+      {line}
+      {node("entry", "condition", "Consent + eligible cart", "Subscribed customers only. A new purchase stops every remaining email.")}
+      {line}
+      {node("email-wait", "wait", "Wait " + duration(f.steps[0].minutes), "After Shopify confirms abandonment; updates do not restart the wait.", { kind: "wait", index: 0 })}
+      {line}
+      {node("first", "email", "Email #1 · Cart reminder", f.steps[0].subject, { kind: "step", index: 0 })}
+      {line}
+      {node("discount10-wait", "wait", "Wait " + duration(f.steps[1].minutes), "After email #1 is sent.", { kind: "wait", index: 1 })}
+      {line}
+      {node("discount10", "email", "Email #2 · 10% offer", f.steps[1].subject, { kind: "step", index: 1 })}
+      {line}
+      {node("discount15-wait", "wait", "Wait " + duration(f.steps[2].minutes), "After email #2 is sent.", { kind: "wait", index: 2 })}
+      {line}
+      {node("discount15", "email", "Email #3 · 15% final offer", f.steps[2].subject, { kind: "step", index: 2 })}
+      {line}
+      {node("end", "end", "End", "Purchase, unsubscribe or suppression stops the remaining emails.")}
+      <div className="mk-cart-tools">
+        {node("products", "condition", "Product recommendations", "Cart items first, then popular products from the last 3 days.", { kind: "info", section: "products" })}
+        {node("coupon", "condition", "One code · 10% → 15%", "Email #3 upgrades the same code. Its expiration does not reset.", { kind: "info", section: "coupon" })}
+      </div>
+    </div>
+  );
   return (
     <div className="mk-cart-map" aria-label={resource.name + " automation map"}>
       {node(

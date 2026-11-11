@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { cartRunKey, type CartRun } from "./cart";
 import { cartTestBlock } from "./cart-config";
+import { cartPreviousStage, isCartCondition } from "./cart-sequence";
 import { setup } from "./delivery";
 import { validateFlow, type FlowConfig } from "./flow-config";
 import { scopedMarketingSettings as marketingSettings } from "./settings";
@@ -47,7 +48,7 @@ async function testContext(
   });
   if (!flow) return null;
   if (m.flowKey === "abandoned-cart") {
-    if (!["cart-v1:first", "cart-v1:final"].includes(m.flowCondition || ""))
+    if (!isCartCondition(m.flowCondition) || m.flowCondition === "cart-v1:sms")
       return null;
     const config = validateFlow(m.flowKey, flow.data);
     if (!config.cart?.testEmail) return null;
@@ -116,9 +117,9 @@ export async function messageTestState(
       },
     };
   let reason: string | null = null;
-  if (context.kind === "cart" && m.flowCondition === "cart-v1:final") {
+  if (context.kind === "cart" && (m.flowCondition === "cart-v1:final" || m.flowCondition?.startsWith("cart-v2:discount"))) {
     const previous = await tx.marketingMessage.findUnique({
-      where: { key: cartRunKey(m.key) + ":first" },
+      where: { key: cartRunKey(m.key) + ":" + cartPreviousStage(m.flowCondition) },
       select: { status: true },
     });
     if (!previous || previous.status !== "SENT")
@@ -305,12 +306,14 @@ export async function clearUnsentTestMessages(profileId: string) {
         key: { in: removable },
       },
     });
-    await tx.marketingResource.deleteMany({
-      where: { shop: shop(), kind: "CART_RUN", key: { in: [...cartRuns] } },
-    });
     const result = await tx.marketingMessage.deleteMany({
       where: { id: { in: removable }, profileId, shop: shop() },
     });
+    // Retain durable test scope while any sent or uncertain history remains.
+    for (const key of cartRuns) {
+      if (!(await tx.marketingMessage.count({ where: { shop: shop(), profileId, key: { startsWith: key + ":" } } })))
+        await tx.marketingResource.deleteMany({ where: { shop: shop(), kind: "CART_RUN", key } });
+    }
     return result.count;
   });
 }

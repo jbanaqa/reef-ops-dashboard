@@ -41,21 +41,21 @@ async function artwork(db: Storage, shop: string, value: unknown, saving: boolea
 export function isCartContentReference(value: unknown): value is { cartContentRef: string; values: Record<string, unknown> } {
   return !!value && typeof value === "object" && "cartContentRef" in value;
 }
-/** Shared copy/artwork plus only the checkout URL, selected products and coupon per message. */
+/** Shared copy/artwork plus only checkout, products and personal offer values per message. */
 export async function saveCartContent(db: Storage, shop: string, value: unknown) {
   if (isCartContentReference(value)) {
     await resolveCartContent(db, shop, value);
     return json(value);
   }
-  const { url, products, couponCode, ...shared } = content(value);
+  const { url, products, couponCode, couponExpiresAt, ...shared } = content(value);
   const key = await save(db, shop, "CART_CONTENT", await artwork(db, shop, shared, true));
-  return json({ cartContentRef: key, values: { url, products, couponCode } });
+  return json({ cartContentRef: key, values: { url, products, couponCode, couponExpiresAt } });
 }
 export async function resolveCartContent(db: Storage, shop: string, value: unknown): Promise<Content> {
   if (!isCartContentReference(value)) return content(value); // Legacy inline messages remain readable.
   const shared = await artwork(db, shop, await load(db, shop, "CART_CONTENT", value.cartContentRef), false);
   const overrides = value.values;
-  if (!overrides || typeof overrides !== "object" || Object.keys(overrides).some(k => !["url", "products", "couponCode"].includes(k)))
+  if (!overrides || typeof overrides !== "object" || Object.keys(overrides).some(k => !["url", "products", "couponCode", "couponExpiresAt"].includes(k)))
     throw Error("Invalid cart message values");
   return content({ ...(shared as object), ...overrides });
 }

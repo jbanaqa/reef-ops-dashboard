@@ -664,7 +664,7 @@ test("abandoned cart editor controls its campaign-style product cards", async ()
       }}
     />,
   );
-  testing.fireEvent.click(await view.findByText("Email #1 · Soft push"));
+  testing.fireEvent.click(await view.findByText("Email #1 · Cart reminder"));
   const frame = view.getByTitle("Email preview") as HTMLIFrameElement;
   assert.match(frame.getAttribute("srcdoc") || "", /Blueberry Gorgonian/);
   assert.match(frame.getAttribute("srcdoc") || "", /\$29\.99/);

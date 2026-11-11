@@ -132,8 +132,11 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     throw new Error(
       "Welcome needs four emails: immediately, two ordered reminders before expiry, then social after expiry.",
     );
+  const cartV2 = f.cart?.recoveryVersion === 2;
+  if (cartV2 && (key !== "abandoned-cart" || steps.length !== 3 || steps.some(s => s.channel !== "EMAIL")))
+    throw new Error("Cart recovery needs three email steps.");
   if (
-    f.cart &&
+    f.cart && !cartV2 &&
     (key !== "abandoned-cart" ||
       steps.length !== 1 ||
       steps[0].channel !== "EMAIL" ||
@@ -147,7 +150,8 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     if (!b) throw new Error("Both legacy branch objects are required.");
     return { subject: subject(b.subject), content: content(b.content) };
   };
-  if (f.cart && steps[0].minutes + minutes(f.smsMinutes, 30) + minutes(f.branchMinutes, 1440) >= CART_EXPIRY_MINUTES)
+  if (f.cart && (cartV2 ? steps.reduce((total, step) => total + step.minutes, 0)
+    : steps[0].minutes + minutes(f.smsMinutes, 30) + minutes(f.branchMinutes, 1440)) >= CART_EXPIRY_MINUTES)
     throw new Error("Cart recovery stops after 72 hours without checkout activity. Keep the total waits below 72 hours.");
   if (
     f.internalProfileIds &&
@@ -173,13 +177,13 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     description: String(f.description || "").slice(0, 1000),
     trigger: flowDefaults.find((f) => f.key === key)!.trigger,
     steps,
-    ...(f.smsContent
+    ...(!cartV2 && f.smsContent
       ? {
           smsContent: content(f.smsContent),
           smsMinutes: minutes(f.smsMinutes, 30),
         }
       : {}),
-    ...(f.orderBranch
+    ...(!cartV2 && f.orderBranch
       ? {
           orderBranch: {
             yes: branch(f.orderBranch.yes),
@@ -194,16 +198,17 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     ...(f.threshold != null ? { threshold: f.threshold } : {}),
   };
 }
-/** Shared by enrollment and the editor map. Delays are measured from the trigger. */
+/** Shared by enrollment and the editor map. V2 cart waits follow the preceding successful email; legacy waits retain their original meaning. */
 export function flowSequence(key: string, f: FlowConfig): PlannedStep[] {
   const steps = (
+    key === "abandoned-cart" && f.cart?.recoveryVersion === 2 ? f.steps :
     key === "abandoned-cart" && f.orderBranch ? f.steps.slice(0, 1) : f.steps
   ).map((s, index) => ({
     ...s,
     id: String(index),
     target: { kind: "step", index } as FlowTarget,
   }));
-  if (key === "abandoned-cart" && f.smsContent)
+  if (key === "abandoned-cart" && f.smsContent && f.cart?.recoveryVersion !== 2)
     steps.push({
       minutes: f.smsMinutes ?? 30,
       subject: "Your cart",
@@ -212,7 +217,7 @@ export function flowSequence(key: string, f: FlowConfig): PlannedStep[] {
       id: String(steps.length),
       target: { kind: "sms" },
     });
-  if (key === "abandoned-cart" && f.orderBranch)
+  if (key === "abandoned-cart" && f.orderBranch && f.cart?.recoveryVersion !== 2)
     steps.push({
       ...f.orderBranch.no,
       minutes: f.branchMinutes ?? 1440,
@@ -220,5 +225,5 @@ export function flowSequence(key: string, f: FlowConfig): PlannedStep[] {
       id: "order-branch",
       target: { kind: "branch", branch: "no" },
     });
-  return steps.sort((a, b) => a.minutes - b.minutes);
+  return key === "abandoned-cart" && f.cart?.recoveryVersion === 2 ? steps : steps.sort((a, b) => a.minutes - b.minutes);
 }

@@ -5,6 +5,9 @@ import { attributionConfiguration, attributedOrders } from "./attribution";
 import { customerCartMessages } from "./cart-report-scope";
 import { addOrderRevenue, orderValue } from "./order-evidence";
 const names: Record<string, string> = {
+  "v2-first": "Email #1 · Cart reminder",
+  "v2-discount10": "Email #2 · 10% offer",
+  "v2-discount15": "Email #3 · 15% final offer",
   sms: "Text message",
   first: "Email #1 · Soft push",
   "final-yes": "Email #2 · Another soft push",
@@ -14,6 +17,10 @@ const names: Record<string, string> = {
 export async function cartReport() {
   const since = new Date(Date.now() - 30 * DAY);
   const attribution = await attributionConfiguration(prisma);
+  const savedFlow = await prisma.marketingResource.findUnique({
+    where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" } }, select: { data: true },
+  });
+  const currentVersion = (savedFlow?.data as { cart?: { recoveryVersion?: number } } | undefined)?.cart?.recoveryVersion;
   const rows = Object.entries(names).map(([key, label]) => ({
     key,
     label,
@@ -46,7 +53,7 @@ export async function cartReport() {
       select: { id: true, key: true, flowKey: true, status: true, error: true, flowCondition: true, sentAt: true },
     });
     for (const m of await customerCartMessages(prisma, shop(), page)) {
-      const row = byKey.get(m.flowCondition?.replace("cart-v1:", "") || "");
+      const row = byKey.get(m.flowCondition?.replace(/^cart-v2:/, "v2-").replace(/^cart-v1:/, "") || "");
       if (!row) continue;
       rowFor.set(m.id, row);
       if (m.sentAt) row.sent++;
@@ -129,6 +136,14 @@ export async function cartReport() {
     if (page.length < 100) break;
     activityCursor = page[page.length - 1].id;
   }
+  const hasActivity = (row: (typeof rows)[number]) => row.waiting + row.sent + row.stopped + row.needsAttention + row.orders > 0;
+  const showThreeStepCart = currentVersion === 2 || rows.some(row => row.key.startsWith("v2-") && hasActivity(row));
+  const visibleRows = rows.filter(row => row.key.startsWith("v2-") === showThreeStepCart || hasActivity(row));
+  if (showThreeStepCart) {
+    const legacyLabels = new Map(visibleRows.filter(row => !row.key.startsWith("v2-")).map(row => [row.label, "Legacy · " + row.label]));
+    for (const row of visibleRows) row.label = legacyLabels.get(row.label) || row.label;
+    for (const order of orders) order.step = legacyLabels.get(order.step) || order.step;
+  }
   return {
     since: since.toISOString(),
     attribution,
@@ -138,7 +153,7 @@ export async function cartReport() {
       void _key; void _flow;
       return { ...m, email: profile.email || "Email unavailable", profileId: profile.id };
     }),
-    rows,
+    rows: visibleRows,
     reasons: [...reasons]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)

@@ -25,9 +25,10 @@ const names: Record<string, string[]> = {
 export function flowEmailTemplates(resources: FlowResource[]): FlowEmailTemplate[] {
   const templates: FlowEmailTemplate[] = [];
   for (const resource of resources) {
-    const labels = names[resource.key];
-    if (resource.kind !== "FLOW" || !labels) continue;
+    if (resource.kind !== "FLOW" || !names[resource.key]) continue;
     const flow = resource.data as Partial<FlowConfig>;
+    const labels = resource.key === "abandoned-cart" && flow.cart?.recoveryVersion === 2
+      ? ["Cart reminder", "Cart offer · 10%", "Cart final offer · 15%"] : names[resource.key];
     for (const [index, label] of labels.entries()) {
       const step = flow.steps?.[index];
       if (step?.channel !== "EMAIL" || !step.content || !step.subject) continue;
@@ -42,7 +43,7 @@ export function flowEmailTemplates(resources: FlowResource[]): FlowEmailTemplate
         data: step.content,
       });
     }
-    if (resource.key === "abandoned-cart" && flow.orderBranch)
+    if (resource.key === "abandoned-cart" && flow.cart?.recoveryVersion !== 2 && flow.orderBranch)
       for (const branch of ["yes", "no"] as const) {
         const email = flow.orderBranch[branch];
         if (!email?.subject || !email.content) continue;

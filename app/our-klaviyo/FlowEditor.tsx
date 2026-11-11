@@ -30,7 +30,7 @@ import {
 } from "@/lib/marketing/welcome-config";
 import { readDraft, writeDraft } from "./flow-drafts";
 
-import { cartDraft, CartConfig } from "@/lib/marketing/cart-config";
+import { threeStepCartDraft, CartConfig } from "@/lib/marketing/cart-config";
 import { FlowConfig, FlowTarget } from "@/lib/marketing/flow-config";
 
 type Step = {
@@ -117,7 +117,7 @@ function FlowEditorState({
   const { marketingFetch, brand } = useMarketingBrand();
   const upgrade = (data: Data) =>
     resource.key === "abandoned-cart"
-      ? cartDraft(data as FlowConfig)
+      ? threeStepCartDraft(data as FlowConfig)
       : resource.key === "welcome"
         ? welcomeDraft(data as FlowConfig)
         : resource.key === "delivery-upsell"
@@ -308,6 +308,10 @@ function FlowEditorState({
   const content = rawContent
     ? withBranding(rawContent, brandingDraft)
     : rawContent;
+  const threeStepCart = flow.cart?.recoveryVersion === 2;
+  const cartOffer = !!flow.cart && (threeStepCart
+    ? selected?.target.kind === "step" && (selected.target.index ?? 0) > 0
+    : selected?.target.branch === "no");
   const step =
     selected?.target.kind === "step" || selected?.target.kind === "wait"
       ? flow.steps[selected.target.index || 0]
@@ -334,7 +338,7 @@ function FlowEditorState({
               ? {
                   ...content,
                   products: cartPreviewProducts(flow.cart.productCount),
-                  ...(selected?.target.branch === "no"
+                  ...(cartOffer
                     ? { couponCode: "AC300-PREVIEW" }
                     : {}),
                 }
@@ -545,7 +549,7 @@ function FlowEditorState({
           )}
         </div>
       )}
-      {flow.cart && (
+      {flow.cart && !threeStepCart && (
         <details className="mk-cart-feed-note">
           <summary>Email sending hours</summary>
           <div className="mk-two">
@@ -563,6 +567,7 @@ function FlowEditorState({
           <p>Uses the customer’s timezone when known, otherwise Pacific time. Overnight reminders wait until the next opening.</p>
         </details>
       )}
+      {threeStepCart && <p className="mk-cart-feed-note">Sends at any hour. Other campaign or flow emails do not delay this recovery sequence.</p>}
       {flow.cart && <CartTools flow={flow as FlowConfig} />}
       {resource.key === "welcome" && <div className="mk-cart-tool-actions"><FlowResults flowKey="welcome" /></div>}
       {resource.key === "low-stock" && (
@@ -601,8 +606,9 @@ function FlowEditorState({
           automations should be paused before this flow goes live to avoid
           duplicate reminders. Saved email edits apply when waiting messages are
           prepared. The first email waits after Shopify confirms abandonment;
-          checkout updates do not restart the wait. The final email waits until
-          the first has sent, then starts its follow-up delay.
+          checkout updates do not restart the wait. {threeStepCart
+            ? "Each later wait starts only after the previous email has sent. New checkouts use this sequence after saving; existing checkouts keep their original sequence."
+            : "The final email waits until the first has sent, then starts its follow-up delay."}
         </p>
       )}
       <p>{draftStatus}</p>
@@ -691,7 +697,7 @@ function FlowEditorState({
                               products: cartPreviewProducts(
                                 flow.cart.productCount,
                               ),
-                              ...(selected.target.branch === "no"
+                              ...(cartOffer
                                 ? { couponCode: "AC300-PREVIEW" }
                                 : {}),
                             }
@@ -771,12 +777,19 @@ function FlowEditorState({
             )}
             {selected.target.section === "coupon" && (
               <div className="mk-cart-feed-note">
-                <p>
+                {threeStepCart ? <>
+                  <p>Email #2 creates one personal, single-use code for 10% off. Email #3 upgrades that same code to 15%. No minimum purchase or discount combinations.</p>
+                  <label>Code valid for (days)
+                    <input type="number" min="1" max="365" value={(flow.cart?.couponHours ?? 168) / 24}
+                      onChange={event => setFlow(current => ({ ...current, cart: { ...current.cart!, couponHours: Number(event.target.value) * 24 } }))} />
+                  </label>
+                  <p>Starts when the 10% code is created. The 15% upgrade keeps the original expiration.</p>
+                </> : <p>
                   10% off the entire order, no minimum purchase, and no
                   combining with other discounts. Each generated AC300- code is
                   single-use, activates during email preparation, and expires
                   after one year.
-                </p>
+                </p>}
                 <p>
                   Shopify discount read/write access is needed. The offer waits
                   if a valid code cannot be created; preview codes are never
@@ -788,7 +801,9 @@ function FlowEditorState({
               <>
                 <p className="mk-modal-explanation">
                   {flow.cart
-                    ? selected.target.timing === "branchMinutes"
+                    ? threeStepCart && (selected.target.index ?? 0) > 0
+                      ? `Minutes after email #${selected.target.index} sends. Recovery ends 72 hours after Shopify confirms abandonment.`
+                      : selected.target.timing === "branchMinutes"
                       ? "Minutes after the first email sends. Recovery ends 72 hours after Shopify confirms abandonment."
                       : "Minutes after Shopify confirms abandonment. Updates do not restart the wait. Recovery ends after 72 hours."
                     : "Minutes after the triggering event, not after the previous step."}

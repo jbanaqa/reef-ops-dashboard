@@ -79,7 +79,7 @@ const { chromium } = require("playwright");
       await page.getByRole("button", { name: "Open Abandoned Cart", exact: true }).click();
       const map = page.locator(".mk-cart-map");
       await map.getByText("Shopify confirms an abandoned checkout", { exact: true }).waitFor();
-      await map.getByText("Shopify abandonment within last 3 days", { exact: true }).waitFor();
+      await map.getByText("Consent + eligible cart", { exact: true }).waitFor();
       await map.getByText("Start once per checkout. Updates alone do not restart recovery.", { exact: true }).waitFor();
       const wait = map.getByRole("button").filter({
         hasText: "After Shopify confirms abandonment; updates do not restart the wait.",
@@ -87,8 +87,8 @@ const { chromium } = require("playwright");
       await wait.click();
       await page.getByRole("dialog").getByText("Minutes after Shopify confirms abandonment. Updates do not restart the wait. Recovery ends after 72 hours.", { exact: true }).waitFor();
       await page.getByRole("dialog").getByRole("button", { name: "Close editor", exact: true }).click();
-      await map.getByRole("button").filter({ hasText: "After the first email is sent." }).click();
-      await page.getByRole("dialog").getByText("Minutes after the first email sends. Recovery ends 72 hours after Shopify confirms abandonment.", { exact: true }).waitFor();
+      await map.getByRole("button").filter({ hasText: "After email #1 is sent." }).click();
+      await page.getByRole("dialog").getByText("Minutes after email #1 sends. Recovery ends 72 hours after Shopify confirms abandonment.", { exact: true }).waitFor();
       await page.getByRole("dialog").getByRole("button", { name: "Close editor", exact: true }).click();
       for (const width of [1440, 390, 320]) {
         await page.setViewportSize({ width, height: 1000 });
@@ -560,9 +560,9 @@ const { chromium } = require("playwright");
     await page.getByLabel("Products per email").fill("3");
     await page.keyboard.press("Escape");
     for (const name of [
-      "Email #1 · Soft push",
-      "Email #2 · Another soft push",
-      "Email #2 · Discount offer",
+      "Email #1 · Cart reminder",
+      "Email #2 · 10% offer",
+      "Email #3 · 15% final offer",
     ]) {
       await page
         .locator(".mk-cart-map")
@@ -579,7 +579,7 @@ const { chromium } = require("playwright");
       );
       const frame = page.frameLocator('iframe[title="Email preview"]');
       await frame.getByText("SHOPPING CART", { exact: true }).waitFor();
-      if (name.includes("Discount"))
+      if (name.includes("offer"))
         await frame.getByText("AC300-PREVIEW", { exact: true }).waitFor();
       await page.getByRole("button", { name: "Mobile", exact: true }).click();
       await page
@@ -604,10 +604,10 @@ const { chromium } = require("playwright");
         path: path.join(
           output,
           "cart-" +
-            (name.includes("Discount")
-              ? "discount"
-              : name.includes("Another")
-                ? "followup"
+            (name.includes("15%")
+              ? "final-offer"
+              : name.includes("10%")
+                ? "discount"
                 : "first") +
             ".png",
         ),
