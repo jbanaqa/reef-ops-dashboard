@@ -103,7 +103,9 @@ export function registerCartAbandonmentTests(context: () => Context) {
     }));
   }
 
-  test("cart abandonment: Shopify failures defer verification without blocking the shared inbox", async () => isolated(context(), "native-outage", async h => {
+  test("cart abandonment: Shopify failures defer verification without blocking the shared inbox", async t => {
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    try { await isolated(context(), "native-outage", async h => {
     const { syncCartAbandonments } = await import("../lib/marketing/cart-abandonment");
     await cutover(h);
     const p = await h.make("native-outage@example.com"), created = new Date(Date.now() - 60000);
@@ -120,8 +122,15 @@ export function registerCartAbandonmentTests(context: () => Context) {
     globalThis.fetch = before;
     const checkout = nativeCheckout(p.email!, "native-outage", created);
     mockNative(checkout, nativeAbandonment(checkout, created));
+    const row = await h.prisma.marketingResource.findFirstOrThrow({ where: { shop: h.shop, kind: "CART_CANDIDATE" } });
+    const retry = row.data as { error: string; nextAttemptAt: string };
+    assert.match(retry.error, /outage/);
+    assert.equal(Date.parse(retry.nextAttemptAt), Date.now() + 5 * 60000);
+    assert.equal((await syncCartAbandonments()).admitted, 0, "recovery still waits for the saved retry deadline");
+    t.mock.timers.setTime(Date.parse(retry.nextAttemptAt));
     assert.equal((await syncCartAbandonments()).admitted, 1);
-  }));
+    }); } finally { t.mock.timers.reset(); }
+  });
 
   test("cart abandonment: legacy queued updates cannot pass the new delivery guard", async () => isolated(context(), "native-legacy", async h => {
     const { cartRunKey } = await import("../lib/marketing/cart");

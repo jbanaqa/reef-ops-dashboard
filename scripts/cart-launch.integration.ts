@@ -21,7 +21,15 @@ export const cartAbandonmentFixture = (at: Date, id = "1", checkout = id) => ({
 });
 
 /** Native checks remain explicit mocked Shopify requests, never live API traffic. */
-export async function cartNativeFixtureResponse(prisma: PrismaClient, query: string, variables: Record<string, unknown>) {
+export async function cartNativeFixtureResponse(prisma: PrismaClient, query: string, variables: Record<string, unknown>, orders?: Map<string, string>) {
+  if (query.includes("CartBuyerHistory")) {
+    const email = String(variables.query).match(/email:"([^"]+)"/)?.[1] || "";
+    const profile = await prisma.marketingProfile.findFirst({ where: { shop: process.env.SHOPIFY_SHOP_DOMAIN!, email } });
+    const customer = { id: profile?.shopifyId ? "gid://shopify/Customer/" + profile.shopifyId.replace(/^gid:\/\/shopify\/Customer\//, "") : "gid://shopify/Customer/1",
+      defaultEmailAddress: { emailAddress: email }, numberOfOrders: profile?.lastOrderAt || orders?.has(email) ? "1" : "0" };
+    return Response.json({ data: { nodes: (variables.ids as string[]).map(id => id === customer.id ? customer : null),
+      customers: { nodes: profile ? [customer] : [], pageInfo: { hasNextPage: false } } } });
+  }
   if (query.includes("CartAbandonmentCandidates") || query.includes("CartAbandonmentReadiness")) return Response.json({ data: {
     abandonedCheckouts: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
   } });
@@ -75,7 +83,7 @@ export async function isolated(context: Context, name: string, work: (h: Harness
     if (url.includes("/oauth/access_token")) return Response.json({ access_token: "mock" });
     if (url.includes("/graphql.json")) {
       const b = JSON.parse(String(init?.body));
-      const native = await cartNativeFixtureResponse(context.prisma, b.query, b.variables || {});
+      const native = await cartNativeFixtureResponse(context.prisma, b.query, b.variables || {}, orders);
       if (native) return native;
       if (b.query.includes("CartAvailability")) return Response.json({ data: { nodes: b.variables.ids.map(() => ({
         status: "ACTIVE", onlineStoreUrl: "https://store.example/products/coral", title: "Coral", variants: { nodes: [{ availableForSale: true }] },

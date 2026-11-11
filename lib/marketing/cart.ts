@@ -239,10 +239,10 @@ export async function enrollCart(
   await record(tx, { key: "cart-abandonment:" + profileId + ":" + abandonment.id,
     type: "CART_ABANDONMENT_CONFIRMED", profileId, occurredAt: abandonedAt,
     payload: { abandonmentId: abandonment.id, checkoutId: abandonment.checkoutId } });
-  const rows = sequenceVersion === 2 ? config.steps.map((step, index) => ({
+  const rows = sequenceVersion === 2 ? config.steps.flatMap((step, index) => profile.lastOrderAt && index > 0 ? [] : [{
     id: ["first", "discount10", "discount15"][index], channel: "EMAIL", subject: step.subject, c: step.content,
     minutes: config.steps.slice(0, index + 1).reduce((sum, item) => sum + item.minutes, 0),
-  })) : [
+  }]) : [
     ...(sms
       ? [
           {

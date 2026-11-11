@@ -1877,6 +1877,12 @@ export function render(
     };
   }
   if (layout === "cart-recovery") {
+    const bodyExpiry = c.couponExpiresAt ? couponExpiryDate(c.couponExpiresAt)
+      : c.couponExpiryFallbackText || defaultGeneratedEmailCopy.couponExpiryFallback;
+    c = { ...c,
+      body: c.body.replaceAll("{{ coupon_expires }}", bodyExpiry).replaceAll("{{ coupon_time_left }}", couponTimeLeft(c.couponExpiresAt)),
+      bodyHtml: c.bodyHtml?.replaceAll("{{ coupon_expires }}", e(bodyExpiry)).replaceAll("{{ coupon_time_left }}", couponTimeLeft(c.couponExpiresAt)),
+    };
     const expiryLine = c.couponExpiresAt && c.couponExpiryText !== ""
       ? (c.couponExpiryText ?? defaultGeneratedEmailCopy.couponExpiry).replaceAll("{{ coupon_expires }}", couponExpiryDate(c.couponExpiresAt))
       : "";

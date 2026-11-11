@@ -30,7 +30,7 @@ import {
 } from "@/lib/marketing/welcome-config";
 import { readDraft, writeDraft } from "./flow-drafts";
 
-import { threeStepCartDraft, CartConfig } from "@/lib/marketing/cart-config";
+import { threeStepCartDraft, cartOfferSettingsError, CartConfig } from "@/lib/marketing/cart-config";
 import { FlowConfig, FlowTarget } from "@/lib/marketing/flow-config";
 
 type Step = {
@@ -141,6 +141,8 @@ function FlowEditorState({
     latest.current = { flow, enabled };
   }, [flow, enabled]);
   async function saveFlow() {
+    const conflict = cartOfferSettingsError(flow as FlowConfig);
+    if (conflict) { setDraftStatus(conflict); return false; }
     const submitted = JSON.stringify({ flow, enabled });
     const result = (await save(
       flow,
@@ -309,6 +311,10 @@ function FlowEditorState({
     ? withBranding(rawContent, brandingDraft)
     : rawContent;
   const threeStepCart = flow.cart?.recoveryVersion === 2;
+  const cartSettingsError = cartOfferSettingsError(flow as FlowConfig);
+  const couponHours = flow.cart?.couponHours ?? 168;
+  const previewHours = Number.isFinite(couponHours) && couponHours >= 1 && couponHours <= 8760 ? couponHours : 168;
+  const cartPreviewExpiry = new Date(previewNow + previewHours * 3600000).toISOString();
   const cartOffer = !!flow.cart && (threeStepCart
     ? selected?.target.kind === "step" && (selected.target.index ?? 0) > 0
     : selected?.target.branch === "no");
@@ -339,7 +345,7 @@ function FlowEditorState({
                   ...content,
                   products: cartPreviewProducts(flow.cart.productCount),
                   ...(cartOffer
-                    ? { couponCode: "AC300-PREVIEW" }
+                    ? { couponCode: "AC300-PREVIEW", ...(threeStepCart ? { couponExpiresAt: cartPreviewExpiry } : {}) }
                     : {}),
                 }
               : content,
@@ -568,6 +574,7 @@ function FlowEditorState({
         </details>
       )}
       {threeStepCart && <p className="mk-cart-feed-note">Sends at any hour. Other campaign or flow emails do not delay this recovery sequence.</p>}
+      {threeStepCart && <p className="mk-cart-feed-note">Returning customers receive email #1 only. The 10% and 15% offers are for customers with no previous orders.</p>}
       {flow.cart && <CartTools flow={flow as FlowConfig} />}
       {resource.key === "welcome" && <div className="mk-cart-tool-actions"><FlowResults flowKey="welcome" /></div>}
       {resource.key === "low-stock" && (
@@ -607,11 +614,12 @@ function FlowEditorState({
           duplicate reminders. Saved email edits apply when waiting messages are
           prepared. The first email waits after Shopify confirms abandonment;
           checkout updates do not restart the wait. {threeStepCart
-            ? "Each later wait starts only after the previous email has sent. New checkouts use this sequence after saving; existing checkouts keep their original sequence."
+            ? "Each later wait starts only after the previous email has sent. Timing and code-lifetime changes apply to new checkouts. Saved copy applies to waiting emails before preparation; prepared retries keep their original copy."
             : "The final email waits until the first has sent, then starts its follow-up delay."}
         </p>
       )}
       <p>{draftStatus}</p>
+      {cartSettingsError && <p role="alert" className="mk-cart-feed-note">{cartSettingsError}</p>}
       <button
         type="button"
         disabled={busy}
@@ -652,7 +660,7 @@ function FlowEditorState({
           />
           Enable this flow
         </label>
-        <button disabled={busy} onClick={saveFlow}>
+        <button disabled={busy || !!cartSettingsError} onClick={saveFlow}>
           Save flow
         </button>
       </div>
@@ -698,7 +706,7 @@ function FlowEditorState({
                                 flow.cart.productCount,
                               ),
                               ...(cartOffer
-                                ? { couponCode: "AC300-PREVIEW" }
+                                ? { couponCode: "AC300-PREVIEW", ...(threeStepCart ? { couponExpiresAt: cartPreviewExpiry } : {}) }
                                 : {}),
                             }
                           : c,
@@ -739,6 +747,7 @@ function FlowEditorState({
                 onChange={(next) => setFlow(next as Data)}
               />
             )}
+            {selected.target.section === "cart-eligibility" && <p className="mk-cart-feed-note">Any real previous Shopify order, including an unpaid or cancelled order, makes the customer ineligible for the 10% and 15% offers. They can still receive the first cart reminder. If order history is unavailable, offers wait until it can be checked.</p>}
             {selected.target.section === "products" && flow.cart && (
               <div className="mk-cart-feed-note">
                 <label>
@@ -784,6 +793,8 @@ function FlowEditorState({
                       onChange={event => setFlow(current => ({ ...current, cart: { ...current.cart!, couponHours: Number(event.target.value) * 24 } }))} />
                   </label>
                   <p>Starts when the 10% code is created. The 15% upgrade keeps the original expiration.</p>
+                  <p>New checkouts use this lifetime. Existing runs keep the lifetime they started with.</p>
+                  {cartSettingsError && <p role="alert">{cartSettingsError}</p>}
                 </> : <p>
                   10% off the entire order, no minimum purchase, and no
                   combining with other discounts. Each generated AC300- code is
@@ -827,8 +838,9 @@ function FlowEditorState({
               </p>
             )}
             <p>{draftStatus}</p>
+            {selected.target.kind === "wait" && cartSettingsError && <p role="alert">{cartSettingsError}</p>}
             <div className="mk-modal-actions">
-              <button type="button" disabled={busy} onClick={saveFlow}>
+              <button type="button" disabled={busy || !!cartSettingsError} onClick={saveFlow}>
                 Save flow
               </button>
               <button type="button" onClick={() => setSelected(null)}>

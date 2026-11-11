@@ -13,6 +13,7 @@ export type CartAbandonment = { id: string; checkoutId: string; abandonedAt: str
 export const CART_ABANDONMENT_STATE_KEY = "cart-abandonment:v1";
 const LIFETIME = 72 * 60 * 60 * 1000;
 const RETRY = 5 * 60 * 1000;
+const LOOKUP_BUDGET = 5000;
 
 type Candidate = {
   profileId: string;
@@ -24,6 +25,9 @@ type Candidate = {
   merchandise?: CartMerchandise;
   stagedAt: string;
   nextAttemptAt?: string;
+  failureCount?: number;
+  checkedAt?: string;
+  error?: string;
   status: "PENDING" | "ADMITTED" | "IGNORED";
   reason?: string;
   abandonment?: CartAbandonment;
@@ -88,14 +92,16 @@ function nativeBlock(native: NativeAbandonment | null, url: string, profile: Pro
   if (checkout.completedAt || native.customerHasNoOrderSinceAbandonment !== true) return "Checkout completed or customer has ordered";
   return null;
 }
-async function within<T>(work: Promise<T>, deadline: number): Promise<T> {
+async function within<T>(work: () => Promise<T>, deadline: number): Promise<T> {
   const remaining = deadline - Date.now();
   if (remaining <= 0) throw Error("Shopify abandonment verification timed out; retry required");
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([work, new Promise<never>((_, reject) => {
+    const result = await Promise.race([work(), new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(Error("Shopify abandonment verification timed out; retry required")), remaining);
     })]);
+    if (Date.now() >= deadline) throw Error("Shopify abandonment verification timed out; retry required");
+    return result;
   } finally { if (timer) clearTimeout(timer); }
 }
 async function gates(tx: Tx) {
@@ -194,78 +200,97 @@ export async function syncCartAbandonments(): Promise<{ checked: number; admitte
       { data: { path: ["nextAttemptAt"], lte: now.toISOString() } },
       { data: { path: ["nextAttemptAt"], equals: Prisma.AnyNull } },
     ],
-  }, orderBy: { updatedAt: "asc" }, take: 25 });
+  }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }], take: 25 });
+  let lastError: string | undefined;
   try {
     for (const row of rows) {
       if (Date.now() >= deadline) break;
       const candidate = row.data as Candidate;
       if (candidate.nextAttemptAt && +new Date(candidate.nextAttemptAt) > Date.now()) continue;
-      let reason: string | undefined, proof: CartAbandonment | undefined;
-      const profile = await prisma.marketingProfile.findFirst({ where: { id: candidate.profileId, shop: shop() }, select: { email: true, shopifyId: true } });
-      if (!profile?.email) reason = "Checkout recipient is unavailable";
-      else if (!Number.isFinite(+new Date(candidate.stagedAt)) || +new Date(candidate.stagedAt) + LIFETIME <= Date.now()) reason = "Shopify did not confirm this abandonment before it expired";
-      else {
-        result.checked++;
-        let checkout: NativeCheckout | undefined, after: string | undefined;
-        const cursors = new Set<string>();
-        for (let page = 0; page < 4 && !checkout; page++) {
-          const response = await within(shopifyGraphql<{ data?: { abandonedCheckouts: { nodes: NativeCheckout[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } }>(CANDIDATES,
-            { query: `"${profile.email.replace(/["\\]/g, "\\$&")}"`, ...(after ? { after } : {}) }), deadline);
-          const connection = response.data?.abandonedCheckouts;
-          if (!connection?.nodes || !connection.pageInfo) throw Error("Shopify abandoned checkout list is unavailable; retry required");
-          const matchingUrl = connection.nodes.find(value => sameCheckout(value.abandonedCheckoutUrl, candidate.url));
-          if (matchingUrl) {
-            if (!matchesProfile(matchingUrl, profile)) reason = "Shopify abandoned checkout identity does not match this recipient";
-            else checkout = matchingUrl;
-            break;
+      const candidateDeadline = Math.min(deadline, Date.now() + LOOKUP_BUDGET);
+      try {
+        let reason: string | undefined, proof: CartAbandonment | undefined;
+        const profile = await prisma.marketingProfile.findFirst({ where: { id: candidate.profileId, shop: shop() }, select: { email: true, shopifyId: true } });
+        if (!profile?.email) reason = "Checkout recipient is unavailable";
+        else if (!Number.isFinite(+new Date(candidate.stagedAt)) || +new Date(candidate.stagedAt) + LIFETIME <= Date.now()) reason = "Shopify did not confirm this abandonment before it expired";
+        else {
+          result.checked++;
+          let checkout: NativeCheckout | undefined, after: string | undefined;
+          const cursors = new Set<string>();
+          for (let page = 0; page < 4 && !checkout; page++) {
+            const response = await within(() => shopifyGraphql<{ data?: { abandonedCheckouts: { nodes: NativeCheckout[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } }>(CANDIDATES,
+              { query: `"${profile.email!.replace(/["\\]/g, "\\$&")}"`, ...(after ? { after } : {}) }), candidateDeadline);
+            const connection = response.data?.abandonedCheckouts;
+            if (!connection?.nodes || !connection.pageInfo) throw Error("Shopify abandoned checkout list is unavailable; retry required");
+            const matchingUrl = connection.nodes.find(value => sameCheckout(value.abandonedCheckoutUrl, candidate.url));
+            if (matchingUrl) {
+              if (!matchesProfile(matchingUrl, profile)) reason = "Shopify abandoned checkout identity does not match this recipient";
+              else checkout = matchingUrl;
+              break;
+            }
+            if (!connection.pageInfo.hasNextPage) break;
+            const cursor = connection.pageInfo.endCursor;
+            if (!cursor || cursors.has(cursor)) throw Error("Shopify abandoned checkout pagination is incomplete; retry required");
+            cursors.add(cursor); after = cursor;
           }
-          if (!connection.pageInfo.hasNextPage) break;
-          const cursor = connection.pageInfo.endCursor;
-          if (!cursor || cursors.has(cursor)) throw Error("Shopify abandoned checkout pagination is incomplete; retry required");
-          cursors.add(cursor); after = cursor;
-        }
-        if (checkout) {
-          const response = await within(shopifyGraphql<Confirmation>(confirmationQuery("CartAbandonmentConfirmation"), { id: checkout.id }), deadline);
-          if (!response.data || !("abandonmentByAbandonedCheckoutId" in response.data)) throw Error("Shopify abandonment confirmation is unavailable; retry required");
-          const native = response.data.abandonmentByAbandonedCheckoutId;
-          if (native) {
-            reason = nativeBlock(native, candidate.url, profile) || undefined;
-            const abandonedAt = new Date(native.createdAt);
-            if (!reason && (native.abandonedCheckoutPayload?.id !== checkout.id || !Number.isFinite(+abandonedAt))) reason = "Shopify abandonment details could not be verified";
-            if (!reason && +abandonedAt < +cutoverAt) reason = "Existing abandonment predates the corrected flow";
-            if (!reason && +abandonedAt > Date.now()) reason = "Shopify abandonment timestamp is in the future";
-            if (!reason && +abandonedAt + LIFETIME <= Date.now()) reason = "Shopify abandoned checkout expired";
-            if (!reason) proof = { id: native.id, checkoutId: checkout.id, abandonedAt: abandonedAt.toISOString() };
+          if (checkout) {
+            const checkoutId = checkout.id;
+            const response = await within(() => shopifyGraphql<Confirmation>(confirmationQuery("CartAbandonmentConfirmation"), { id: checkoutId }), candidateDeadline);
+            if (!response.data || !("abandonmentByAbandonedCheckoutId" in response.data)) throw Error("Shopify abandonment confirmation is unavailable; retry required");
+            const native = response.data.abandonmentByAbandonedCheckoutId;
+            if (native) {
+              reason = nativeBlock(native, candidate.url, profile) || undefined;
+              const abandonedAt = new Date(native.createdAt);
+              if (!reason && (native.abandonedCheckoutPayload?.id !== checkout.id || !Number.isFinite(+abandonedAt))) reason = "Shopify abandonment details could not be verified";
+              if (!reason && +abandonedAt < +cutoverAt) reason = "Existing abandonment predates the corrected flow";
+              if (!reason && +abandonedAt > Date.now()) reason = "Shopify abandonment timestamp is in the future";
+              if (!reason && +abandonedAt + LIFETIME <= Date.now()) reason = "Shopify abandoned checkout expired";
+              if (!reason) proof = { id: native.id, checkoutId: checkout.id, abandonedAt: abandonedAt.toISOString() };
+            }
           }
         }
+        const outcome = await atomic(async tx => {
+          const fresh = await tx.marketingResource.findUnique({ where: { id: row.id } });
+          if (!fresh?.enabled || +fresh.updatedAt !== +row.updatedAt || JSON.stringify(fresh.data) !== JSON.stringify(row.data)) return;
+          const flow = await gates(tx);
+          if (!flow) return;
+          const currentProfile = await tx.marketingProfile.findFirst({ where: { id: candidate.profileId, shop: shop() }, select: { email: true, shopifyId: true } });
+          if (profile && (!currentProfile || currentProfile.email !== profile.email || currentProfile.shopifyId !== profile.shopifyId)) return;
+          const minimum = cartMerchandiseBlock(candidate.merchandise, Math.round((flow.cart?.minimumSubtotal ?? 100) * 100));
+          if (minimum) reason = minimum;
+          if (!reason && proof) {
+            const { enrollCart } = await import("./cart");
+            const admitted = await enrollCart(tx, candidate.profileId, candidate.checkout, new Date(candidate.createdAt), flow,
+              candidate.url, candidate.lines, new Date(candidate.observedAt), candidate.merchandise, proof);
+            if (!admitted) reason = "Checkout recovery was already handled, replaced or stopped";
+          }
+          const cleanCandidate = { ...candidate };
+          delete cleanCandidate.failureCount;
+          delete cleanCandidate.error;
+          const data: Candidate = { ...cleanCandidate, checkedAt: new Date().toISOString(),
+            status: reason ? "IGNORED" : proof ? "ADMITTED" : "PENDING",
+            ...(reason ? { reason } : {}), ...(proof ? { abandonment: proof } : {}),
+            ...(!reason && !proof ? { nextAttemptAt: new Date(Date.now() + RETRY).toISOString() } : {}) };
+          await tx.marketingResource.update({ where: { id: row.id }, data: { enabled: !reason && !proof, data: json(data) } });
+          return reason ? "ignored" : proof ? "admitted" : undefined;
+        });
+        if (outcome === "admitted") result.admitted++;
+        if (outcome === "ignored") result.ignored++;
+      } catch (error) {
+        const message = (error instanceof Error ? error.message : "Shopify abandonment verification failed; retry required").replace(/\s+/g, " ").slice(0, 500);
+        const failureCount = Math.min(1000000, (Number.isSafeInteger(candidate.failureCount) ? Math.max(0, candidate.failureCount!) : 0) + 1);
+        const checkedAt = new Date(), expiresAt = Date.parse(candidate.stagedAt) + LIFETIME;
+        const nextAttemptAt = new Date(Math.min(+checkedAt + Math.min(3600000, RETRY * 2 ** Math.min(4, failureCount - 1)),
+          Number.isFinite(expiresAt) ? expiresAt : Infinity));
+        const changed = await prisma.marketingResource.updateMany({ where: { id: row.id, shop: shop(), kind: "CART_CANDIDATE", enabled: true,
+          updatedAt: row.updatedAt, data: { equals: json(row.data) } }, data: { data: json({ ...candidate,
+          status: "PENDING", failureCount, error: message, checkedAt: checkedAt.toISOString(), nextAttemptAt: nextAttemptAt.toISOString(),
+        }) } });
+        if (changed.count) lastError = message;
       }
-      const outcome = await atomic(async tx => {
-        const fresh = await tx.marketingResource.findUnique({ where: { id: row.id } });
-        if (!fresh?.enabled || +fresh.updatedAt !== +row.updatedAt) return;
-        const flow = await gates(tx);
-        if (!flow) return;
-        const currentProfile = await tx.marketingProfile.findFirst({ where: { id: candidate.profileId, shop: shop() }, select: { email: true, shopifyId: true } });
-        if (profile && (!currentProfile || currentProfile.email !== profile.email || currentProfile.shopifyId !== profile.shopifyId)) return;
-        const minimum = cartMerchandiseBlock(candidate.merchandise, Math.round((flow.cart?.minimumSubtotal ?? 100) * 100));
-        if (minimum) reason = minimum;
-        if (!reason && proof) {
-          const { enrollCart } = await import("./cart");
-          const admitted = await enrollCart(tx, candidate.profileId, candidate.checkout, new Date(candidate.createdAt), flow,
-            candidate.url, candidate.lines, new Date(candidate.observedAt), candidate.merchandise, proof);
-          if (!admitted) reason = "Checkout recovery was already handled, replaced or stopped";
-        }
-        const data: Candidate = { ...candidate,
-          status: reason ? "IGNORED" : proof ? "ADMITTED" : "PENDING",
-          ...(reason ? { reason } : {}), ...(proof ? { abandonment: proof } : {}),
-          ...(!reason && !proof ? { nextAttemptAt: new Date(Date.now() + RETRY).toISOString() } : {}) };
-        await tx.marketingResource.update({ where: { id: row.id }, data: { enabled: !reason && !proof, data: json(data) } });
-        return reason ? "ignored" : proof ? "admitted" : undefined;
-      });
-      if (outcome === "admitted") result.admitted++;
-      if (outcome === "ignored") result.ignored++;
     }
-    await prisma.marketingResource.update({ where: { id: state.id }, data: { data: json({ cutoverAt: stateData.cutoverAt, checkedAt: new Date().toISOString() }) } });
-    return result;
+    await prisma.marketingResource.update({ where: { id: state.id }, data: { data: json({ cutoverAt: stateData.cutoverAt, checkedAt: new Date().toISOString(), ...(lastError ? { error: lastError } : {}) }) } });
+    return { ...result, ...(lastError ? { error: lastError } : {}) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Shopify abandonment verification failed; retry required";
     await prisma.marketingResource.update({ where: { id: state.id }, data: { data: json({ cutoverAt: stateData.cutoverAt, checkedAt: new Date().toISOString(), error: message }) } });

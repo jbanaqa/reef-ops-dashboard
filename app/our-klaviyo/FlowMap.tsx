@@ -369,6 +369,8 @@ function CartMap({
       {line}
       {node("first", "email", "Email #1 · Cart reminder", f.steps[0].subject, { kind: "step", index: 0 })}
       {line}
+      {node("prior-orders", "condition", "No previous orders?", "Yes: continue to offers. No: stop after email #1.", { kind: "info", section: "cart-eligibility" })}
+      {line}
       {node("discount10-wait", "wait", "Wait " + duration(f.steps[1].minutes), "After email #1 is sent.", { kind: "wait", index: 1 })}
       {line}
       {node("discount10", "email", "Email #2 · 10% offer", f.steps[1].subject, { kind: "step", index: 1 })}
@@ -490,7 +492,7 @@ function CartMap({
         "end",
         "end",
         "End",
-        "Each email checks consent and skips customers emailed in the last 16 hours.",
+        "Consent and purchase checks apply. Customers with previous orders receive the first email only.",
       )}
       <div className="mk-cart-tools">
         {node(

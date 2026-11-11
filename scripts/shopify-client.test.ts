@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getShopifyAccessToken, shopifyGraphql } from "../lib/shopify";
+import { ShopifyRequestNotExecutedError } from "../lib/shopify-request-error";
 
 const query = "query ClientTransportTest { __typename }";
 async function isolated(name: string, run: () => Promise<void>) {
@@ -80,4 +81,44 @@ test("Shopify API HTML and GraphQL failures remain explicit without losing a goo
   await assert.rejects(shopifyGraphql(query), /GraphQL.*HTTP 502.*non-JSON/);
   await assert.rejects(shopifyGraphql(query), /THROTTLED/);
   assert.equal(auth, 1);
+}));
+
+test("Shopify authentication failures prove the Admin request was not posted, without changing the error message", async () => isolated("auth-not-executed", async () => {
+  let auth = 0, api = 0;
+  globalThis.fetch = async url => {
+    if (String(url).endsWith("/oauth/access_token")) return ++auth === 1
+      ? new Response("<!DOCTYPE html><p>private auth rejection</p>", { status: 400 })
+      : Response.json({ access_token: "recovered", expires_in: 600 });
+    api++;
+    return Response.json({ data: { __typename: "QueryRoot" } });
+  };
+  await assert.rejects(shopifyGraphql(query), error => {
+    assert.ok(error instanceof ShopifyRequestNotExecutedError);
+    assert.equal(error.message, "Shopify authentication returned HTTP 400 with a non-JSON response.");
+    return true;
+  });
+  assert.equal(api, 0, "a failed token request cannot execute an Admin mutation");
+  assert.deepEqual(await shopifyGraphql(query), { data: { __typename: "QueryRoot" } });
+  assert.equal(auth, 2); assert.equal(api, 1);
+  globalThis.fetch = async () => { throw Error("Unknown connection reset after POST"); };
+  await assert.rejects(shopifyGraphql(query), error => {
+    assert.ok(!(error instanceof ShopifyRequestNotExecutedError)); return true;
+  });
+}));
+
+test("Shopify request-cost rejections are distinguished from partial or internal execution errors", async () => isolated("cost-not-executed", async () => {
+  for (const [body, knownNonExecution] of [
+    [{ errors: [{ extensions: { code: "THROTTLED" } }] }, true],
+    [{ data: null, errors: [{ extensions: { code: "MAX_COST_EXCEEDED" } }] }, true],
+    [{ data: { partial: true }, errors: [{ extensions: { code: "THROTTLED" } }] }, false],
+    [{ errors: [{ path: ["discountCodeBasicCreate"], extensions: { code: "THROTTLED" } }] }, false],
+    [{ errors: [{ extensions: { code: "THROTTLED" } }, { extensions: { code: "INTERNAL_SERVER_ERROR" } }] }, false],
+    [{ errors: [{ extensions: { code: "INTERNAL_SERVER_ERROR" } }] }, false],
+  ] as const) {
+    globalThis.fetch = async url => String(url).endsWith("/oauth/access_token")
+      ? Response.json({ access_token: "cost-fixture", expires_in: 600 }) : Response.json(body);
+    await assert.rejects(shopifyGraphql(query), error => {
+      assert.equal(error instanceof ShopifyRequestNotExecutedError, knownNonExecution); return true;
+    });
+  }
 }));

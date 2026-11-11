@@ -8,12 +8,14 @@ import { cancelCart, currentCart, cartDependency, cartRunKey, cartSequenceStop, 
 import { cartTestBlock } from "./cart-config";
 import { cartEmailNextAllowed } from "./cart-schedule";
 import { validateFlow } from "./flow-config";
+import { cartBuyerProofValid, isCartFollowup, CART_RETURNING_CUSTOMER, CART_BUYER_WAIT, type CartBuyerCheck } from "./cart-buyer";
 
 type Handoff = {
   id: string;
   attemptedAt: Date | null;
   recipient: string;
   cartRun: CartRun | null;
+  cartBuyerCheck?: CartBuyerCheck | null;
 };
 
 /** Final authorization uses only fresh local state. No remote preparation follows it. */
@@ -76,6 +78,10 @@ export async function authorizeDelivery(handoff: Handoff): Promise<boolean> {
         await cartSequenceStop(tx, m.key, m.flowCondition) ||
         (m.profile.lastOrderAt && m.triggerAt && m.profile.lastOrderAt >= m.triggerAt ? "Customer purchased after checkout" : null);
       if (reason) return stop(reason);
+      if (isCartFollowup(m)) {
+        if (m.profile.lastOrderAt || handoff.cartBuyerCheck?.hasOrders) return stop(CART_RETURNING_CUSTOMER);
+        if (!cartBuyerProofValid(handoff.cartBuyerCheck, m.profile)) return stop(CART_BUYER_WAIT, false);
+      }
       if (latest.observedAt !== cart.observedAt) return stop("Checkout changed during preparation", false);
       const dependency = await cartDependency(tx, m, latest);
       const quietUntil = m.channel === "EMAIL" && latest.sequenceVersion !== 2 ? cartEmailNextAllowed(live.cart!, (m.profile.properties as { timezone?: string })?.timezone) : null;

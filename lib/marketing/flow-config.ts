@@ -1,4 +1,4 @@
-import { CartConfig, validateCart, CART_EXPIRY_MINUTES } from "./cart-config";
+import { CartConfig, validateCart, cartOfferSettingsError, CART_EXPIRY_MINUTES } from "./cart-config";
 import { StockConfig, validateStock } from "./stock-config";
 import { defaultContent } from "./rules";
 import { validateWelcome, type WelcomeConfig } from "./welcome-config";
@@ -36,7 +36,7 @@ export type FlowConfig = {
 export type FlowTarget = {
   kind: "step" | "sms" | "branch" | "wait" | "info";
   index?: number;
-  section?: "products" | "coupon" | "welcome-settings" | "delivery-settings";
+  section?: "products" | "coupon" | "cart-eligibility" | "welcome-settings" | "delivery-settings";
   branch?: "yes" | "no";
   timing?: "smsMinutes" | "branchMinutes";
 };
@@ -153,6 +153,9 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
   if (f.cart && (cartV2 ? steps.reduce((total, step) => total + step.minutes, 0)
     : steps[0].minutes + minutes(f.smsMinutes, 30) + minutes(f.branchMinutes, 1440)) >= CART_EXPIRY_MINUTES)
     throw new Error("Cart recovery stops after 72 hours without checkout activity. Keep the total waits below 72 hours.");
+  const cart = key === "abandoned-cart" && f.cart ? validateCart(f.cart) : undefined;
+  const cartConflict = cartOfferSettingsError({ cart, steps });
+  if (cartConflict) throw new Error(cartConflict);
   if (
     f.internalProfileIds &&
     (!Array.isArray(f.internalProfileIds) ||
@@ -170,8 +173,8 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     ...(delivery ? { delivery } : {}),
     ...(welcome ? { welcome } : {}),
     ...(stock ? { stock } : {}),
-    ...(key === "abandoned-cart" && f.cart
-      ? { cart: validateCart(f.cart) }
+    ...(cart
+      ? { cart }
       : {}),
     reviewed: f.reviewed === true,
     description: String(f.description || "").slice(0, 1000),

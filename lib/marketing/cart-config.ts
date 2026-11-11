@@ -3,6 +3,7 @@ import type { FlowConfig } from "./flow-config";
 
 export const CART_EXPIRY_MINUTES = 3 * 24 * 60;
 export const CART_UNAVAILABLE_REASON = "No purchasable items remain in this checkout";
+export const CART_OFFER_EXPIRY_BUFFER_MINUTES = 60;
 
 export type CartConfig = {
   version: 1;
@@ -16,6 +17,18 @@ export type CartConfig = {
   bypassRecentEmailSuppression?: boolean;
 };
 export const defaultCartConfig: CartConfig = { version: 1, productCount: 6, minimumSubtotal: 100 };
+/** Keep the final upgrade possible even with a short preparation delay. */
+export function cartOfferSettingsError(flow: Pick<FlowConfig, "cart" | "steps">): string | null {
+  if (flow.cart?.recoveryVersion !== 2) return null;
+  const lifetime = flow.cart.couponHours ?? 168;
+  const finalWait = flow.steps[2]?.minutes;
+  if (!Number.isInteger(lifetime) || lifetime < 1 || lifetime > 8760)
+    return "Choose a code lifetime from 1 hour to 365 days.";
+  if (typeof finalWait !== "number" || !Number.isFinite(finalWait) || finalWait < 0) return null;
+  return lifetime * 60 < finalWait + CART_OFFER_EXPIRY_BUFFER_MINUTES
+    ? "The code must stay valid for at least 1 hour beyond the final email wait. Increase its lifetime or shorten the last wait."
+    : null;
+}
 export function validateCart(value: unknown): CartConfig {
   const c = value as CartConfig;
   if (

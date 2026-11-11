@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { macroalgaeGraphql } from "../lib/macroalgae-shopify";
+import { ShopifyRequestNotExecutedError } from "../lib/shopify-request-error";
 
 const query = "query MacroClientTransportTest { __typename }";
 let testClock = Date.now();
@@ -31,6 +32,7 @@ test("Macro authentication HTML errors are safe, coalesced and recover on the ne
   for (const result of failures) {
     assert.equal(result.status, "rejected");
     if (result.status !== "rejected") throw Error("Authentication must fail before an API request.");
+    assert.ok(result.reason instanceof ShopifyRequestNotExecutedError);
     assert.match(String(result.reason), /Macroalgae Shopify authentication.*HTTP 503.*non-JSON/);
     assert.doesNotMatch(String(result.reason), /private-fixture-secret|upstream detail|DOCTYPE/);
   }
@@ -107,4 +109,24 @@ test("a late Macro 401 cannot discard an already refreshed token", async () => i
   release(); await second;
   assert.equal(auth, 2, "The delayed response reuses the refreshed token.");
   assert.equal(api, 4, "Each rejected API call is retried once.");
+}));
+
+test("Macro rejects pre-execution costs safely while partial responses and network outcomes remain uncertain", async () => isolated("cost-not-executed", async () => {
+  for (const [body, knownNonExecution] of [
+    [{ errors: [{ extensions: { code: "THROTTLED" } }] }, true],
+    [{ data: null, errors: [{ extensions: { code: "MAX_COST_EXCEEDED" } }] }, true],
+    [{ data: { partial: true }, errors: [{ extensions: { code: "THROTTLED" } }] }, false],
+    [{ errors: [{ path: ["discountCodeBasicCreate"], extensions: { code: "THROTTLED" } }] }, false],
+    [{ errors: [{ extensions: { code: "THROTTLED" } }, { extensions: { code: "INTERNAL_SERVER_ERROR" } }] }, false],
+  ] as const) {
+    globalThis.fetch = async url => String(url).endsWith("/oauth/access_token")
+      ? Response.json({ access_token: "cost-fixture", expires_in: 600 }) : Response.json(body);
+    await assert.rejects(macroalgaeGraphql(query), error => {
+      assert.equal(error instanceof ShopifyRequestNotExecutedError, knownNonExecution); return true;
+    });
+  }
+  globalThis.fetch = async () => { throw Error("Unknown connection reset after POST"); };
+  await assert.rejects(macroalgaeGraphql(query), error => {
+    assert.ok(!(error instanceof ShopifyRequestNotExecutedError)); return true;
+  });
 }));

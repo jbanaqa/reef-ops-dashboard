@@ -34,6 +34,11 @@ const { chromium } = require("playwright");
     assert.equal(await page.evaluate(() => localStorage.getItem("threeStepSaved")), null, "Opening the upgrade never saves or changes the live flow");
     assert.equal(await map.getByText("Purchased in the last 2 weeks?", { exact: true }).count(), 0);
     assert.equal(await map.getByText("Can receive marketing texts?", { exact: true }).count(), 0);
+    await map.getByText("No previous orders?", { exact: true }).waitFor();
+    await map.getByText("Yes: continue to offers. No: stop after email #1.", { exact: true }).waitFor();
+    await map.getByText("No previous orders?", { exact: true }).click();
+    await page.getByRole("dialog").getByText(/Any real previous Shopify order, including an unpaid or cancelled order/).waitFor();
+    await page.getByRole("dialog").getByRole("button", { name: "Close editor", exact: true }).click();
     await map.getByText("Wait 3 hours", { exact: true }).waitFor();
     await map.getByText("Wait 4 hours", { exact: true }).waitFor();
     await map.getByText("Wait 1 day", { exact: true }).waitFor();
@@ -45,6 +50,7 @@ const { chromium } = require("playwright");
       const file = path.join(output, `cart-three-step-default-${width}.png`); await map.screenshot({ path: file }); screenshots.push(file);
     }
     await page.setViewportSize({ width: 1440, height: 1100 });
+    const expiryLines = [];
     for (const [label, expected, newSubject] of [
       ["Email #1 · Cart reminder", "Saved first email HTML", "Custom first subject"],
       ["Email #2 · 10% offer", "Your saved offer: 10% off", "Custom 10% subject"],
@@ -53,6 +59,12 @@ const { chromium } = require("playwright");
       await map.getByText(label, { exact: true }).click();
       const html = await page.getByTitle("Email preview").getAttribute("srcdoc");
       assert.ok(html.includes(expected), "Each email preserves its HTML and correct rate");
+      if (label.includes("offer")) {
+        assert.doesNotMatch(html, /\{\{ coupon_(?:expires|time_left) \}\}/, "Custom HTML expiration tokens render as real preview values");
+        const expiry = html.match(/Expires ([^<]*?) Pacific time\./)?.[1];
+        assert.ok(expiry, "The preview includes the same dated expiry line that delivery adds");
+        expiryLines.push(expiry);
+      }
       if (label.includes("15%")) {
         assert.ok(!/\b10\s*%/.test(html), "The 15% preview must not contain a stale generated 10% term");
         assert.ok(html.includes("AC300-PREVIEW"));
@@ -61,6 +73,7 @@ const { chromium } = require("playwright");
       await page.getByRole("button", { name: "Save email", exact: true }).click();
       await page.getByLabel("Back to flow", { exact: true }).click();
     }
+    assert.equal(expiryLines.length, 2); assert.equal(expiryLines[0], expiryLines[1], "Both offers share one sample expiration");
     for (const [detail, expected, value] of [["After email #1 is sent.", "240", "300"], ["After email #2 is sent.", "1440", "1500"]]) {
       await map.getByRole("button").filter({ hasText: detail }).click();
       const dialog = page.getByRole("dialog");
@@ -73,6 +86,11 @@ const { chromium } = require("playwright");
     const coupon = page.getByRole("dialog");
     assert.equal(await coupon.getByLabel("Code valid for (days)", { exact: true }).inputValue(), "7");
     await coupon.getByText("Starts when the 10% code is created. The 15% upgrade keeps the original expiration.", { exact: true }).waitFor();
+    const beforeConflict = await page.evaluate(() => localStorage.getItem("threeStepSaved"));
+    await coupon.getByLabel("Code valid for (days)", { exact: true }).fill("1");
+    await coupon.getByRole("alert").getByText(/at least 1 hour beyond the final email wait/).waitFor();
+    assert.equal(await coupon.getByRole("button", { name: "Save flow", exact: true }).isDisabled(), true);
+    assert.equal(await page.evaluate(() => localStorage.getItem("threeStepSaved")), beforeConflict, "A conflicting lifetime is never saved");
     await coupon.getByLabel("Code valid for (days)", { exact: true }).fill("8");
     await coupon.getByRole("button", { name: "Close editor", exact: true }).click();
     await page.getByRole("button", { name: "Save flow", exact: true }).click();

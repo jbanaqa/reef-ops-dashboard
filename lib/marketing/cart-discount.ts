@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { json, shop } from "./store";
 import { shopifyGraphql } from "./shopify";
 import type { SavedDiscount } from "./discounts";
+import { ShopifyRequestNotExecutedError } from "@/lib/shopify-request-error";
 
 export type SavedCartDiscount = SavedDiscount & {
   version: 2;
@@ -10,6 +11,8 @@ export type SavedCartDiscount = SavedDiscount & {
   recipientEmail: string;
   percentage: 10 | 15;
   creationAttemptedAt?: string;
+  creationAttemptId?: string;
+  creationRejectedAttemptId?: string;
 };
 
 /** A known unusable offer stops this recovery run rather than minting another code. */
@@ -89,7 +92,7 @@ async function runOwner(runKey: string, profileId: string, percentage: 10 | 15) 
   const [run, active, profile, message, previous] = await Promise.all([
     prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: tenant, kind: "CART_RUN", key: runKey } } }),
     prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: tenant, kind: "CART_ACTIVE", key: profileId } } }),
-    prisma.marketingProfile.findFirst({ where: { shop: tenant, id: profileId }, select: { email: true } }),
+    prisma.marketingProfile.findFirst({ where: { shop: tenant, id: profileId }, select: { email: true, lastOrderAt: true } }),
     prisma.marketingMessage.findFirst({ where: { shop: tenant, key: runKey + ":" + stage, profileId,
       flowKey: "abandoned-cart", channel: "EMAIL", flowCondition: "cart-v2:" + stage } }),
     prisma.marketingMessage.findFirst({ where: { shop: tenant, key: runKey + (percentage === 10 ? ":first" : ":discount10"),
@@ -102,6 +105,7 @@ async function runOwner(runKey: string, profileId: string, percentage: 10 | 15) 
     throw new CartDiscountStopped("Recovery discount ownership changed");
   if (saved.completedAt || saved.empty || saved.stockStoppedAt || saved.eligibilityStopped || saved.stop)
     throw new CartDiscountStopped("Checkout recovery has stopped");
+  if (profile.lastOrderAt) throw new CartDiscountStopped("Cart offers are only for customers with no previous orders");
   if (message?.status !== "SENDING") throw new CartDiscountStopped("Recovery offer is no longer sending");
   if (previous?.status !== "SENT" || !previous.sentAt)
     throw new CartDiscountStopped("The previous recovery email was not sent");
@@ -167,25 +171,64 @@ async function ensure(runKey: string, profileId: string, percentage: 10 | 15, co
     if (!changed.count) throw Error("Recovery discount allocation changed; retry verification");
     saved = next;
   };
+  const releaseRejectedCreation = async () => {
+    const retryable = { ...saved };
+    delete retryable.creationAttemptedAt;
+    delete retryable.creationAttemptId;
+    delete retryable.creationRejectedAttemptId;
+    await persist(retryable);
+  };
+  const reconcileRejectedCreation = async () => {
+    await persist({ ...saved, creationRejectedAttemptId: saved.creationAttemptId });
+    const found = await lookup(saved.code);
+    if (!found) await releaseRejectedCreation();
+    return found;
+  };
   let remote = await lookup(saved.code);
   if (!remote) {
     if (saved.discountId) throw new CartDiscountStopped("Recovery discount was removed");
     // An uncertain create must be reconciled by code, never recreated after possible deletion/use.
-    if (saved.creationAttemptedAt) throw Error("Recovery discount creation is awaiting verification");
+    if (saved.creationAttemptedAt) {
+      if (!saved.creationAttemptId || saved.creationRejectedAttemptId !== saved.creationAttemptId)
+        throw Error("Recovery discount creation is awaiting verification");
+      // A previous known rejection can survive a temporary reconciliation outage.
+      await releaseRejectedCreation();
+    }
     if (percentage !== 10) throw new CartDiscountStopped("The initial recovery discount is missing");
     if (await runOwner(runKey, profileId, percentage) !== recipientEmail) throw new CartDiscountStopped("Recovery discount ownership changed");
-    await persist({ ...saved, creationAttemptedAt: new Date().toISOString() });
-    const response = await shopifyGraphql<{ data?: { discountCodeBasicCreate?: MutationResult } }>(CREATE, { input: {
-      title, code: saved.code, context: { all: "ALL" }, startsAt: saved.startsAt, endsAt: saved.endsAt,
-      customerGets: { value: { percentage: 0.1 }, items: { all: true } },
-      combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: false },
-      usageLimit: 1, appliesOncePerCustomer: true,
-    } });
-    const result = response.data?.discountCodeBasicCreate;
-    if (!result?.codeDiscountNode?.id || result.userErrors?.length)
-      throw Error(result?.userErrors?.map(error => error.message).join("; ") || "Recovery discount creation unavailable");
-    await persist({ ...saved, discountId: result.codeDiscountNode.id });
-    remote = await lookup(saved.code);
+    await persist({ ...saved, creationAttemptedAt: new Date().toISOString(), creationAttemptId: crypto.randomUUID() });
+    let response: { data?: { discountCodeBasicCreate?: MutationResult } } | undefined;
+    try {
+      response = await shopifyGraphql<{ data?: { discountCodeBasicCreate?: MutationResult } }>(CREATE, { input: {
+        title, code: saved.code, context: { all: "ALL" }, startsAt: saved.startsAt, endsAt: saved.endsAt,
+        customerGets: { value: { percentage: 0.1 }, items: { all: true } },
+        combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: false },
+        usageLimit: 1, appliesOncePerCustomer: true,
+      } });
+    } catch (error) {
+      // Only the transport's explicit pre-execution proof permits a retry.
+      // A timeout/network failure after POST remains an uncertain creation.
+      if (!(error instanceof ShopifyRequestNotExecutedError)) throw error;
+      remote = await reconcileRejectedCreation();
+      if (!remote) throw error;
+    }
+    if (!remote) {
+      const result = response?.data?.discountCodeBasicCreate;
+      const rejected = result?.codeDiscountNode === null && Array.isArray(result.userErrors) &&
+        result.userErrors.length > 0 && result.userErrors.every(error => !!error && typeof error.message === "string" && !!error.message.trim());
+      if (rejected) {
+        // A definitive rejection is a known non-creation. Reconcile first in
+        // case another process completed this allocation, then release only our
+        // unchanged claim so a later attempt can use the same code and dates.
+        remote = await reconcileRejectedCreation();
+        if (!remote) throw Error("Recovery discount creation rejected: " + result!.userErrors!.map(error => error.message).join("; "));
+      } else if (!result?.codeDiscountNode?.id || result.userErrors?.length) {
+        throw Error(result?.userErrors?.map(error => error.message).join("; ") || "Recovery discount creation unavailable");
+      } else {
+        await persist({ ...saved, discountId: result.codeDiscountNode.id });
+        remote = await lookup(saved.code);
+      }
+    }
     if (!remote) throw Error("Recovery discount creation could not be verified");
   }
   let effective = verified(remote, saved, title);
@@ -204,6 +247,7 @@ async function ensure(runKey: string, profileId: string, percentage: 10 | 15, co
   }
   if (await runOwner(runKey, profileId, percentage) !== recipientEmail) throw new CartDiscountStopped("Recovery discount ownership changed");
   const next = { ...saved, discountId: remote.id, percentage: effective };
+  delete next.creationRejectedAttemptId;
   if (JSON.stringify(next) !== JSON.stringify(saved)) await persist(next);
   return next;
 }

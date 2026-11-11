@@ -1,3 +1,5 @@
+import { ShopifyRequestNotExecutedError, shopifyCostRejectedBeforeExecution } from "./shopify-request-error";
+
 const SHOPIFY_API_VERSION = "2026-07";
 
 type TokenEntry = { secret: string; token?: string; expiresAt?: number; request?: Promise<string> };
@@ -83,8 +85,13 @@ export async function shopifyGraphql<TData = unknown>(
   query: string,
   variables?: Record<string, unknown>
 ) {
-  const shopDomain = getShopifyShopDomain();
-  const accessToken = await getShopifyAccessToken();
+  let shopDomain: string, accessToken: string;
+  try {
+    shopDomain = getShopifyShopDomain();
+    accessToken = await getShopifyAccessToken();
+  } catch (error) {
+    throw new ShopifyRequestNotExecutedError(error);
+  }
 
   const response = await fetch(
     `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
@@ -112,7 +119,8 @@ export async function shopifyGraphql<TData = unknown>(
   if (Array.isArray(data.errors) && data.errors.length) {
     const codes = [...new Set(data.errors.flatMap((error: { extensions?: { code?: unknown } }) =>
       typeof error?.extensions?.code === "string" ? [error.extensions.code] : []))];
-    throw new Error("Shopify GraphQL returned errors" + (codes.length ? ` (${codes.join(", ")})` : "") + ".");
+    const error = new Error("Shopify GraphQL returned errors" + (codes.length ? ` (${codes.join(", ")})` : "") + ".");
+    throw shopifyCostRejectedBeforeExecution(data) ? new ShopifyRequestNotExecutedError(error) : error;
   }
 
   return data as TData;

@@ -2,6 +2,7 @@ import { cartEmailNextAllowed } from "./cart-schedule";
 import { emailReservationScope, emailSpacingHistory, isIndependentCartEmail } from "./email-spacing";
 import { cartStepIndex, isCartCondition } from "./cart-sequence";
 import { ensureCartDiscount, CartDiscountStopped } from "./cart-discount";
+import { cartBuyerHistory, cartBuyerProofValid, isCartFollowup, CART_RETURNING_CUSTOMER, CART_BUYER_WAIT, type CartBuyerCheck } from "./cart-buyer";
 import { authorizeDelivery } from "./send-guard";
 import { cartTestBlock, type CartConfig } from "./cart-config";
 import { customerMarketingFlows, masterAudienceAllows } from "./master-audience";
@@ -457,6 +458,7 @@ export async function runMarketing(onlyMessageId?: string) {
       );
     inspected++;
     let cartRun: CartRun | null = null;
+    let cartBuyerCheck: CartBuyerCheck | null = null;
     let welcomeRun: WelcomeRun | null = null;
     let welcomePurchased = false;
     if (candidate.flowCondition?.startsWith("welcome-v1:")) {
@@ -495,6 +497,7 @@ export async function runMarketing(onlyMessageId?: string) {
         if (!p.email || !candidate.triggerAt)
           throw new Error("Checkout identity is incomplete");
         shopifyOrder = await cartLastOrder(p.email, candidate.triggerAt);
+        if (isCartFollowup(candidate)) cartBuyerCheck = await cartBuyerHistory(candidate.profileId);
       } catch (error) {
         await prisma.marketingMessage.updateMany({
           where: { id: candidate.id, status: "PENDING" },
@@ -742,6 +745,18 @@ export async function runMarketing(onlyMessageId?: string) {
             if (terminal) {
               await cancelCart(tx, cartRunKey(m.key), terminal);
               return null;
+            }
+            if (isCartFollowup(m)) {
+              if (m.profile.lastOrderAt || cartBuyerCheck?.hasOrders) {
+                await cancelCart(tx, cartRunKey(m.key), CART_RETURNING_CUSTOMER);
+                return null;
+              }
+              if (!cartBuyerProofValid(cartBuyerCheck, m.profile)) {
+                await tx.marketingMessage.update({ where: { id: m.id }, data: {
+                  dueAt: new Date(Date.now() + 900000), error: CART_BUYER_WAIT,
+                } });
+                return null;
+              }
             }
             // Missing consent/audience may arrive later. Explicit opt-outs stay terminal.
             if (m.channel === "EMAIL" && ["Not eligible for this channel", "Not in 2025 Mailable Subscribers"].includes(reason || "")) {
@@ -1349,6 +1364,12 @@ export async function runMarketing(onlyMessageId?: string) {
             });
             continue;
           }
+          // A lifetime zero is checked again after network preparation. It is
+          // never inferred from a recent order window or a missing local record.
+          if (isCartFollowup(message)) {
+            cartBuyerCheck = await cartBuyerHistory(message.profileId);
+            if (cartBuyerCheck.hasOrders) throw new CartDiscountStopped(CART_RETURNING_CUSTOMER);
+          }
           if (
             !liveFlow?.enabled ||
             !(liveFlow.data as { reviewed?: boolean }).reviewed ||
@@ -1408,7 +1429,7 @@ export async function runMarketing(onlyMessageId?: string) {
         beforeSend: async () => {
           try {
             const allowed = await authorizeDelivery({ id: message.id, attemptedAt: message.attemptedAt,
-              recipient: message.channel === "EMAIL" ? message.profile.email! : message.profile.phone!, cartRun });
+              recipient: message.channel === "EMAIL" ? message.profile.email! : message.profile.phone!, cartRun, cartBuyerCheck });
             if (!allowed) throw new DeliveryStopped("Delivery stopped before provider handoff");
           } catch (error) {
             if (error instanceof DeliveryStopped) throw error;

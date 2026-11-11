@@ -227,7 +227,7 @@ export default function FlowsWorkspace({
               )}
               <div className="fw-test-choice" aria-label="Test type">
                 <button type="button" aria-pressed={testView === "preview"} onClick={() => setTestView("preview")}>
-                  <strong>Preview email</strong><span>Send now · check appearance</span>
+                  <strong>Preview email</strong><span>{selected.key === "abandoned-cart" ? "Any email · preview codes" : "Send now · check appearance"}</span>
                 </button>
                 <button type="button" aria-pressed={testView === "timing"} onClick={() => setTestView("timing")}>
                   <strong>Test timing</strong><span>Follow the saved schedule</span>
@@ -270,7 +270,7 @@ export default function FlowsWorkspace({
                       <p className="fw-test-hint">{selected.key === "b2b-welcome"
                         ? "Then add the B2B tag to this subscribed Shopify customer."
                         : selected.key === "abandoned-cart"
-                          ? "Then start checkout with this email and leave it unfinished."
+                          ? "Then leave checkout unfinished. Any previous order means email #1 only."
                           : selected.key === "welcome"
                             ? "Then sign up a new address. Existing subscribers cannot re-enter."
                             : "Then add a delivery-date tag to a test Shopify order."}</p>

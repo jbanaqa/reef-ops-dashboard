@@ -1,4 +1,5 @@
 import { assertSpeciesLibraryShop, normalizeShopDomain } from "./species-library";
+import { ShopifyRequestNotExecutedError, shopifyCostRejectedBeforeExecution } from "./shopify-request-error";
 
 const API_VERSION = "2026-07";
 
@@ -58,9 +59,14 @@ async function getAccessToken() {
 }
 
 export async function macroalgaeGraphql<T>(query: string, variables?: Record<string, unknown>) {
-  const shop = assertSpeciesLibraryShop();
-  if (normalizeShopDomain(shop) !== normalizeShopDomain(required("SPECIES_LIBRARY_SHOP_DOMAIN"))) {
-    throw new Error("Macroalgae Shopify boundary mismatch.");
+  let shop: string, accessToken: string;
+  try {
+    shop = assertSpeciesLibraryShop();
+    if (normalizeShopDomain(shop) !== normalizeShopDomain(required("SPECIES_LIBRARY_SHOP_DOMAIN")))
+      throw new Error("Macroalgae Shopify boundary mismatch.");
+    accessToken = await getAccessToken();
+  } catch (error) {
+    throw new ShopifyRequestNotExecutedError(error);
   }
   const perform = (accessToken: string) =>
     fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
@@ -70,7 +76,6 @@ export async function macroalgaeGraphql<T>(query: string, variables?: Record<str
       cache: "no-store",
     });
 
-  const accessToken = await getAccessToken();
   let response = await perform(accessToken);
   if (response.status === 401) {
     // A delayed rejection must not discard a newer token or bypass a shared refresh.
@@ -81,7 +86,8 @@ export async function macroalgaeGraphql<T>(query: string, variables?: Record<str
   if (Array.isArray(body.errors) && body.errors.length) {
     const codes = [...new Set(body.errors.flatMap((error: { extensions?: { code?: unknown } }) =>
       typeof error?.extensions?.code === "string" && /^[A-Z0-9_]{1,64}$/.test(error.extensions.code) ? [error.extensions.code] : []))];
-    throw new Error("Macroalgae Shopify GraphQL returned errors" + (codes.length ? ` (${codes.join(", ")})` : "") + ".");
+    const error = new Error("Macroalgae Shopify GraphQL returned errors" + (codes.length ? ` (${codes.join(", ")})` : "") + ".");
+    throw shopifyCostRejectedBeforeExecution(body) ? new ShopifyRequestNotExecutedError(error) : error;
   }
   return body as T;
 }
