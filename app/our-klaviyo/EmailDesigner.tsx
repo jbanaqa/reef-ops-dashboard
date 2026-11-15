@@ -21,6 +21,7 @@ import RichEmailCopy from "./RichEmailCopy";
 import CampaignEmailFields from "./CampaignEmailFields";
 import Artwork from "./EmailArtwork";
 import MacroNewsletterFields from "./MacroNewsletterFields";
+import { applyCoralsReefDesign, reefDesignDefaults } from "@/lib/marketing/corals-reef";
 
 const emailLayoutNames: Record<EmailLayout, string> = {
   standard: "Standard",
@@ -30,6 +31,7 @@ const emailLayoutNames: Record<EmailLayout, string> = {
   "welcome-social": "Welcome social",
   "campaign-sale": "Campaign sale",
   "macro-newsletter": "Approved Macroalgae Farms newsletter",
+  "corals-reef": "Corals Anonymous · Reef cards",
 };
 
 export default function EmailDesigner({
@@ -51,6 +53,9 @@ export default function EmailDesigner({
   previewSubject,
   previewCaption,
   recoveryLink,
+  flowKey,
+  flowStepIndex,
+  flowBranch,
   editProducts = false,
   subjectEditable = true,
   backLabel = "Back to flow",
@@ -61,6 +66,9 @@ export default function EmailDesigner({
   editProducts?: boolean;
   subjectEditable?: boolean;
   recoveryLink?: boolean;
+  flowKey?: string;
+  flowStepIndex?: number;
+  flowBranch?: "yes" | "no";
   contentFields?: React.ReactNode;
   previewSubject?: string;
   previewCaption?: string;
@@ -91,6 +99,11 @@ export default function EmailDesigner({
   >("content");
   const visualLayout = content.layout || content.template || "standard";
   const isNewsletter = visualLayout === "macro-newsletter" && !!content.macroNewsletter;
+  const isReef = visualLayout === "corals-reef" && !isMacro;
+  const reef = content.reefDesign || (flowKey ? applyCoralsReefDesign(content, flowKey, flowStepIndex, flowBranch).reefDesign : undefined);
+  const reefDefaults = reefDesignDefaults(reef?.variant || "cart");
+  const cartCopy = content.template === "cart-recovery" || visualLayout === "cart-recovery";
+  const socialCopy = visualLayout === "welcome-social" || (isReef && reef?.variant === "social");
   const gridStyle = {
     ...defaultProductGridStyle,
     ...(content.productGridStyle || {}),
@@ -121,7 +134,7 @@ export default function EmailDesigner({
       ? content.bodyHtml
       : content.body
           .split("\n")
-          .slice(content.template === "b2b-wholesale" ? 2 : 0)
+          .slice(content.template === "b2b-wholesale" && !isReef ? 2 : 0)
           .map((line) => (line ? "<p>" + escapeHtml(line) + "</p>" : ""))
           .join("\n");
   const includesHeading =
@@ -132,6 +145,9 @@ export default function EmailDesigner({
   function changeContent(key: keyof Content, value: Content[keyof Content]) {
     setNotice("");
     onContent(key, value);
+  }
+  function changeReef<K extends keyof NonNullable<Content["reefDesign"]>>(key: K, value: NonNullable<Content["reefDesign"]>[K]) {
+    changeContent("reefDesign", { ...reefDefaults, ...reef, [key]: value });
   }
   function changeProductGrid(
     key: keyof typeof gridStyle,
@@ -316,13 +332,13 @@ export default function EmailDesigner({
                       (content.template === "b2b-wholesale" ||
                         visualLayout === "b2b-wholesale") && (
                       <label>
-                        Intro line
+                        {isReef ? "Intro line (optional)" : "Intro line"}
                         <input
-                          aria-label="Intro line"
+                          aria-label={isReef ? "Intro line (optional)" : "Intro line"}
                           value={
                             content.introText !== undefined
                               ? content.introText
-                              : content.body.split("\n")[0] ||
+                              : isReef ? "" : content.body.split("\n")[0] ||
                                 defaultGeneratedEmailCopy.b2bIntro
                           }
                           onChange={(event) =>
@@ -340,30 +356,44 @@ export default function EmailDesigner({
                       onChange={(value) => changeContent("bodyHtml", value)}
                     />
                   </section>
-                  {(content.template?.startsWith("welcome") ||
+                  {isReef && <details className="mk-editor-section mk-editor-disclosure">
+                    <summary><span>Flow design</span><small>Card headings and sign-off</small></summary>
+                    <div className="mk-editor-disclosure-body">
+                      {([
+                        ["eyebrow", "Small introduction", 120],
+                        ...(reef?.variant === "gift" ? [["offerTitle", "Offer heading", 120], ["offerScope", "Offer subtitle", 160]] as const : []),
+                        ["productsTitle", "Product section heading", 120],
+                        ["closing", "Closing line", 120],
+                        ["signature", "Team signature", 160],
+                      ] as const).map(([key, label, limit]) => <label key={key}>{label}
+                        <input maxLength={limit} value={reef?.[key] ?? reefDefaults[key]} onChange={event => changeReef(key, event.target.value)} />
+                      </label>)}
+                    </div>
+                  </details>}
+                  {((isReef ? reef?.variant === "gift" || socialCopy || !!content.couponCode : content.template?.startsWith("welcome") ||
                     content.template === "cart-recovery" ||
                     visualLayout === "welcome" ||
                     visualLayout === "welcome-social" ||
                     visualLayout === "cart-recovery" ||
-                    content.couponCode) && (
+                    content.couponCode)) && (
                     <details className="mk-editor-section mk-editor-disclosure">
                       <summary>
                         <span>Automatic text</span>
                         <small>Coupon, greeting, and social wording</small>
                       </summary>
                       <div className="mk-editor-disclosure-body">
-                        {(content.template?.startsWith("welcome") ||
+                        {((isReef ? reef?.variant === "gift" || !!content.couponCode : content.template?.startsWith("welcome") ||
                           content.template === "cart-recovery" ||
                           visualLayout === "welcome" ||
                           visualLayout === "cart-recovery" ||
-                          content.couponCode) && (
+                          content.couponCode)) && (
                           <>
                             <label>
                               Coupon heading
                               <input
                                 value={
                                   content.couponLabel ??
-                                  (visualLayout === "cart-recovery"
+                                  (cartCopy
                                     ? defaultGeneratedEmailCopy.cartCouponLabel
                                     : content.offerAboveBody
                                       ? defaultGeneratedEmailCopy.welcomeCouponLabelAbove
@@ -380,7 +410,7 @@ export default function EmailDesigner({
                                 rows={3}
                                 value={
                                   content.couponTerms ??
-                                  (visualLayout === "cart-recovery"
+                                  (cartCopy
                                     ? defaultGeneratedEmailCopy.cartCouponTerms
                                     : defaultGeneratedEmailCopy.welcomeCouponTerms)
                                 }
@@ -467,7 +497,7 @@ export default function EmailDesigner({
                             </label>
                           </>
                         )}
-                        {visualLayout === "welcome-social" && (
+                        {socialCopy && (
                           <>
                             <label>
                               Social-card introduction
@@ -652,6 +682,10 @@ export default function EmailDesigner({
                       onChange={(event) => {
                         const layout = event.target.value as EmailLayout;
                         changeContent("layout", layout);
+                        if (layout === "corals-reef" && flowKey) {
+                          const designed = applyCoralsReefDesign(content, flowKey, flowStepIndex, flowBranch);
+                          changeContent("reefDesign", designed.reefDesign);
+                        }
                         if (layout === "campaign-sale" && !content.campaignLayout) {
                           const campaignLayout = structuredClone(
                             (isMacro ? defaultMacroCampaignContent : defaultCampaignContent).campaignLayout!,
@@ -663,6 +697,7 @@ export default function EmailDesigner({
                       }}
                     >
                       <option value="standard">Standard</option>
+                      {!isMacro && (flowKey || isReef) && <option value="corals-reef">Corals Anonymous · Reef cards</option>}
                       {!isMacro && <option value="b2b-wholesale">B2B wholesale</option>}
                       {!isMacro && <option value="cart-recovery">Cart recovery</option>}
                       {!isMacro && <option value="welcome">Welcome offer</option>}
@@ -676,6 +711,15 @@ export default function EmailDesigner({
                       Restore this email&apos;s original layout
                     </button>
                   )}
+                  </div>
+                </details>}
+                {isReef && <details className="mk-editor-section mk-editor-disclosure">
+                  <summary><span>Flow design</span><small>Colors and heading size</small></summary>
+                  <div className="mk-editor-disclosure-body">
+                    <p>{reef?.variant === "gift" ? `${reef.offerPercent || 10}% offer` : reef?.variant === "social" ? "Social email" : reef?.variant === "message" ? "Information email" : "Cart reminder · no offer"}. Offer eligibility stays controlled by the flow.</p>
+                    <label>Background color<input aria-label="Flow background color" type="color" value={reef?.backgroundColor ?? reefDefaults.backgroundColor} onChange={event => changeReef("backgroundColor", event.target.value)} /></label>
+                    <label>Accent color<input aria-label="Flow accent color" type="color" value={reef?.accentColor ?? reefDefaults.accentColor} onChange={event => changeReef("accentColor", event.target.value)} /></label>
+                    <label>Heading size<input aria-label="Flow heading size" type="number" min={24} max={64} value={reef?.headingSize ?? reefDefaults.headingSize} onChange={event => changeReef("headingSize", Number(event.target.value))} /></label>
                   </div>
                 </details>}
                 {visualLayout === "welcome" && (
@@ -1000,7 +1044,11 @@ export default function EmailDesigner({
                     onChange={(value) => changeContent("welcomeFeatureImage", value)}
                   />
                 )}
-                <Artwork
+                {isReef ? <>
+                  <Artwork label="Flow logo" value={reef?.logo ?? reefDefaults.logo} scale={reef?.logoScale ?? reefDefaults.logoScale ?? 1}
+                    onChange={value => changeReef("logo", value ?? "")} onScale={value => changeReef("logoScale", value)} />
+                  <button type="button" onClick={() => changeReef("logo", undefined)}>Use default flow logo</button>
+                </> : <Artwork
                   label="Logo"
                   value={content.logo}
                   scale={
@@ -1009,8 +1057,8 @@ export default function EmailDesigner({
                   }
                   onChange={(value) => changeContent("logo", value)}
                   onScale={(value) => changeContent("logoScale", value)}
-                />
-                <Artwork
+                />}
+                {!isReef && <Artwork
                   label="Footer"
                   value={content.footerImage}
                   scale={
@@ -1019,17 +1067,18 @@ export default function EmailDesigner({
                   }
                   onChange={(value) => changeContent("footerImage", value)}
                   onScale={(value) => changeContent("footerScale", value)}
-                />
+                />}
               </>
             )}
             {panel === "footer" && isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="footer" />}
             {panel === "footer" && !isNewsletter && (
               <section className="mk-editor-section">
                 <h3>Footer content</h3>
-                <p>
+                {isReef ? <p>Closing and signature: Content → Flow design. Footer details use this brand&apos;s shared settings.</p> : <p>
                   Add a closing message, contact details, or a note for your
                   customers.
-                </p>
+                </p>}
+                {!isReef && <>
                 <label>
                   Footer background color
                   <input
@@ -1074,6 +1123,7 @@ export default function EmailDesigner({
                     }
                   />
                 </label>
+                </>}
                 <label>
                   Footer message
                   <textarea
@@ -1130,7 +1180,7 @@ export default function EmailDesigner({
                   />{" "}
                   Show social media in footer
                 </label>
-                {content.showFooterSocial !== false && (
+                {content.showFooterSocial !== false && !isReef && (
                   <>
                     <label>
                       Social heading
@@ -1209,7 +1259,7 @@ export default function EmailDesigner({
                         }
                       />
                     </label>
-                    <Artwork
+                    {!isReef && <Artwork
                       label="Instagram icon"
                       value={content.instagramIcon}
                       scale={1}
@@ -1217,7 +1267,7 @@ export default function EmailDesigner({
                       onChange={(value) =>
                         changeContent("instagramIcon", value)
                       }
-                    />
+                    />}
                     <label>
                       Facebook link
                       <input
@@ -1237,7 +1287,7 @@ export default function EmailDesigner({
                         }
                       />
                     </label>
-                    <Artwork
+                    {!isReef && <Artwork
                       label="Facebook icon"
                       value={content.facebookIcon}
                       scale={1}
@@ -1245,7 +1295,7 @@ export default function EmailDesigner({
                       onChange={(value) =>
                         changeContent("facebookIcon", value)
                       }
-                    />
+                    />}
                     <small>
                       Square icons work best. Custom icons appear at 32 pixels
                       in the email footer; the built-in symbols remain when no

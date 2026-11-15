@@ -69,6 +69,7 @@ import { currentMarketingBrand, marketingEnv, runWithMarketingBrand } from "@/li
 import { defaultMacroCampaignContent, marketingBrands, type MarketingBrand } from "@/lib/marketing/brands";
 import { scopedMarketingSettings as marketingSettings, validateMarketingSender } from "@/lib/marketing/settings";
 import { shopifySubscriberStatus, syncShopifySubscribers, setShopifySubscriberSyncRunning } from "@/lib/marketing/shopify-subscribers";
+import { previewCoralsFlowDesign, applyCoralsFlowDesign, coralsFlowDesignEvidence } from "@/lib/marketing/flow-design-rollout";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -134,8 +135,24 @@ async function saveDiscoveredBranding(value: unknown, footerSource?: unknown, op
           ? { logoScale: extracted.logoScale }
           : {}),
       };
+  const independentHeader = (() => {
+    const hasReefLayout = (node: unknown): boolean => {
+      if (!node || typeof node !== "object") return false;
+      const v = node as Record<string, unknown>;
+      return v.layout === "corals-reef" || Object.entries(v).some(([key, child]) => key !== "reefDesign" && hasReefLayout(child));
+    };
+    return hasReefLayout(footerSource) || hasReefLayout(value);
+  })();
+  if (independentHeader) {
+    delete discovered.logo;
+    delete discovered.logoScale;
+  }
   if (!Object.keys(discovered).length) return;
-  const existing = await loadMarketingSettings();
+  // Reef headers belong to the individual email. Avoid the legacy footer
+  // migration here as it can discover a header from another saved flow too.
+  const existing = independentHeader ? marketingSettings((await prisma.marketingResource.findUnique({
+    where: { shop_kind_key: { shop: shop(), kind: "SETTINGS", key: "global" } },
+  }))?.data) : await loadMarketingSettings();
   // A flow's saved steps can contain older, email-specific artwork. Main flow
   // saves may discover a missing header, but only an explicit designer save
   // should replace an already configured shared header and its matching scale.
@@ -585,11 +602,13 @@ async function getMarketing(request: Request) {
       view = url.searchParams.get("view") || "overview";
     const macro = currentMarketingBrand() === "macroalgae-farms";
     if (macro) {
-      if (["welcome-activity", "cart-report", "flow-report", "cart-history", "audience-backfill", "engagement-backfill", "tracking-pixel", "stock-status"].includes(view))
+      if (["welcome-activity", "cart-report", "flow-report", "cart-history", "audience-backfill", "engagement-backfill", "tracking-pixel", "stock-status", "flow-design-preview", "flow-design-evidence"].includes(view))
         return Response.json({ error: "Macroalgae Farms currently supports campaigns. Customer flows and signup forms are separate." }, { status: 400 });
       await seed();
     }
     if (view === "shopify-subscribers") return Response.json(await shopifySubscriberStatus(), { headers: { "Cache-Control": "no-store" } });
+    if (view === "flow-design-preview") return Response.json(await previewCoralsFlowDesign(), { headers: { "Cache-Control": "no-store" } });
+    if (view === "flow-design-evidence") return Response.json(await coralsFlowDesignEvidence(url.searchParams.get("id") || "", url.searchParams.get("after") || undefined), { headers: { "Cache-Control": "no-store" } });
     if (view === "welcome-activity")
       return Response.json(await welcomeActivity(url), { headers: { "Cache-Control": "no-store" } });
     if (view === "cart-report")
@@ -929,6 +948,7 @@ async function postMarketing(request: Request) {
       await setShopifySubscriberSyncRunning(true);
       return Response.json(await syncShopifySubscribers());
     }
+    if (b.action === "apply-flow-design") return Response.json(await applyCoralsFlowDesign(String(b.fingerprint || "")));
     if (b.action === "pause-shopify-subscribers") return Response.json(await setShopifySubscriberSyncRunning(false));
     if (b.action === "check-stock") return Response.json(await lowStock());
     if (b.action === "remove-profile-list") {

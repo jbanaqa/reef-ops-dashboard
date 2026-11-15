@@ -669,6 +669,9 @@ function FlowEditorState({
           <EmailDesigner
             key={JSON.stringify(selected.target)}
             title={resource.name}
+            flowKey={resource.key}
+            flowStepIndex={selected.target.index}
+            flowBranch={selected.target.branch}
             subject={step?.subject || branch?.subject || ""}
             content={content}
             html={preview}

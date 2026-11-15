@@ -3,6 +3,7 @@ import { decode } from "he";
 import { normalizeMacroNewsletter, renderMacroNewsletter, type MacroNewsletter } from "./macro-newsletters";
 import { inSegmentSnapshot, inMasterMarketingAudience, masterEngagementAllowed, segmentSnapshot, type SegmentSnapshot, type MasterMarketing } from "./segment-snapshot";
 import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
+import { normalizeReefDesign, renderCoralsReef, type ReefDesign } from "./corals-reef";
 export const channels = [
   "EMAIL",
   "SMS_MARKETING",
@@ -17,6 +18,7 @@ export const emailLayouts = [
   "welcome-social",
   "campaign-sale",
   "macro-newsletter",
+  "corals-reef",
 ] as const;
 export type EmailLayout = (typeof emailLayouts)[number];
 export type CampaignEmailProduct = {
@@ -216,6 +218,7 @@ export type Content = {
     | "campaign-sale";
   /** Visual presentation. The template continues to describe dynamic flow behavior. */
   layout?: EmailLayout;
+  reefDesign?: ReefDesign;
   couponCode?: string;
   couponExpiresAt?: string;
   offerAboveBody?: boolean;
@@ -940,6 +943,7 @@ export function content(value: unknown): Content {
     layout: emailLayouts.includes(c.layout as EmailLayout)
       ? (c.layout as EmailLayout)
       : undefined,
+    ...(c.reefDesign !== undefined ? { reefDesign: normalizeReefDesign(c.reefDesign) } : {}),
     couponCode: c.couponCode ? String(c.couponCode).slice(0, 100) : undefined,
     couponExpiresAt: c.couponExpiresAt
       ? new Date(c.couponExpiresAt).toISOString()
@@ -1162,7 +1166,7 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
     if (typeof v.facebookIcon === "string" && v.facebookIcon)
       found.facebookIcon = v.facebookIcon;
     for (const [key, child] of Object.entries(v)) {
-      if (key !== "macroNewsletter" && child && typeof child === "object") visit(child);
+      if (key !== "macroNewsletter" && key !== "reefDesign" && child && typeof child === "object") visit(child);
     }
   };
   visit(value);
@@ -1578,6 +1582,7 @@ export function render(
   address = c.showPostalAddress ? address : "";
   const e = escapeHtml;
   const layout = c.layout || c.template || "standard";
+  if (layout === "corals-reef") return renderCoralsReef(c, unsubscribe, address, profileName, organizationName);
   if (layout === "macro-newsletter" && c.macroNewsletter)
     return renderMacroNewsletter(c, unsubscribe, address, profileName);
   if (layout === "campaign-sale" && c.campaignLayout)

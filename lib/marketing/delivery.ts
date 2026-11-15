@@ -9,12 +9,47 @@ import {
   footerCopyright,
   defaultGeneratedEmailCopy,
   couponExpiryDate,
+  couponTimeLeft,
+  htmlText,
   personalize,
 } from "./rules";
 import { screenEmail } from "./email-screen";
 import { currentMarketingBrand, marketingEnv } from "./context";
 import { marketingBrand } from "./brands";
 import { macroNewsletterText } from "./macro-newsletters";
+import { reefDesignDefaults, type ReefDesign } from "./corals-reef";
+
+function coralsReefText(c: Content, d: ReefDesign, unsubscribe: string, address: string, name: string | undefined, organizationName: string) {
+  const expiry = c.couponExpiresAt ? couponExpiryDate(c.couponExpiresAt) : c.couponExpiryFallbackText ?? defaultGeneratedEmailCopy.couponExpiryFallback;
+  const expand = (value?: string) => personalize((value || "")
+    .replaceAll("{{ coupon_expires }}", expiry)
+    .replaceAll("{{ coupon_time_left }}", couponTimeLeft(c.couponExpiresAt)), name);
+  const ownHeading = c.template === "b2b-wholesale" && c.bodyHtml !== undefined && /<h[1-6]\b|\{\{\s*first_name/.test(c.bodyHtml);
+  const offer = c.couponCode && d.variant === "gift";
+  const social = d.variant === "social";
+  return [
+    !ownHeading ? expand(c.heading) : "",
+    expand(d.eyebrow),
+    !ownHeading ? expand(c.introText) : "",
+    expand(c.bodyHtml !== undefined ? htmlText(c.bodyHtml) : c.body),
+    ...(offer ? [expand(d.offerTitle), `${c.template === "welcome" ? 10 : d.offerPercent === 15 ? 15 : 10}% OFF`,
+      expand(d.offerScope), `${expand(c.couponLabel ?? "Your gift code:")} ${c.couponCode}`, expand(c.couponTerms),
+      c.couponExpiresAt && c.couponExpiryText !== "" ? expand(c.couponExpiryText ?? defaultGeneratedEmailCopy.couponExpiry) : ""] : []),
+    ...(social ? [expand(c.socialFollowText),
+      ...[[c.instagramUrl, c.instagramHeading, c.instagramHandle, c.instagramText], [c.facebookUrl, c.facebookHeading, c.facebookHandle, c.facebookText]]
+        .filter(([url]) => url).map(([url, heading, handle, copy]) => [expand(heading || handle || "Follow us"), expand(handle), expand(copy), url].filter(Boolean).join("\n")),
+      ...(c.socialNavigation || []).map(link => `${expand(link.label)}: ${link.url}`)] : []),
+    c.products?.length ? expand(d.productsTitle) : "",
+    ...(c.products || []).map(product => [product.title, product.price, product.compareAtPrice ? "Was " + product.compareAtPrice : "", product.url].filter(Boolean).join(" · ")),
+    `${expand(c.button)}: ${c.url}`,
+    expand(d.closing), expand(d.signature), expand(c.footerText),
+    `${expand(c.footerUnsubscribeText ?? defaultGeneratedEmailCopy.unsubscribeIntro)} ${expand(c.footerUnsubscribeLinkText ?? defaultGeneratedEmailCopy.unsubscribeLink)}: ${unsubscribe}`,
+    c.showPostalAddress === true ? [organizationName, address].filter(Boolean).join("\n") : "",
+    c.showFooterCopyright !== false ? footerCopyright(c, organizationName) : "",
+    ...(c.showFooterSocial !== false ? [[c.instagramUrl, "Instagram"], [c.facebookUrl, "Facebook"]]
+      .filter(([url]) => url).map(([url, label]) => `${label}: ${url}`) : []),
+  ].filter(Boolean).join("\n\n");
+}
 
 export type DeliverySender = { name?: string; email?: string; replyTo?: string };
 
@@ -52,6 +87,8 @@ export function emailBody(
   organizationName: string,
 ) {
   const effectiveContent = content(withBranding(m.content, m.branding));
+  const reefDesign = effectiveContent.layout === "corals-reef" ? effectiveContent.reefDesign || reefDesignDefaults("message") : undefined;
+  const attachOnlyRendered = !!reefDesign || effectiveContent.layout === "macro-newsletter" && !!effectiveContent.macroNewsletter;
   let html = render(
     effectiveContent,
     m.unsubscribe,
@@ -77,7 +114,7 @@ export function emailBody(
     const match = image?.match(
       /^data:image\/(png|jpeg|webp|gif);base64,([a-zA-Z0-9+/=]+)$/,
     );
-    if (match && (!(effectiveContent.layout === "macro-newsletter" && effectiveContent.macroNewsletter) || html.includes(image!))) {
+    if (match && (!attachOnlyRendered || html.includes(image!))) {
       const id = "marketing-" + field;
       attachments.push({
         filename: field + "." + match[1],
@@ -100,11 +137,21 @@ export function emailBody(
       html = html.replaceAll(image, `cid:${id}`);
     }
   }
+  const reefLogo = reefDesign?.logo;
+  if (reefLogo && html.includes(reefLogo)) {
+    const match = reefLogo.match(/^data:image\/(png|jpeg|webp|gif);base64,([a-zA-Z0-9+/=]+)$/);
+    if (match) {
+      const id = "marketing-reef-logo";
+      attachments.push({ filename: `reef-logo.${match[1]}`, content: match[2], content_id: id });
+      html = html.replaceAll(reefLogo, `cid:${id}`);
+    }
+  }
   return {
     html,
     attachments: attachments.length ? attachments : undefined,
     text: effectiveContent.macroNewsletter && (effectiveContent.layout || effectiveContent.template) === "macro-newsletter"
       ? macroNewsletterText(effectiveContent, m.unsubscribe, address, m.profileName)
+      : reefDesign ? coralsReefText(effectiveContent, reefDesign, m.unsubscribe, address, m.profileName, organizationName)
       : [
       effectiveContent.heading,
       textBody(effectiveContent, m.profileName),

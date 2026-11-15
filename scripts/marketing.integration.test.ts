@@ -31,6 +31,8 @@ import { registerFlowBrandingTests } from "./flow-branding.integration";
 import { registerCartBuyerTests } from "./cart-buyer.integration";
 import { registerCartAbandonmentRetryTests } from "./cart-abandonment-retry.integration";
 import { registerCartSettingsTests } from "./cart-settings.integration";
+import { registerCoralsReefTests } from "./corals-reef.integration";
+import { registerFlowDesignRolloutTests } from "./flow-design-rollout.integration";
 
 // A new in-memory PostgreSQL database, never an existing DATABASE_URL.
 let db: PGlite, server: PGLiteSocketServer, prisma: PrismaClient;
@@ -82,6 +84,8 @@ registerFlowBrandingTests(() => ({ prisma, store, ingest, worker }));
 registerCartBuyerTests(() => ({ prisma, store, ingest, worker }));
 registerCartAbandonmentRetryTests(() => ({ prisma, store, ingest, worker }));
 registerCartSettingsTests(() => ({ prisma, store, ingest, worker }));
+registerCoralsReefTests(() => ({ prisma, store, ingest, worker }));
+registerFlowDesignRolloutTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {
   // Deterministic DNS: example.com fixtures intentionally do not use real mail routing.
   mock.method(Resolver.prototype, "resolveMx", async (domain: string) => {
@@ -603,7 +607,7 @@ test("Shopify delivery-date order tag schedules one upsell notice", async () => 
     customer: { id: "9001", email: "delivery@example.com" },
   });
   assert.equal(
-    await prisma.marketingMessage.count({ where: { flowKey: "delivery-upsell" } }),
+    await prisma.marketingMessage.count({ where: { shop: store.shop(), flowKey: "delivery-upsell" } }),
     1,
   );
   const changedDelivery = new Date(Date.now() + 35 * 86400000);
@@ -628,7 +632,7 @@ test("Shopify delivery-date order tag schedules one upsell notice", async () => 
   assert.equal(rescheduled.status, "PENDING");
   assert.equal(rescheduled.dueAt.toISOString(), changedDue.toISOString());
   assert.equal(
-    await prisma.marketingMessage.count({ where: { flowKey: "delivery-upsell" } }),
+    await prisma.marketingMessage.count({ where: { shop: store.shop(), flowKey: "delivery-upsell" } }),
     1,
   );
   await ingest.ingestShopify("orders/updated", "delivery-order-9001-update-2", {
@@ -719,7 +723,7 @@ test("Shopify delivery-date order tag schedules one upsell notice", async () => 
     "SENT",
   );
   assert.equal(
-    await prisma.marketingMessage.count({ where: { flowKey: "delivery-upsell" } }),
+    await prisma.marketingMessage.count({ where: { shop: store.shop(), flowKey: "delivery-upsell" } }),
     1,
   );
   sent.splice(sentBefore, 1);
@@ -2100,7 +2104,7 @@ test("stock alerts baseline per variant, use strict threshold, deduplicate and r
     "old snapshots are ignored",
   );
   const messages = await prisma.marketingMessage.findMany({
-    where: { flowKey: "low-stock" },
+    where: { shop: store.shop(), flowKey: "low-stock" },
   });
   assert.equal(messages.length, 2);
   assert.deepEqual(messages.map((m) => m.channel).sort(), [
@@ -2115,14 +2119,14 @@ test("stock alerts baseline per variant, use strict threshold, deduplicate and r
   assert.equal(await observe(5), 0);
   assert.equal(
     await prisma.marketingMessage.count({
-      where: { flowKey: "low-stock", status: "CANCELLED" },
+      where: { shop: store.shop(), flowKey: "low-stock", status: "CANCELLED" },
     }),
     2,
   );
   assert.equal(await observe(4), 2);
   assert.equal(await observe(4), 0);
   assert.equal(
-    await prisma.marketingMessage.count({ where: { flowKey: "low-stock" } }),
+    await prisma.marketingMessage.count({ where: { shop: store.shop(), flowKey: "low-stock" } }),
     4,
   );
   assert.equal(
@@ -2224,7 +2228,7 @@ test("stock alerts baseline per variant, use strict threshold, deduplicate and r
       data: { enabled: false },
     });
     await prisma.marketingMessage.updateMany({
-      where: { flowKey: "low-stock", status: "PENDING" },
+      where: { shop: store.shop(), flowKey: "low-stock", status: "PENDING" },
       data: { status: "CANCELLED" },
     });
   }

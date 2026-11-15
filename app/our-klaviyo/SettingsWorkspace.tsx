@@ -2,6 +2,7 @@
 import { useMarketingBrand, useMarketingAction, useMarketingUnsavedChanges } from "./MarketingBrand";
 import SenderIdentity from "./SenderIdentity";
 import MacroSettingsWorkspace from "./MacroSettingsWorkspace";
+import FlowDesignCard from "./FlowDesignCard";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type {
@@ -452,6 +453,7 @@ function CoralsSettingsWorkspace({
                 </p>
               </article>
             </div>
+            <FlowDesignCard refresh={refresh} />
             <section className="sw-card">
               <div className="sw-card-title">
                 <div>
