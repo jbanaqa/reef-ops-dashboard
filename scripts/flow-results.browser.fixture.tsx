@@ -42,7 +42,10 @@ function report(flowKey: "welcome" | "abandoned-cart", days: number, page: numbe
     orders: empty ? [] : orders.slice((page - 1) * 2, page * 2),
     ordersPage: { page, pageSize: 2, total: empty ? 0 : 3, pages: empty ? 1 : 2 },
     evidence: { matchingCheckoutOrders: flowKey === "abandoned-cart" ? 1 : 0, discountOrders: 1, missingCheckoutDetails: flowKey === "abandoned-cart" ? 1 : 0 },
-    activity: [{ id: "message-1", profileId: "profile-1", email: "queued@example.test", subject: "Queued reminder", step: "First reminder", status: "PENDING", triggerAt: at, sentAt: null, dueAt: at, error: "Waiting for email sending hours" }],
+    activity: [{ id: "message-1", profileId: "profile-1", email: "queued@example.test", subject: "Queued reminder", step: "First reminder", status: "PENDING",
+      triggerAt: flowKey === "abandoned-cart" ? "2026-08-27T17:00:00.000Z" : at, enteredAt: at,
+      checkoutStartedAt: flowKey === "abandoned-cart" ? "2026-08-27T17:00:00.000Z" : null,
+      sentAt: null, dueAt: at, error: "Waiting for email sending hours" }],
     reasons: [{ reason: "Waiting for email sending hours", count: 4 }],
   };
 }

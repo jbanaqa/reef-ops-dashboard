@@ -2,6 +2,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { attributionConfiguration, attributedOrders, type AttributionMatch } from "./attribution";
 import { customerFlowMessages } from "./cart-report-scope";
+import { cartActivityTiming } from "./cart-report-timing";
 import { addOrderRevenue, compactOrderEvidence, orderValue, type OrderEvidence } from "./order-evidence";
 import { DAY } from "./rules";
 import { shop } from "./store";
@@ -60,7 +61,7 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
     profile: { select: { email: true } } } as const;
   const sentMessages = new Map<string, Prisma.MarketingMessageGetPayload<{ select: typeof selection }>>();
   const recent: { id: string; profileId: string; email: string; subject: string; step: string; status: string;
-    triggerAt: string | null; dueAt: string; sentAt: string | null; error: string | null; sortAt: string }[] = [];
+    key: string; createdAt: Date; triggerAt: string | null; dueAt: string; sentAt: string | null; error: string | null; sortAt: string }[] = [];
   const reasons = new Map<string, number>();
   let cursor: string | undefined;
   for (;;) {
@@ -80,7 +81,7 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
       }
       if (message.sentAt) sentMessages.set(message.id, message);
       if (message.error && message.status !== "SENT") reasons.set(message.error, (reasons.get(message.error) || 0) + 1);
-      recent.push({ id: message.id, profileId: message.profileId, email: message.profile.email || "Email unavailable",
+      recent.push({ id: message.id, key: message.key, createdAt: message.createdAt, profileId: message.profileId, email: message.profile.email || "Email unavailable",
         subject: message.subject, step: step.label, status: message.status, triggerAt: message.triggerAt?.toISOString() || null,
         dueAt: message.dueAt.toISOString(), sentAt: message.sentAt?.toISOString() || null, error: message.error,
         sortAt: (message.sentAt || message.createdAt).toISOString() });
@@ -214,9 +215,16 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
     for (const order of orders) order.step = legacyLabels.get(order.step) || order.step;
     for (const message of recent) message.step = legacyLabels.get(message.step) || message.step;
   }
+  const cartTiming = flowKey === "abandoned-cart" ? await cartActivityTiming(prisma, shop(), recent.map(message => ({
+    ...message, triggerAt: message.triggerAt ? new Date(message.triggerAt) : null,
+  }))) : null;
   return { flowKey, name, days, since: since.toISOString(), generatedAt: now.toISOString(), attribution, totals, steps: visibleSteps, paymentVerification: { unverifiedOrders: unverifiedOrderIds.size, staleOrders: staleOrderIds.size },
     orders: orders.slice((page - 1) * pageSize, page * pageSize), ordersPage: { page, pageSize, total: orders.length, pages }, evidence,
-    activity: recent.map(({ sortAt: _sortAt, ...message }) => { void _sortAt; return message; }),
+    activity: recent.map(({ sortAt: _sortAt, key: _key, createdAt: _createdAt, ...message }) => {
+      void _sortAt; void _key; void _createdAt;
+      return { ...message, enteredAt: cartTiming?.get(message.id)?.enteredAt ?? message.triggerAt,
+        checkoutStartedAt: cartTiming?.get(message.id)?.checkoutStartedAt ?? null };
+    }),
     reasons: [...reasons].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([reason, count]) => ({ reason, count })),
   };
 }

@@ -1247,7 +1247,7 @@ export default function EmailDesigner({
                         placeholder="https://instagram.com/your-account"
                         value={
                           content.instagramUrl ??
-                          (visualLayout === "welcome-social"
+                          (socialCopy
                             ? defaultGeneratedEmailCopy.instagramUrl
                             : "")
                         }
@@ -1275,7 +1275,7 @@ export default function EmailDesigner({
                         placeholder="https://facebook.com/your-page"
                         value={
                           content.facebookUrl ??
-                          (visualLayout === "welcome-social"
+                          (socialCopy
                             ? defaultGeneratedEmailCopy.facebookUrl
                             : "")
                         }

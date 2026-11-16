@@ -75,6 +75,13 @@ const { chromium } = require("playwright");
         assert.ok(!details.source.includes("ca-reef-gift-v1.png"), "Non-offer flow emails do not invent a gift");
       }
       const hasProducts = item.flowKey === "abandoned-cart" || item.id === "welcome-social";
+      if (item.id === "welcome-social") {
+        for (const copy of ["FOLLOW US ON", "INSTAGRAM", "@coralsanonymous", "DAILY CORAL POSTS, SALES, AND MORE!",
+          "FACEBOOK", "@coralsanonymousshop", "CORAL SALES, PROMO CODES AND MORE!"])
+          assert.ok(details.text.includes(copy), "The saved social email retains its default " + copy);
+        assert.ok(details.links.includes("https://www.instagram.com/coralsanonymous/"));
+        assert.ok(details.links.includes("https://www.facebook.com/coralsanonymousshop/"));
+      }
       assert.equal(details.products, hasProducts ? 6 : 0);
       if (hasProducts) {
         assert.ok(details.text.includes("Blueberry Gorgonian") && details.text.includes("$15.00") && details.text.includes("$29.99"));
@@ -166,6 +173,19 @@ const { chromium } = require("playwright");
       assert.ok(await page.getByRole("dialog").evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth + 1));
       const file = path.join(output, "flow-editor-" + width + ".png"); await page.screenshot({ path: file }); screenshots.push(file);
     }
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await open({ case: "welcome-social", mode: "editor" });
+    await page.locator('[data-node-id="welcome-email:3"]').click();
+    await page.getByRole("button", { name: "Content", exact: true }).click();
+    await page.getByText("Automatic text", { exact: true }).click();
+    assert.equal(await page.getByLabel("Social-card introduction", { exact: true }).inputValue(), "FOLLOW US ON");
+    assert.equal(await page.getByRole("group", { name: "Instagram card", exact: true }).getByLabel("Heading", { exact: true }).inputValue(), "INSTAGRAM");
+    assert.equal(await page.getByRole("group", { name: "Facebook card", exact: true }).getByLabel("Heading", { exact: true }).inputValue(), "FACEBOOK");
+    await page.getByRole("button", { name: "Footer", exact: true }).click();
+    assert.equal(await page.getByLabel("Instagram link", { exact: true }).inputValue(), "https://www.instagram.com/coralsanonymous/");
+    assert.equal(await page.getByLabel("Facebook link", { exact: true }).inputValue(), "https://www.facebook.com/coralsanonymousshop/");
+    const socialPreview = await page.getByTitle("Email preview").getAttribute("srcdoc");
+    assert.ok(socialPreview.includes("DAILY CORAL POSTS, SALES, AND MORE!") && socialPreview.includes("CORAL SALES, PROMO CODES AND MORE!"));
     for (const brand of ["corals-anonymous", "macroalgae-farms"]) {
       await page.setViewportSize({ width: 1440, height: 1100 });
       await open({ mode: "campaign", brand });

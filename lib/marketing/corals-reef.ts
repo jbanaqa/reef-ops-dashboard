@@ -50,6 +50,27 @@ export function applyCoralsReefDesign(c: Content, flowKey: string, stepIndex = 0
   } };
 }
 
+/** Resolve the same implicit social copy as the original Welcome layout, after shared branding. */
+export function resolveReefSocialContent(c: Content): Content {
+  if (c.template !== "welcome-social" && c.reefDesign?.variant !== "social") return c;
+  return { ...c,
+    socialFollowText: c.socialFollowText ?? defaultGeneratedEmailCopy.socialFollow,
+    instagramUrl: c.instagramUrl ?? defaultGeneratedEmailCopy.instagramUrl,
+    instagramHeading: c.instagramHeading ?? defaultGeneratedEmailCopy.instagramHeading,
+    instagramHandle: c.instagramHandle ?? defaultGeneratedEmailCopy.instagramHandle,
+    instagramText: c.instagramText ?? defaultGeneratedEmailCopy.instagramText,
+    facebookUrl: c.facebookUrl ?? defaultGeneratedEmailCopy.facebookUrl,
+    facebookHeading: c.facebookHeading ?? defaultGeneratedEmailCopy.facebookHeading,
+    facebookHandle: c.facebookHandle ?? defaultGeneratedEmailCopy.facebookHandle,
+    facebookText: c.facebookText ?? defaultGeneratedEmailCopy.facebookText,
+    socialNavigation: c.socialNavigation ?? [
+      { label: "🔥 New Corals", url: "https://coralsanonymous.com/collections/new-arrivals" },
+      { label: "🏷️ Deal Busters", url: "https://coralsanonymous.com/collections/deal-busters" },
+      { label: "✚ Earn Points & Save!", url: "https://coralsanonymous.com/pages/rewards" },
+    ],
+  };
+}
+
 /** Hybrid columns wrap without media queries; Outlook gets conditional fixed cells. */
 function productCards(c: Content, d: ReefDesign, profileName?: string) {
   if (!c.products?.length) return "";
@@ -68,6 +89,7 @@ function productCards(c: Content, d: ReefDesign, profileName?: string) {
 }
 
 export function renderCoralsReef(c: Content, unsubscribe: string, address: string, profileName?: string, organizationName = "Corals Anonymous") {
+  c = resolveReefSocialContent(c);
   const e = escapeHtml, d: ReefDesign = normalizeReefDesign(c.reefDesign) || reefDesignDefaults("message");
   const bg = e(d.backgroundColor || "#e0f4f9"), accent = e(d.accentColor || "#f2643f");
   const expiry = c.couponExpiresAt ? couponExpiryDate(c.couponExpiresAt) : c.couponExpiryFallbackText ?? defaultGeneratedEmailCopy.couponExpiryFallback;
@@ -90,7 +112,7 @@ export function renderCoralsReef(c: Content, unsubscribe: string, address: strin
   const social = d.variant === "social" ? '<tr><td style="padding:0 26px 24px">' +
     (c.socialFollowText ? '<p style="font-size:18px;text-align:center;color:#49646e">' + e(c.socialFollowText) + '</p>' : '') +
     [[c.instagramUrl, c.instagramHeading, c.instagramHandle, c.instagramText], [c.facebookUrl, c.facebookHeading, c.facebookHandle, c.facebookText]]
-      .filter(([url]) => url).map(([url, heading, handle, copy]) => '<table role="presentation" width="100%" style="background:#ffffff;border-radius:18px;margin:0 0 14px"><tr><td style="padding:22px;text-align:center"><a href="' + e(url!) + '" style="font-size:22px;color:#073a49;font-weight:bold;text-decoration:none">' + e(heading || handle || "Follow us") + '</a>' + (handle ? '<p style="font-size:13px;color:#168591">' + e(handle) + '</p>' : '') + (copy ? '<p style="font-size:15px;line-height:1.5;color:#49646e">' + e(copy) + '</p>' : '') + '</td></tr></table>').join('') +
+      .filter(([url]) => url).map(([url, heading, handle, copy]) => '<table role="presentation" width="100%" style="background:#ffffff;border-radius:18px;margin:0 0 14px"><tr><td style="padding:22px;text-align:center"><a href="' + e(url!) + '" style="display:block;color:#073a49;text-decoration:none">' + (heading ? '<p style="font-size:22px;font-weight:bold">' + e(heading) + '</p>' : '') + (handle ? '<p style="font-size:13px;color:#168591">' + e(handle) + '</p>' : '') + (copy ? '<p style="font-size:15px;line-height:1.5;color:#49646e">' + e(copy) + '</p>' : '') + '</a></td></tr></table>').join('') +
       (c.socialNavigation?.length ? '<p style="text-align:center;font-size:13px;line-height:2">' + c.socialNavigation.map(link=>'<a href="'+e(link.url)+'" style="color:#157c88;margin:0 7px">'+e(link.label)+'</a>').join(' ')+'</p>' : '') + '</td></tr>' : '';
   const button = '<tr><td style="padding:0 42px 24px;text-align:center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" bgcolor="' + accent + '" style="background:' + accent + ';border-radius:40px"><a href="' + e(c.url) + '" style="display:block;padding:18px 12px;border:1px solid ' + accent + ';border-radius:40px;color:#ffffff;text-decoration:none;font-family:Arial,sans-serif;font-size:23px;line-height:1.25;font-weight:800;word-wrap:break-word">' + e(c.button) + ' <span aria-hidden="true">&#8594;</span></a></td></tr></table></td></tr>';
   const compliance = '<tr><td style="padding:14px 28px 24px;text-align:center;font-size:11px;line-height:1.7;color:#53727d;word-wrap:break-word">' +

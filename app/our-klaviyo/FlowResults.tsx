@@ -190,7 +190,9 @@ function ResultsDialog({ flowKey, close, initialDays }: {
           {!report.activity.length ? <p>No customer messages recorded yet.</p> : <ol className="mk-fr-message-list">{report.activity.map(message => <li key={message.id}>
             <div><strong>{message.email || "Customer email unavailable"}</strong><span>{statusLabels[message.status] || message.status}</span></div>
             <p>{message.step} · {message.subject}</p>
-            {message.triggerAt && <small>Entered {date(message.triggerAt)}</small>}
+            {message.enteredAt && <small>Entered {date(message.enteredAt)}</small>}
+            {message.checkoutStartedAt && message.checkoutStartedAt !== message.enteredAt &&
+              <small>Checkout started {date(message.checkoutStartedAt)}</small>}
             <small>{message.sentAt ? "Sent " + date(message.sentAt) : "Scheduled " + date(message.dueAt)}</small>
             {message.error && <p className="mk-fr-message-error">{message.error}</p>}
           </li>)}</ol>}

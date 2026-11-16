@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { content, render, defaultContent, type Content } from "../lib/marketing/rules";
+import { content, render, defaultContent, defaultGeneratedEmailCopy, type Content } from "../lib/marketing/rules";
 import { emailBody } from "../lib/marketing/delivery";
-import { applyCoralsReefDesign } from "../lib/marketing/corals-reef";
+import { applyCoralsReefDesign, resolveReefSocialContent } from "../lib/marketing/corals-reef";
 import { isolated, type Context } from "./cart-launch.integration";
 import { threeStepCartDraft } from "../lib/marketing/cart-config";
+import { welcomeSteps } from "../lib/marketing/welcome-config";
 
 const unsubscribe = "https://dashboard.example/api/marketing/unsubscribe?token=real-recipient-token";
 const checkout = "https://coralsanonymous.com/checkouts/live-checkout-token?key=keep-me&locale=en";
@@ -104,6 +105,58 @@ export function registerCoralsReefTests(context: () => Context) {
       assert.ok(links.includes(required), `social layout keeps ${required}`);
     for (const required of [social.instagramUrl!, social.facebookUrl!, social.socialNavigation![0].url, "Follow the actual reef", "Actual Instagram copy", "Actual Facebook copy"])
       assert.ok(payload.text.includes(required), `plain text keeps ${required}`);
+  });
+
+  test("Corals reef default Welcome social cards retain original copy with default or shared-brand URLs", () => {
+    const original = structuredClone(welcomeSteps[3].content), before = structuredClone(original);
+    assert.equal(original.instagramHeading, undefined); assert.equal(original.facebookHeading, undefined);
+    const design = applyCoralsReefDesign(original, "welcome", 3);
+    for (const branding of [undefined, { footerConfigured: true, instagramUrl: "https://www.instagram.com/shared-reef/",
+      facebookUrl: "https://www.facebook.com/shared-reef/" }]) {
+      const payload = delivered(design, branding), doc = new JSDOM(payload.html).window.document;
+      const text = doc.body.textContent || "";
+      for (const required of [defaultGeneratedEmailCopy.socialFollow, defaultGeneratedEmailCopy.instagramHeading,
+        defaultGeneratedEmailCopy.instagramHandle, defaultGeneratedEmailCopy.instagramText, defaultGeneratedEmailCopy.facebookHeading,
+        defaultGeneratedEmailCopy.facebookHandle, defaultGeneratedEmailCopy.facebookText]) {
+        assert.ok(text.includes(required), `HTML resolves ${required}`);
+        assert.ok(payload.text.includes(required), `plain text resolves ${required}`);
+      }
+      for (const [heading, url] of [[defaultGeneratedEmailCopy.instagramHeading, branding?.instagramUrl ?? defaultGeneratedEmailCopy.instagramUrl],
+        [defaultGeneratedEmailCopy.facebookHeading, branding?.facebookUrl ?? defaultGeneratedEmailCopy.facebookUrl]]) {
+        const card = [...doc.querySelectorAll("a")].find(link => link.textContent?.includes(heading));
+        assert.equal(card?.getAttribute("href"), url, "the complete named card uses the effective brand URL");
+        assert.ok(payload.text.includes(url));
+      }
+      assert.ok(!text.includes("Follow usFollow us"));
+    }
+    assert.deepEqual(original, before, "default resolution never rewrites saved content");
+  });
+
+  test("Corals reef social defaults preserve authored copy, deliberately cleared text and empty navigation", () => {
+    const design = content({ ...applyCoralsReefDesign(welcomeSteps[3].content, "welcome", 3), socialFollowText: "",
+      instagramHeading: "", instagramHandle: "@my-reef", instagramText: "My saved Instagram message",
+      instagramUrl: "https://www.instagram.com/my-saved-reef/", facebookHeading: "My Facebook heading", facebookHandle: "",
+      facebookText: "", facebookUrl: "https://www.facebook.com/my-saved-reef/", socialNavigation: [], showFooterSocial: false });
+    const before = structuredClone(design), payload = delivered(design), doc = new JSDOM(payload.html).window.document;
+    const text = doc.body.textContent || "";
+    for (const required of ["@my-reef", "My saved Instagram message", "My Facebook heading"]) {
+      assert.ok(text.includes(required)); assert.ok(payload.text.includes(required));
+    }
+    for (const absent of [defaultGeneratedEmailCopy.socialFollow, defaultGeneratedEmailCopy.instagramHeading,
+      defaultGeneratedEmailCopy.instagramText, defaultGeneratedEmailCopy.facebookHandle, defaultGeneratedEmailCopy.facebookText,
+      "Earn Points & Save!"]) {
+      assert.ok(!text.includes(absent), `HTML preserves the cleared/default-overridden ${absent}`);
+      assert.ok(!payload.text.includes(absent), `plain text preserves the cleared/default-overridden ${absent}`);
+    }
+    assert.ok(![...doc.querySelectorAll("a")].some(link => link.textContent?.trim() === "Follow us"),
+      "a cleared social-card heading is not replaced with the generic label");
+    assert.ok(!payload.text.split("\n").some(line => line.trim() === "Follow us"));
+    assert.equal([...doc.querySelectorAll("a")].find(link => link.textContent?.includes("My saved Instagram message"))?.getAttribute("href"), design.instagramUrl,
+      "clearing a card heading leaves the handle and message linked");
+    assert.deepEqual(resolveReefSocialContent({ ...design, socialNavigation: undefined }).socialNavigation,
+      welcomeSteps[3].content.socialNavigation, "missing navigation retains the original three links");
+    assert.deepEqual(resolveReefSocialContent(design).socialNavigation, []);
+    assert.deepEqual(design, before);
   });
 
   test("Corals reef nested logo attachments reflect rendered images and omit unused old-layout artwork", () => {

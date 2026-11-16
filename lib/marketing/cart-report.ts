@@ -3,6 +3,7 @@ import { shop } from "./store";
 import { DAY } from "./rules";
 import { attributionConfiguration, attributedOrders } from "./attribution";
 import { customerCartMessages } from "./cart-report-scope";
+import { cartActivityTiming } from "./cart-report-timing";
 import { addOrderRevenue, orderValue } from "./order-evidence";
 const names: Record<string, string> = {
   "v2-first": "Email #1 · Cart reminder",
@@ -129,7 +130,7 @@ export async function cartReport() {
       where: { shop: shop(), flowKey: "abandoned-cart", OR: [{ createdAt: { gte: since } }, { sentAt: { gte: since } }] },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 100,
       ...(activityCursor ? { cursor: { id: activityCursor }, skip: 1 } : {}),
-      select: { id: true, key: true, flowKey: true, flowCondition: true, subject: true, status: true, triggerAt: true, dueAt: true,
+      select: { id: true, key: true, flowKey: true, flowCondition: true, subject: true, status: true, triggerAt: true, createdAt: true, dueAt: true,
         sentAt: true, error: true, profile: { select: { id: true, email: true } } },
     });
     activity.push(...await customerCartMessages(prisma, shop(), page));
@@ -144,14 +145,16 @@ export async function cartReport() {
     for (const row of visibleRows) row.label = legacyLabels.get(row.label) || row.label;
     for (const order of orders) order.step = legacyLabels.get(order.step) || order.step;
   }
+  const recent = activity.slice(0, 25);
+  const timing = await cartActivityTiming(prisma, shop(), recent);
   return {
     since: since.toISOString(),
     attribution,
     paymentVerification: { unverifiedOrders: unverifiedOrderIds.size, staleOrders: staleOrderIds.size },
     orders,
-    activity: activity.slice(0, 25).map(({ profile, key: _key, flowKey: _flow, ...m }) => {
-      void _key; void _flow;
-      return { ...m, email: profile.email || "Email unavailable", profileId: profile.id };
+    activity: recent.map(({ profile, key: _key, flowKey: _flow, createdAt: _createdAt, ...m }) => {
+      void _key; void _flow; void _createdAt;
+      return { ...m, ...timing.get(m.id)!, email: profile.email || "Email unavailable", profileId: profile.id };
     }),
     rows: visibleRows,
     reasons: [...reasons]

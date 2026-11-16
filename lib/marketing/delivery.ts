@@ -17,9 +17,10 @@ import { screenEmail } from "./email-screen";
 import { currentMarketingBrand, marketingEnv } from "./context";
 import { marketingBrand } from "./brands";
 import { macroNewsletterText } from "./macro-newsletters";
-import { reefDesignDefaults, type ReefDesign } from "./corals-reef";
+import { reefDesignDefaults, resolveReefSocialContent, type ReefDesign } from "./corals-reef";
 
 function coralsReefText(c: Content, d: ReefDesign, unsubscribe: string, address: string, name: string | undefined, organizationName: string) {
+  c = resolveReefSocialContent(c);
   const expiry = c.couponExpiresAt ? couponExpiryDate(c.couponExpiresAt) : c.couponExpiryFallbackText ?? defaultGeneratedEmailCopy.couponExpiryFallback;
   const expand = (value?: string) => personalize((value || "")
     .replaceAll("{{ coupon_expires }}", expiry)
@@ -37,7 +38,7 @@ function coralsReefText(c: Content, d: ReefDesign, unsubscribe: string, address:
       c.couponExpiresAt && c.couponExpiryText !== "" ? expand(c.couponExpiryText ?? defaultGeneratedEmailCopy.couponExpiry) : ""] : []),
     ...(social ? [expand(c.socialFollowText),
       ...[[c.instagramUrl, c.instagramHeading, c.instagramHandle, c.instagramText], [c.facebookUrl, c.facebookHeading, c.facebookHandle, c.facebookText]]
-        .filter(([url]) => url).map(([url, heading, handle, copy]) => [expand(heading || handle || "Follow us"), expand(handle), expand(copy), url].filter(Boolean).join("\n")),
+        .filter(([url]) => url).map(([url, heading, handle, copy]) => [expand(heading), expand(handle), expand(copy), url].filter(Boolean).join("\n")),
       ...(c.socialNavigation || []).map(link => `${expand(link.label)}: ${link.url}`)] : []),
     c.products?.length ? expand(d.productsTitle) : "",
     ...(c.products || []).map(product => [product.title, product.price, product.compareAtPrice ? "Was " + product.compareAtPrice : "", product.url].filter(Boolean).join(" · ")),

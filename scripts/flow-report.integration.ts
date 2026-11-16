@@ -11,6 +11,8 @@ type MessageOptions = {
   stage?: string;
   sentAt?: Date | null;
   createdAt?: Date;
+  triggerAt?: Date | null;
+  condition?: string;
   status?: string;
   campaignId?: string;
 };
@@ -40,11 +42,11 @@ async function message(h: Harness, profileId: string, flowKey: "welcome" | "aban
     key: options.key || `${h.shop}:${flowKey}:${profileId}:${step}:${crypto.randomUUID()}`,
     profileId, flowKey: options.campaignId ? null : flowKey, campaignId: options.campaignId,
     flowStep: step,
-    flowCondition: flowKey === "welcome" ? `welcome-v1:${step}` : `cart-v1:${options.stage || "first"}`,
+    flowCondition: options.condition || (flowKey === "welcome" ? `welcome-v1:${step}` : `cart-v1:${options.stage || "first"}`),
     channel: "EMAIL", subject: `${flowKey} email ${step + 1}`, content: defaultContent,
     status: options.status || (sentAt ? "SENT" : "PENDING"),
     dueAt: sentAt || new Date(), sentAt, createdAt: options.createdAt || ago(3),
-    triggerAt: options.createdAt || (sentAt ? new Date(+sentAt - 1000) : ago(3)),
+    triggerAt: options.triggerAt === undefined ? options.createdAt || (sentAt ? new Date(+sentAt - 1000) : ago(3)) : options.triggerAt,
   } });
 }
 
@@ -62,6 +64,62 @@ async function order(h: Harness, profileId: string, orderId: string, occurredAt:
 }
 
 export function registerFlowReportTests(context: () => Context) {
+  test("flow reports: Cart entry uses verified abandonment while preserving the older checkout purchase boundary", async () => customerReportTest(context(), "cart-entry-clock", async h => {
+    const { flowReport } = await import("../lib/marketing/flow-report");
+    const { cartReport } = await import("../lib/marketing/cart-report");
+    const { cartCheckoutKey } = await import("../lib/marketing/cart");
+    const p = await h.make("cart-entry-clock@example.com");
+    const root = `${cartCheckoutKey(p.id, "old-checkout")}:attempt-recent`, checkoutAt = ago(80), abandonedAt = ago(1);
+    const m = await message(h, p.id, "abandoned-cart", { key: `${root}:first`, condition: "cart-v2:first",
+      triggerAt: checkoutAt, createdAt: ago(0.99), sentAt: ago(0.8) });
+    await h.prisma.marketingResource.create({ data: { shop: h.shop, kind: "CART_RUN", key: root,
+      name: "Native cart run", data: { profileId: p.id, sequenceVersion: 2, checkoutCreatedAt: checkoutAt.toISOString(),
+        abandonment: { id: "gid://shopify/Abandonment/current", abandonedAt: abandonedAt.toISOString() } } } });
+    const beforeMessages = await h.prisma.marketingMessage.findMany({ where: { shop: h.shop }, orderBy: { id: "asc" } });
+    const beforeResources = await h.prisma.marketingResource.findMany({ where: { shop: h.shop }, orderBy: { id: "asc" } });
+    for (const report of [await flowReport("abandoned-cart"), await cartReport()]) {
+      const activity = report.activity.find(item => item.id === m.id)!;
+      assert.equal(activity.enteredAt, abandonedAt.toISOString(), "new native abandonment is the recovery entry time");
+      assert.equal(activity.checkoutStartedAt, checkoutAt.toISOString());
+      assert.equal(new Date(activity.triggerAt!).toISOString(), checkoutAt.toISOString(), "reporting retains the original purchase boundary");
+    }
+    assert.deepEqual(await h.prisma.marketingMessage.findMany({ where: { shop: h.shop }, orderBy: { id: "asc" } }), beforeMessages);
+    assert.deepEqual(await h.prisma.marketingResource.findMany({ where: { shop: h.shop }, orderBy: { id: "asc" } }), beforeResources);
+  }));
+
+  test("flow reports: legacy and missing Cart runs use queue creation without changing Welcome or exposing restricted tests", async () => customerReportTest(context(), "cart-entry-fallback", async h => {
+    const { flowReport } = await import("../lib/marketing/flow-report");
+    const { cartReport } = await import("../lib/marketing/cart-report");
+    const { cartCheckoutKey } = await import("../lib/marketing/cart");
+    const p = await h.make("cart-entry-fallback@example.com"), enteredAt = ago(1), checkoutAt = ago(60);
+    const cases = ["legacy", "missing", "invalid"] as const;
+    const messages: Awaited<ReturnType<typeof message>>[] = [];
+    for (const kind of cases) {
+      const root = cartCheckoutKey(p.id, kind);
+      messages.push(await message(h, p.id, "abandoned-cart", { key: `${root}:first`, triggerAt: checkoutAt,
+        createdAt: enteredAt, sentAt: ago(0.8) }));
+      if (kind !== "missing") await h.prisma.marketingResource.create({ data: { shop: h.shop, kind: "CART_RUN", key: root,
+        name: "Retained cart history", data: { profileId: p.id, ...(kind === "invalid" ? { abandonment: { abandonedAt: "invalid" } } : {}) } } });
+    }
+    const testRoot = cartCheckoutKey(p.id, "restricted");
+    const restricted = await message(h, p.id, "abandoned-cart", { key: `${testRoot}:first`, triggerAt: checkoutAt,
+      createdAt: enteredAt, sentAt: ago(0.7) });
+    await h.prisma.marketingResource.create({ data: { shop: h.shop, kind: "CART_RUN", key: testRoot,
+      name: "Restricted test", data: { profileId: p.id, testEmail: p.email, abandonment: { abandonedAt: enteredAt.toISOString() } } } });
+    const welcome = await message(h, p.id, "welcome", { triggerAt: ago(2), createdAt: enteredAt, sentAt: ago(0.8) });
+    for (const report of [await flowReport("abandoned-cart"), await cartReport()]) {
+      for (const m of messages) {
+        const activity = report.activity.find(item => item.id === m.id)!;
+        assert.equal(activity.enteredAt, enteredAt.toISOString());
+        assert.equal(activity.checkoutStartedAt, checkoutAt.toISOString());
+      }
+      assert.equal(report.activity.some(item => item.id === restricted.id), false);
+    }
+    const welcomeActivity = (await flowReport("welcome")).activity.find(item => item.id === welcome.id)!;
+    assert.equal(welcomeActivity.enteredAt, welcome.triggerAt!.toISOString());
+    assert.equal(welcomeActivity.checkoutStartedAt, null);
+  }));
+
   test("flow reports: Welcome counts unique engagement, recipients and buyers with per-email sales and separate currencies", async () => customerReportTest(context(), "welcome-metrics", async h => {
     const { flowReport } = await import("../lib/marketing/flow-report");
     const { marketingAnalytics } = await import("../lib/marketing/analytics");
