@@ -106,6 +106,72 @@ async function offerFixture(context: Context, name: string, work: (h: Context & 
 }
 
 export function registerCartDiscountTests(context: () => Context) {
+  test("cart shared discount: removing the final offer blocks allocation and Shopify requests for 15 percent", async () => offerFixture(context(), "final-removed-unallocated", async h => {
+    const { CartDiscountStopped } = await import("../lib/marketing/cart-discount");
+    const flow = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: h.shop, kind: "FLOW", key: "abandoned-cart" } } });
+    const config = validateFlow("abandoned-cart", flow.data);
+    await h.prisma.marketingResource.update({ where: { id: flow.id }, data: { data: h.store.json({ ...config, cart: { ...config.cart, finalOfferEnabled: false } }) } });
+    await h.stage(15);
+    await assert.rejects(h.ensure(15), error => {
+      assert.ok(error instanceof CartDiscountStopped); assert.match(error.message, /final offer|15%/i); return true;
+    });
+    assert.equal(h.state.lookups, 0); assert.equal(h.state.creates, 0); assert.equal(h.state.upgrades, 0);
+    assert.equal(await h.prisma.marketingResource.count({ where: { shop: h.shop, kind: "CART_COUPON", key: h.root } }), 0);
+  }));
+
+  test("cart shared discount: removing the final offer preserves the existing 10 percent allocation and retries", async () => offerFixture(context(), "final-removed-existing10", async h => {
+    const { CartDiscountStopped } = await import("../lib/marketing/cart-discount");
+    const initial = await h.ensure(10), remote = structuredClone(h.state.remote);
+    const coupon = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: h.shop, kind: "CART_COUPON", key: h.root } } });
+    const flow = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: h.shop, kind: "FLOW", key: "abandoned-cart" } } });
+    const config = validateFlow("abandoned-cart", flow.data), lookups = h.state.lookups;
+    await h.prisma.marketingResource.update({ where: { id: flow.id }, data: { data: h.store.json({ ...config, cart: { ...config.cart, finalOfferEnabled: false } }) } });
+    await h.stage(15);
+    await assert.rejects(h.ensure(15), error => {
+      assert.ok(error instanceof CartDiscountStopped); assert.match(error.message, /final offer|15%/i); return true;
+    });
+    assert.equal(h.state.lookups, lookups); assert.equal(h.state.upgrades, 0); assert.deepEqual(h.state.remote, remote);
+    assert.deepEqual((await h.prisma.marketingResource.findUniqueOrThrow({ where: { id: coupon.id } })).data, coupon.data);
+    await h.stage(10);
+    assert.deepEqual(await h.ensure(10), initial, "the retained offer can still verify and retry with its original code and dates");
+    assert.equal(h.state.creates, 1); assert.equal(h.state.upgrades, 0);
+  }));
+
+  test("cart shared discount: removing the final offer during lookup prevents a 15 percent mutation", async () => offerFixture(context(), "final-removed-lookup", async h => {
+    const { CartDiscountStopped } = await import("../lib/marketing/cart-discount");
+    await h.ensure(10);
+    const coupon = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: h.shop, kind: "CART_COUPON", key: h.root } } });
+    const remote = structuredClone(h.state.remote), nextLookup = h.state.lookups + 1;
+    await h.stage(15);
+    h.state.onLookup = async (_code, count) => {
+      if (count !== nextLookup) return;
+      const flow = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: h.shop, kind: "FLOW", key: "abandoned-cart" } } });
+      const config = validateFlow("abandoned-cart", flow.data);
+      await h.prisma.marketingResource.update({ where: { id: flow.id }, data: { data: h.store.json({ ...config, cart: { ...config.cart, finalOfferEnabled: false } }) } });
+    };
+    await assert.rejects(h.ensure(15), error => {
+      assert.ok(error instanceof CartDiscountStopped); assert.match(error.message, /final offer|15%/i); return true;
+    });
+    assert.equal(h.state.creates, 1); assert.equal(h.state.upgrades, 0); assert.deepEqual(h.state.remote, remote);
+    assert.deepEqual((await h.prisma.marketingResource.findUniqueOrThrow({ where: { id: coupon.id } })).data, coupon.data);
+  }));
+
+  test("cart shared discount: removing the final email never downgrades an already issued 15 percent code", async () => offerFixture(context(), "final-removed-existing15", async h => {
+    const { CartDiscountStopped } = await import("../lib/marketing/cart-discount");
+    await h.ensure(10); await h.stage(15);
+    const upgraded = await h.ensure(15), remote = structuredClone(h.state.remote);
+    const coupon = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: h.shop, kind: "CART_COUPON", key: h.root } } });
+    const flow = await h.prisma.marketingResource.findUniqueOrThrow({ where: { shop_kind_key: { shop: h.shop, kind: "FLOW", key: "abandoned-cart" } } });
+    const config = validateFlow("abandoned-cart", flow.data), lookups = h.state.lookups;
+    await h.prisma.marketingResource.update({ where: { id: flow.id }, data: { data: h.store.json({ ...config, cart: { ...config.cart, finalOfferEnabled: false } }) } });
+    await assert.rejects(h.ensure(15), error => {
+      assert.ok(error instanceof CartDiscountStopped); assert.match(error.message, /final offer|15%/i); return true;
+    });
+    assert.equal(upgraded.percentage, 15); assert.equal(h.state.lookups, lookups); assert.equal(h.state.creates, 1); assert.equal(h.state.upgrades, 1);
+    assert.deepEqual(h.state.remote, remote);
+    assert.deepEqual((await h.prisma.marketingResource.findUniqueOrThrow({ where: { id: coupon.id } })).data, coupon.data);
+  }));
+
   test("cart shared discount: known previous buyers cannot allocate or upgrade an offer", async () => offerFixture(context(), "returning-buyer", async h => {
     const { CartDiscountStopped } = await import("../lib/marketing/cart-discount");
     await h.prisma.marketingProfile.update({ where: { id: h.profileId }, data: { lastOrderAt: new Date(Date.now() - hour) } });

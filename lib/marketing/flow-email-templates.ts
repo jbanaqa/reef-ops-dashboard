@@ -1,5 +1,6 @@
 import type { FlowConfig } from "./flow-config";
 import type { Content } from "./rules";
+import { cartFinalOfferEnabled } from "./cart-config";
 
 type FlowResource = { id: string; key: string; kind: string; data: unknown };
 
@@ -28,7 +29,7 @@ export function flowEmailTemplates(resources: FlowResource[]): FlowEmailTemplate
     if (resource.kind !== "FLOW" || !names[resource.key]) continue;
     const flow = resource.data as Partial<FlowConfig>;
     const labels = resource.key === "abandoned-cart" && flow.cart?.recoveryVersion === 2
-      ? ["Cart reminder", "Cart offer · 10%", "Cart final offer · 15%"] : names[resource.key];
+      ? !cartFinalOfferEnabled(flow.cart) ? ["Cart reminder", "Cart offer · 10%"] : ["Cart reminder", "Cart offer · 10%", "Cart final offer · 15%"] : names[resource.key];
     for (const [index, label] of labels.entries()) {
       const step = flow.steps?.[index];
       if (step?.channel !== "EMAIL" || !step.content || !step.subject) continue;

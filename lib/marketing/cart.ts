@@ -8,7 +8,7 @@ import { FlowConfig, validateFlow } from "./flow-config";
 import { atomic, json, record, shop, Tx } from "./store";
 import { setup } from "./delivery";
 import { saveCartConfig, resolveCartConfig, saveCartContent } from "./cart-storage";
-import { CART_EXPIRY_MINUTES, CART_UNAVAILABLE_REASON } from "./cart-config";
+import { CART_EXPIRY_MINUTES, CART_UNAVAILABLE_REASON, CART_FINAL_OFFER_DISABLED, cartFinalOfferEnabled } from "./cart-config";
 import { cartMerchandiseBlock, isCartServiceLine, isCartMerchandiseBlock, type CartMerchandise } from "./cart-merchandise";
 import { stageCartAbandonment, verifyCartAbandonmentAccess, type CartAbandonment } from "./cart-abandonment";
 import { cartSequenceVersion, cartStage, cartPreviousStage, cartNextStage, cartStageMinutes, cartStepIndex, isCartCondition } from "./cart-sequence";
@@ -99,6 +99,13 @@ export async function cancelCart(tx: Tx, runKey: string, reason: string) {
   }
   await tx.marketingMessage.updateMany({ where: { shop: shop(), flowKey: "abandoned-cart",
     key: { in: ["sms", "first", "final", "discount10", "discount15"].map(stage => runKey + ":" + stage) }, status: "PENDING" }, data: { status: "CANCELLED", error: reason } });
+}
+
+/** Removing an offer preserves the reminder, 10% offer and all delivery history. */
+export async function cancelDisabledCartFinals(tx: Tx) {
+  return tx.marketingMessage.updateMany({ where: { shop: shop(), flowKey: "abandoned-cart", channel: "EMAIL",
+    flowCondition: "cart-v2:discount15", status: "PENDING" },
+  data: { status: "CANCELLED", error: CART_FINAL_OFFER_DISABLED } });
 }
 
 /** Read ownership/activity inside the claim and again immediately before sending. */
@@ -239,7 +246,8 @@ export async function enrollCart(
   await record(tx, { key: "cart-abandonment:" + profileId + ":" + abandonment.id,
     type: "CART_ABANDONMENT_CONFIRMED", profileId, occurredAt: abandonedAt,
     payload: { abandonmentId: abandonment.id, checkoutId: abandonment.checkoutId } });
-  const rows = sequenceVersion === 2 ? config.steps.flatMap((step, index) => profile.lastOrderAt && index > 0 ? [] : [{
+  const rows = sequenceVersion === 2 ? config.steps.flatMap((step, index) =>
+    (profile.lastOrderAt && index > 0) || (index === 2 && !cartFinalOfferEnabled(config.cart)) ? [] : [{
     id: ["first", "discount10", "discount15"][index], channel: "EMAIL", subject: step.subject, c: step.content,
     minutes: config.steps.slice(0, index + 1).reduce((sum, item) => sum + item.minutes, 0),
   }]) : [
@@ -351,6 +359,7 @@ export async function loadCart(key: string): Promise<CartRun> {
       ) : run.config.steps,
       orderBranch: sameLegacySequence ? live.orderBranch : run.config.orderBranch,
       cart: { ...savedCart,
+        finalOfferEnabled: live.cart!.finalOfferEnabled,
         minimumSubtotal: live.cart!.minimumSubtotal,
         productCount: live.cart!.productCount,
         testEmail: live.cart!.testEmail,
@@ -644,16 +653,18 @@ export async function advanceCart(
   });
   if (!next || next.status !== "PENDING") return;
   const where = { shop: shop(), kind: "CART_WAIT", key: next.id };
-  if (
-    await tx.marketingResource.findUnique({ where: { shop_kind_key: where } })
-  )
-    return;
   const row = await tx.marketingResource.findUnique({
     where: {
       shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" },
     },
   });
   const live = validateFlow("abandoned-cart", row?.data);
+  if (nextStage === "discount15" && !cartFinalOfferEnabled(live.cart)) {
+    await tx.marketingMessage.updateMany({ where: { id: next.id, status: "PENDING" },
+      data: { status: "CANCELLED", error: CART_FINAL_OFFER_DISABLED } });
+    return;
+  }
+  if (await tx.marketingResource.findUnique({ where: { shop_kind_key: where } })) return;
   let config = live;
   if (sequenceVersion === 2 || live.cart?.recoveryVersion === 2) {
     const saved = await tx.marketingResource.findUniqueOrThrow({ where: {

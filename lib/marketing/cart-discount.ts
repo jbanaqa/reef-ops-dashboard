@@ -4,6 +4,7 @@ import { json, shop } from "./store";
 import { shopifyGraphql } from "./shopify";
 import type { SavedDiscount } from "./discounts";
 import { ShopifyRequestNotExecutedError } from "@/lib/shopify-request-error";
+import { cartFinalOfferBlock, type CartConfig } from "./cart-config";
 
 export type SavedCartDiscount = SavedDiscount & {
   version: 2;
@@ -89,7 +90,7 @@ export async function ensureCartDiscount(runKey: string, profileId: string, perc
 
 async function runOwner(runKey: string, profileId: string, percentage: 10 | 15) {
   const tenant = shop(), stage = percentage === 10 ? "discount10" : "discount15";
-  const [run, active, profile, message, previous] = await Promise.all([
+  const [run, active, profile, message, previous, flow] = await Promise.all([
     prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: tenant, kind: "CART_RUN", key: runKey } } }),
     prisma.marketingResource.findUnique({ where: { shop_kind_key: { shop: tenant, kind: "CART_ACTIVE", key: profileId } } }),
     prisma.marketingProfile.findFirst({ where: { shop: tenant, id: profileId }, select: { email: true, lastOrderAt: true } }),
@@ -97,7 +98,11 @@ async function runOwner(runKey: string, profileId: string, percentage: 10 | 15) 
       flowKey: "abandoned-cart", channel: "EMAIL", flowCondition: "cart-v2:" + stage } }),
     prisma.marketingMessage.findFirst({ where: { shop: tenant, key: runKey + (percentage === 10 ? ":first" : ":discount10"),
       profileId, flowKey: "abandoned-cart", channel: "EMAIL" } }),
+    percentage === 15 ? prisma.marketingResource.findUnique({ where: {
+      shop_kind_key: { shop: tenant, kind: "FLOW", key: "abandoned-cart" } }, select: { data: true } }) : null,
   ]);
+  const disabled = cartFinalOfferBlock((flow?.data as { cart?: CartConfig } | undefined)?.cart, "cart-v2:" + stage);
+  if (disabled) throw new CartDiscountStopped(disabled);
   const saved = run?.data as { sequenceVersion?: number; profileId?: string; completedAt?: string; empty?: boolean;
     stockStoppedAt?: string; eligibilityStopped?: string; stop?: string } | undefined;
   if (!saved || saved.sequenceVersion !== 2 || saved.profileId !== profileId ||

@@ -115,6 +115,52 @@ const { chromium } = require("playwright");
     }
     saved = await page.evaluate(() => JSON.parse(localStorage.getItem("threeStepSaved")));
     assert.equal(saved.data.steps.length, 3);
+    const storedThird = structuredClone(saved.data.steps[2]);
+    await page.getByLabel("Send final 15% offer", { exact: true }).uncheck();
+    assert.equal(await map.getByText("Email #3 · 15% final offer", { exact: true }).count(), 0);
+    assert.equal(await map.getByText("Wait 25 hours", { exact: true }).count(), 0);
+    assert.ok(!(await map.innerText()).includes("15%"), "The active map no longer suggests an upgrade");
+    await map.getByText("Yes: continue to the 10% offer. No: stop after email #1.", { exact: true }).waitFor();
+    await map.getByText("Personal code · 10% off", { exact: true }).click();
+    const remainingCoupon = page.getByRole("dialog");
+    assert.equal(await remainingCoupon.getByLabel("Code valid for (days)", { exact: true }).inputValue(), "8");
+    assert.ok(!(await remainingCoupon.innerText()).includes("15%"));
+    await remainingCoupon.getByText("Starts when the 10% code is created.", { exact: true }).waitFor();
+    await remainingCoupon.getByRole("button", { name: "Close editor", exact: true }).click();
+    await page.getByRole("button", { name: "Save flow", exact: true }).click();
+    await page.getByText("Flow saved, including copy and artwork.", { exact: true }).waitFor();
+    saved = await page.evaluate(() => JSON.parse(localStorage.getItem("threeStepSaved")));
+    assert.equal(saved.data.cart.finalOfferEnabled, false);
+    assert.deepEqual(saved.data.steps[2], storedThird, "Removing the active final offer retains its saved copy and history reference");
+    assert.deepEqual(saved.data.steps.slice(0, 2).map(step => step.subject), ["Custom first subject", "Custom 10% subject"]);
+    assert.equal(saved.data.cart.couponHours, 192, "Removing the final offer cannot reset the configured code lifetime");
+    const summary = JSON.parse(await page.locator("#saved-flow-summary").textContent());
+    assert.equal(summary.count, 2);
+    assert.deepEqual(summary.templates, ["Cart reminder", "Cart offer · 10%"], "Inactive final copy is not offered as a current flow template");
+    await page.reload();
+    await map.getByText("Email #2 · 10% offer", { exact: true }).waitFor();
+    assert.equal(await page.getByLabel("Send final 15% offer", { exact: true }).isChecked(), false);
+    assert.equal(await map.getByText("Email #3 · 15% final offer", { exact: true }).count(), 0);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 1100 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Two-email map has no overflow at " + width);
+      const file = path.join(output, `cart-final-offer-removed-${width}.png`); await map.screenshot({ path: file }); screenshots.push(file);
+    }
+    await page.goto(`http://127.0.0.1:${server.address().port}/?stale=1`);
+    await map.getByText("Unfinished first-email draft", { exact: true }).waitFor();
+    assert.equal(await page.getByLabel("Send final 15% offer", { exact: true }).isChecked(), false,
+      "An unfinished draft from before removal cannot silently restore the final offer");
+    assert.equal(await map.getByText("Email #3 · 15% final offer", { exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Save flow", exact: true }).click();
+    await page.getByText("Flow saved, including copy and artwork.", { exact: true }).waitFor();
+    saved = await page.evaluate(() => JSON.parse(localStorage.getItem("threeStepSaved")));
+    assert.equal(saved.data.cart.finalOfferEnabled, false);
+    assert.equal(saved.data.steps[0].subject, "Unfinished first-email draft", "Unrelated authored draft edits are retained");
+    assert.deepEqual(saved.data.steps[2], storedThird);
+    await page.getByLabel("Send final 15% offer", { exact: true }).check();
+    await map.getByText("Email #3 · 15% final offer", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("threeStepSaved")).data.cart.finalOfferEnabled), false,
+      "Explicitly restoring the optional step remains a draft until Save flow");
     assert.deepEqual(errors, []); assert.deepEqual(apiRequests, [], "No API or email requests were made");
     const result = { result: "PASS", screenshots, savedWaits: saved.data.steps.map(step => step.minutes), couponDays: saved.data.cart.couponHours / 24 };
     await fs.writeFile(path.join(output, "cart-three-step-browser.json"), JSON.stringify(result, null, 2));

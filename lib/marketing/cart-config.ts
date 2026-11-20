@@ -4,10 +4,12 @@ import type { FlowConfig } from "./flow-config";
 export const CART_EXPIRY_MINUTES = 3 * 24 * 60;
 export const CART_UNAVAILABLE_REASON = "No purchasable items remain in this checkout";
 export const CART_OFFER_EXPIRY_BUFFER_MINUTES = 60;
+export const CART_FINAL_OFFER_DISABLED = "15% cart offer is disabled";
 
 export type CartConfig = {
   version: 1;
   recoveryVersion?: 2;
+  finalOfferEnabled?: boolean;
   couponHours?: number;
   productCount: number;
   minimumSubtotal?: number;
@@ -17,6 +19,9 @@ export type CartConfig = {
   bypassRecentEmailSuppression?: boolean;
 };
 export const defaultCartConfig: CartConfig = { version: 1, productCount: 6, minimumSubtotal: 100 };
+export const cartFinalOfferEnabled = (cart?: Pick<CartConfig, "finalOfferEnabled">) => cart?.finalOfferEnabled !== false;
+export const cartFinalOfferBlock = (cart: Pick<CartConfig, "finalOfferEnabled"> | undefined, condition: string | null) =>
+  condition === "cart-v2:discount15" && !cartFinalOfferEnabled(cart) ? CART_FINAL_OFFER_DISABLED : null;
 /** Keep the final upgrade possible even with a short preparation delay. */
 export function cartOfferSettingsError(flow: Pick<FlowConfig, "cart" | "steps">): string | null {
   if (flow.cart?.recoveryVersion !== 2) return null;
@@ -24,6 +29,7 @@ export function cartOfferSettingsError(flow: Pick<FlowConfig, "cart" | "steps">)
   const finalWait = flow.steps[2]?.minutes;
   if (!Number.isInteger(lifetime) || lifetime < 1 || lifetime > 8760)
     return "Choose a code lifetime from 1 hour to 365 days.";
+  if (!cartFinalOfferEnabled(flow.cart)) return null;
   if (typeof finalWait !== "number" || !Number.isFinite(finalWait) || finalWait < 0) return null;
   return lifetime * 60 < finalWait + CART_OFFER_EXPIRY_BUFFER_MINUTES
     ? "The code must stay valid for at least 1 hour beyond the final email wait. Increase its lifetime or shorten the last wait."
@@ -35,6 +41,7 @@ export function validateCart(value: unknown): CartConfig {
     !c ||
     c.version !== 1 ||
     (c.recoveryVersion !== undefined && c.recoveryVersion !== 2) ||
+    (c.finalOfferEnabled !== undefined && typeof c.finalOfferEnabled !== "boolean") ||
     !Number.isInteger(c.productCount) ||
     c.productCount < 0 ||
     c.productCount > 12
@@ -56,6 +63,7 @@ export function validateCart(value: unknown): CartConfig {
   return {
     version: 1,
     ...(c.recoveryVersion === 2 ? { recoveryVersion: 2, couponHours } : {}),
+    ...(c.finalOfferEnabled !== undefined ? { finalOfferEnabled: c.finalOfferEnabled } : {}),
     productCount: c.productCount,
     minimumSubtotal,
     sendStartHour,

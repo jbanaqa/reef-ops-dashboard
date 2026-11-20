@@ -56,6 +56,27 @@ export function registerFlowDesignRolloutTests(context: () => Context) {
     assert.equal(await h.prisma.marketingResource.count({ where: { shop: h.shop, kind: "FLOW_DESIGN_ROLLOUT" } }), 0);
   }));
 
+  test("flow design rollout: removed Cart final offer is absent from active previews and retains stored copy", async () => isolated(context(), "design-no-final", async h => {
+    const { previewCoralsFlowDesign, applyCoralsFlowDesign } = await import("../lib/marketing/flow-design-rollout");
+    const { flowEmailTemplates } = await import("../lib/marketing/flow-email-templates");
+    const { validateFlow } = await import("../lib/marketing/flow-config");
+    const config = validateFlow("abandoned-cart", threeStepCartDraft(h.f));
+    config.cart = { ...config.cart!, finalOfferEnabled: false };
+    const before = await h.prisma.marketingResource.update({ where: { id: h.flowId }, data: { data: h.store.json(config) } });
+    const retainedFinal = (before.data as unknown as typeof config).steps[2];
+    const preview = await previewCoralsFlowDesign();
+    assert.equal(preview.emailCount, 8);
+    assert.ok(!preview.samples.some(sample => sample.key === "abandoned-cart:2"));
+    const result = await applyCoralsFlowDesign(preview.fingerprint);
+    assert.equal(result.emails, 8);
+    const saved = await h.prisma.marketingResource.findUniqueOrThrow({ where: { id: h.flowId } });
+    const flow = saved.data as unknown as typeof config;
+    assert.equal(flow.cart?.finalOfferEnabled, false);
+    assert.deepEqual(flow.steps[2], retainedFinal, "inactive historical copy is never changed by active design rollout");
+    assert.deepEqual(flowEmailTemplates([saved]).map(template => template.name), ["Cart reminder", "Cart offer · 10%"]);
+    assert.equal(h.emails.length, 0);
+  }));
+
   test("flow design rollout: only unattempted waiting emails change; prepared retries, history, campaigns and SMS stay intact", async () => isolated(context(), "design-messages", async h => {
     const { previewCoralsFlowDesign, applyCoralsFlowDesign } = await import("../lib/marketing/flow-design-rollout");
     await settings(h); const p = await h.make("design-scope@example.com");

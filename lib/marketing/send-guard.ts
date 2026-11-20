@@ -5,7 +5,7 @@ import { setup } from "./delivery";
 import { customerMarketingFlows, masterAudienceAllows } from "./master-audience";
 import { campaignConsentEligible, resolveCampaignAudience, resolvedAudienceMatches } from "./campaign-audience";
 import { cancelCart, currentCart, cartDependency, cartRunKey, cartSequenceStop, advanceCart, type CartRun } from "./cart";
-import { cartTestBlock } from "./cart-config";
+import { cartTestBlock, cartFinalOfferBlock, CART_FINAL_OFFER_DISABLED } from "./cart-config";
 import { cartEmailNextAllowed } from "./cart-schedule";
 import { validateFlow } from "./flow-config";
 import { cartBuyerProofValid, isCartFollowup, CART_RETURNING_CUSTOMER, CART_BUYER_WAIT, type CartBuyerCheck } from "./cart-buyer";
@@ -30,7 +30,7 @@ export async function authorizeDelivery(handoff: Handoff): Promise<boolean> {
       +m.attemptedAt !== +handoff.attemptedAt) return false;
     const cart = handoff.cartRun;
     const stop = async (reason: string, terminal = true, until = new Date(Date.now() + 900000)) => {
-      if (terminal && cart && m.channel === "EMAIL") await cancelCart(tx, cartRunKey(m.key), reason);
+      if (terminal && cart && m.channel === "EMAIL" && reason !== CART_FINAL_OFFER_DISABLED) await cancelCart(tx, cartRunKey(m.key), reason);
       await tx.marketingMessage.update({ where: { id: m.id }, data: {
         status: terminal ? "CANCELLED" : "PENDING", error: reason, ...(terminal ? {} : { dueAt: until }),
       } });
@@ -73,6 +73,8 @@ export async function authorizeDelivery(handoff: Handoff): Promise<boolean> {
       return stop("B2B audience changed during preparation");
     if (cart) {
       const live = validateFlow("abandoned-cart", flow!.data);
+      const inactive = cartFinalOfferBlock(live.cart, m.flowCondition);
+      if (inactive) return stop(inactive);
       const latest = await currentCart(tx, m.key, { ...cart, config: { ...cart.config, cart: live.cart } });
       const reason = latest.stop || cartTestBlock(live.cart, latest, m.profile.email, m.channel) ||
         await cartSequenceStop(tx, m.key, m.flowCondition) ||

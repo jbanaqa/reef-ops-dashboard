@@ -1,4 +1,4 @@
-import { CartConfig, validateCart, cartOfferSettingsError, CART_EXPIRY_MINUTES } from "./cart-config";
+import { CartConfig, validateCart, cartOfferSettingsError, cartFinalOfferEnabled, CART_EXPIRY_MINUTES } from "./cart-config";
 import { StockConfig, validateStock } from "./stock-config";
 import { defaultContent } from "./rules";
 import { validateWelcome, type WelcomeConfig } from "./welcome-config";
@@ -150,7 +150,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     if (!b) throw new Error("Both legacy branch objects are required.");
     return { subject: subject(b.subject), content: content(b.content) };
   };
-  if (f.cart && (cartV2 ? steps.reduce((total, step) => total + step.minutes, 0)
+  if (f.cart && (cartV2 ? steps.filter((_, index) => index !== 2 || cartFinalOfferEnabled(f.cart)).reduce((total, step) => total + step.minutes, 0)
     : steps[0].minutes + minutes(f.smsMinutes, 30) + minutes(f.branchMinutes, 1440)) >= CART_EXPIRY_MINUTES)
     throw new Error("Cart recovery stops after 72 hours without checkout activity. Keep the total waits below 72 hours.");
   const cart = key === "abandoned-cart" && f.cart ? validateCart(f.cart) : undefined;
@@ -204,7 +204,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
 /** Shared by enrollment and the editor map. V2 cart waits follow the preceding successful email; legacy waits retain their original meaning. */
 export function flowSequence(key: string, f: FlowConfig): PlannedStep[] {
   const steps = (
-    key === "abandoned-cart" && f.cart?.recoveryVersion === 2 ? f.steps :
+    key === "abandoned-cart" && f.cart?.recoveryVersion === 2 ? f.steps.filter((_, index) => index !== 2 || cartFinalOfferEnabled(f.cart)) :
     key === "abandoned-cart" && f.orderBranch ? f.steps.slice(0, 1) : f.steps
   ).map((s, index) => ({
     ...s,

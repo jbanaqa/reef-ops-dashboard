@@ -18,7 +18,7 @@ import {
   campaignConsentEligible,
 } from "@/lib/marketing/campaign-audience";
 import { cartProducts } from "@/lib/marketing/cart";
-import { cartReadiness } from "@/lib/marketing/cart";
+import { cartReadiness, cancelDisabledCartFinals } from "@/lib/marketing/cart";
 import { CART_ABANDONMENT_STATE_KEY } from "@/lib/marketing/cart-abandonment";
 import { readStock, lowStock } from "@/lib/marketing/stock";
 import { validateStock } from "@/lib/marketing/stock-config";
@@ -1341,7 +1341,7 @@ async function postMarketing(request: Request) {
     if (b.action === "save-resource") {
       if (!["SEGMENT", "TEMPLATE", "FLOW"].includes(b.kind))
         throw new Error("Unsupported resource.");
-      let data;
+      let data: ReturnType<typeof json>;
       if (b.kind === "SEGMENT") {
         const current = await prisma.marketingResource.findUnique({
           where: { shop_kind_key: { shop: shop(), kind: "SEGMENT", key: String(b.key || "") } },
@@ -1351,10 +1351,13 @@ async function postMarketing(request: Request) {
           throw new Error("This audience is aligned directly from Klaviyo; its membership is managed by the scoped alignment.");
       }
       if (b.kind === "FLOW") {
-        const f = validateFlow(String(b.key || ""), b.data);
         const current = await prisma.marketingResource.findUnique({
           where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: String(b.key || "") } },
         });
+        const incoming = b.key === "abandoned-cart" && b.data?.cart?.finalOfferEnabled === undefined &&
+          (current?.data as { cart?: { finalOfferEnabled?: boolean } })?.cart?.finalOfferEnabled === false
+          ? { ...b.data, cart: { ...b.data?.cart, finalOfferEnabled: false } } : b.data;
+        const f = validateFlow(String(b.key || ""), incoming);
         if (current && flowTestEmail(String(b.key || ""), current.data as unknown as ReturnType<typeof validateFlow>) !== flowTestEmail(String(b.key || ""), f))
           throw new Error("Change the real-flow test address in the Test this flow panel.");
         if (b.enabled && !f.reviewed)
@@ -1372,7 +1375,18 @@ async function postMarketing(request: Request) {
       } else
         data = json(b.kind === "SEGMENT" ? segment(b.data) : content(b.data));
       const key = String(b.key || crypto.randomUUID()).slice(0, 100);
-      const result = await prisma.marketingResource.upsert({
+      const result = await atomic(async tx => {
+        if (b.kind === "FLOW" && key === "abandoned-cart" && b.data?.cart?.finalOfferEnabled === undefined) {
+          // A stale editor that does not know this control cannot restore a removed offer.
+          const current = await tx.marketingResource.findUnique({ where: {
+            shop_kind_key: { shop: shop(), kind: "FLOW", key },
+          }, select: { data: true } });
+          if ((current?.data as { cart?: { finalOfferEnabled?: boolean } })?.cart?.finalOfferEnabled === false) {
+            const flow = data as unknown as ReturnType<typeof validateFlow>;
+            data = json(validateFlow(key, { ...flow, cart: { ...flow.cart, finalOfferEnabled: false } }));
+          }
+        }
+        const result = await tx.marketingResource.upsert({
         where: { shop_kind_key: { shop: shop(), kind: b.kind, key } },
         create: {
           shop: shop(),
@@ -1387,15 +1401,18 @@ async function postMarketing(request: Request) {
           data,
           enabled: !!b.enabled,
         },
-      });
-      await saveDiscoveredBranding(data, b.brandingSource, { preserveExistingLogo: b.kind === "FLOW" });
-      await atomic((tx) =>
-        record(tx, {
+        });
+        const removed = b.kind === "FLOW" && key === "abandoned-cart" &&
+          (data as unknown as { cart?: { finalOfferEnabled?: boolean } }).cart?.finalOfferEnabled === false
+          ? (await cancelDisabledCartFinals(tx)).count : undefined;
+        await record(tx, {
           key: `staff:${crypto.randomUUID()}`,
           type: "CONFIG_CHANGED",
-          payload: { kind: b.kind, key, enabled: !!b.enabled },
-        }),
-      );
+          payload: { kind: b.kind, key, enabled: !!b.enabled, ...(removed !== undefined ? { cancelledCartFinalOffers: removed } : {}) },
+        });
+        return result;
+      });
+      await saveDiscoveredBranding(data, b.brandingSource, { preserveExistingLogo: b.kind === "FLOW" });
       return Response.json(result);
     }
     throw new Error("Unknown action.");

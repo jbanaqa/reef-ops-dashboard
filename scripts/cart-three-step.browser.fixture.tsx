@@ -3,7 +3,9 @@ import { createRoot } from "react-dom/client";
 import FlowEditor from "../app/our-klaviyo/FlowEditor";
 import { defaultContent, defaultMarketingSettings } from "../lib/marketing/rules";
 import { cartEmail } from "../lib/marketing/cart-config";
-import { validateFlow } from "../lib/marketing/flow-config";
+import { validateFlow, flowSequence } from "../lib/marketing/flow-config";
+import { flowEmailTemplates } from "../lib/marketing/flow-email-templates";
+import { writeDraft } from "../app/our-klaviyo/flow-drafts";
 
 const artwork = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
 const first = cartEmail("first"), offer = cartEmail("no");
@@ -16,6 +18,8 @@ const initial = { id: "three-step-editor", key: "abandoned-cart", name: "Abandon
 function App() {
   const [resource, setResource] = useState(() => JSON.parse(localStorage.getItem("threeStepSaved") || JSON.stringify(initial)));
   return <main className="marketing" style={{ maxWidth: 1200, padding: 20, margin: "auto" }}>
+    <output hidden id="saved-flow-summary">{JSON.stringify({ count: flowSequence("abandoned-cart", resource.data).length,
+      templates: flowEmailTemplates([{ ...resource, kind: "FLOW" }]).map(template => template.name) })}</output>
     <FlowEditor resource={resource} busy={false} settings={defaultMarketingSettings}
       save={async (data, enabled) => {
         const validated = validateFlow("abandoned-cart", data);
@@ -26,4 +30,14 @@ function App() {
       }} />
   </main>;
 }
-createRoot(document.getElementById("root")!).render(<App />);
+async function start() {
+  if (new URLSearchParams(location.search).has("stale")) {
+    const saved = JSON.parse(localStorage.getItem("threeStepSaved")!);
+    const flow = structuredClone(saved.data);
+    flow.cart.finalOfferEnabled = true;
+    flow.steps[0].subject = "Unfinished first-email draft";
+    await writeDraft(initial.id, { flow, enabled: saved.enabled, base: "previous saved flow" });
+  }
+  createRoot(document.getElementById("root")!).render(<App />);
+}
+void start();

@@ -7,6 +7,7 @@ import { addOrderRevenue, compactOrderEvidence, orderValue, type OrderEvidence }
 import { DAY } from "./rules";
 import { shop } from "./store";
 import { welcomeLabels } from "./welcome-config";
+import { cartFinalOfferEnabled } from "./cart-config";
 
 export type ReportedFlow = "welcome" | "abandoned-cart";
 const periods = new Set([7, 30, 90, 365]);
@@ -40,10 +41,12 @@ export async function flowReport(flowKey: ReportedFlow, requestedDays = 30, requ
   const cartFlow = flowKey === "abandoned-cart" ? await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" } }, select: { data: true },
   }) : null;
-  const currentCartVersion = (cartFlow?.data as { cart?: { recoveryVersion?: number } } | undefined)?.cart?.recoveryVersion;
+  const currentCart = (cartFlow?.data as { cart?: { recoveryVersion?: number; finalOfferEnabled?: boolean } } | undefined)?.cart;
+  const currentCartVersion = currentCart?.recoveryVersion;
   const totals = metrics();
   const steps = (flowKey === "welcome" ? welcomeLabels.map((label, index) => [String(index), label])
-    : Object.entries(cartNames)).map(([key, label]) => ({ key, label, ...metrics() }));
+    : Object.entries(cartNames)).map(([key, label]) => ({ key,
+      label: key === "v2-discount15" && !cartFinalOfferEnabled(currentCart) ? label + " (inactive)" : label, ...metrics() }));
   const byKey = new Map(steps.map(step => [step.key, step]));
   const recipientSets = new Map<Metrics, Set<string>>(), buyerSets = new Map<Metrics, Set<string>>();
   for (const row of [totals, ...steps]) { recipientSets.set(row, new Set()); buyerSets.set(row, new Set()); }

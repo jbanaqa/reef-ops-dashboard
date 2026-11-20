@@ -5,6 +5,7 @@ import {
   flowSequence,
 } from "@/lib/marketing/flow-config";
 import { welcomeLabels } from "@/lib/marketing/welcome-config";
+import { cartFinalOfferEnabled } from "@/lib/marketing/cart-config";
 type Resource = {
   key: string;
   name: string;
@@ -369,20 +370,23 @@ function CartMap({
       {line}
       {node("first", "email", "Email #1 · Cart reminder", f.steps[0].subject, { kind: "step", index: 0 })}
       {line}
-      {node("prior-orders", "condition", "No previous orders?", "Yes: continue to offers. No: stop after email #1.", { kind: "info", section: "cart-eligibility" })}
+      {node("prior-orders", "condition", "No previous orders?", !cartFinalOfferEnabled(f.cart) ? "Yes: continue to the 10% offer. No: stop after email #1." : "Yes: continue to offers. No: stop after email #1.", { kind: "info", section: "cart-eligibility" })}
       {line}
       {node("discount10-wait", "wait", "Wait " + duration(f.steps[1].minutes), "After email #1 is sent.", { kind: "wait", index: 1 })}
       {line}
       {node("discount10", "email", "Email #2 · 10% offer", f.steps[1].subject, { kind: "step", index: 1 })}
-      {line}
-      {node("discount15-wait", "wait", "Wait " + duration(f.steps[2].minutes), "After email #2 is sent.", { kind: "wait", index: 2 })}
-      {line}
-      {node("discount15", "email", "Email #3 · 15% final offer", f.steps[2].subject, { kind: "step", index: 2 })}
+      {cartFinalOfferEnabled(f.cart) && <>
+        {line}
+        {node("discount15-wait", "wait", "Wait " + duration(f.steps[2].minutes), "After email #2 is sent.", { kind: "wait", index: 2 })}
+        {line}
+        {node("discount15", "email", "Email #3 · 15% final offer", f.steps[2].subject, { kind: "step", index: 2 })}
+      </>}
       {line}
       {node("end", "end", "End", "Purchase, unsubscribe or suppression stops the remaining emails.")}
       <div className="mk-cart-tools">
         {node("products", "condition", "Product recommendations", "Cart items first, then popular products from the last 3 days.", { kind: "info", section: "products" })}
-        {node("coupon", "condition", "One code · 10% → 15%", "Email #3 upgrades the same code. Its expiration does not reset.", { kind: "info", section: "coupon" })}
+        {node("coupon", "condition", !cartFinalOfferEnabled(f.cart) ? "Personal code · 10% off" : "One code · 10% → 15%",
+          !cartFinalOfferEnabled(f.cart) ? "Single-use code. Expires after the configured lifetime." : "Email #3 upgrades the same code. Its expiration does not reset.", { kind: "info", section: "coupon" })}
       </div>
     </div>
   );

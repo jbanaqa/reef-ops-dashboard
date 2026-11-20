@@ -5,6 +5,7 @@ import { attributionConfiguration, attributedOrders } from "./attribution";
 import { customerCartMessages } from "./cart-report-scope";
 import { cartActivityTiming } from "./cart-report-timing";
 import { addOrderRevenue, orderValue } from "./order-evidence";
+import { cartFinalOfferEnabled } from "./cart-config";
 const names: Record<string, string> = {
   "v2-first": "Email #1 · Cart reminder",
   "v2-discount10": "Email #2 · 10% offer",
@@ -21,10 +22,11 @@ export async function cartReport() {
   const savedFlow = await prisma.marketingResource.findUnique({
     where: { shop_kind_key: { shop: shop(), kind: "FLOW", key: "abandoned-cart" } }, select: { data: true },
   });
-  const currentVersion = (savedFlow?.data as { cart?: { recoveryVersion?: number } } | undefined)?.cart?.recoveryVersion;
+  const currentCart = (savedFlow?.data as { cart?: { recoveryVersion?: number; finalOfferEnabled?: boolean } } | undefined)?.cart;
+  const currentVersion = currentCart?.recoveryVersion;
   const rows = Object.entries(names).map(([key, label]) => ({
     key,
-    label,
+    label: key === "v2-discount15" && !cartFinalOfferEnabled(currentCart) ? label + " (inactive)" : label,
     waiting: 0,
     sent: 0,
     delivered: 0,

@@ -39,6 +39,7 @@ function flowDesign(value: unknown, key: string) {
   const next = { ...data };
   if (Array.isArray(data.steps)) next.steps = data.steps.map((raw, index) => {
     const step = object(raw);
+    if (key === "abandoned-cart" && index === 2 && object(data.cart).finalOfferEnabled === false) return raw;
     if (step.channel !== "EMAIL" || !step.content) return raw;
     const changed = design(step.content, key, index);
     entries.push({ path: `steps.${index}.content`, before: presentation(step.content), key: `${key}:${index}`, content: changed as Content });

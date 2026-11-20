@@ -31,6 +31,7 @@ import { registerFlowBrandingTests } from "./flow-branding.integration";
 import { registerCartBuyerTests } from "./cart-buyer.integration";
 import { registerCartAbandonmentRetryTests } from "./cart-abandonment-retry.integration";
 import { registerCartSettingsTests } from "./cart-settings.integration";
+import { registerCartFinalOfferTests } from "./cart-final-offer.integration";
 import { registerCoralsReefTests } from "./corals-reef.integration";
 import { registerFlowDesignRolloutTests } from "./flow-design-rollout.integration";
 
@@ -84,6 +85,7 @@ registerFlowBrandingTests(() => ({ prisma, store, ingest, worker }));
 registerCartBuyerTests(() => ({ prisma, store, ingest, worker }));
 registerCartAbandonmentRetryTests(() => ({ prisma, store, ingest, worker }));
 registerCartSettingsTests(() => ({ prisma, store, ingest, worker }));
+registerCartFinalOfferTests(() => ({ prisma, store, ingest, worker }));
 registerCoralsReefTests(() => ({ prisma, store, ingest, worker }));
 registerFlowDesignRolloutTests(() => ({ prisma, store, ingest, worker }));
 before(async () => {

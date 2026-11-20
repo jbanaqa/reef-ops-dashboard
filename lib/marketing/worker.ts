@@ -4,7 +4,7 @@ import { cartStepIndex, isCartCondition } from "./cart-sequence";
 import { ensureCartDiscount, CartDiscountStopped } from "./cart-discount";
 import { cartBuyerHistory, cartBuyerProofValid, isCartFollowup, CART_RETURNING_CUSTOMER, CART_BUYER_WAIT, type CartBuyerCheck } from "./cart-buyer";
 import { authorizeDelivery } from "./send-guard";
-import { cartTestBlock, type CartConfig } from "./cart-config";
+import { cartTestBlock, cartFinalOfferBlock, CART_FINAL_OFFER_DISABLED, type CartConfig } from "./cart-config";
 import { customerMarketingFlows, masterAudienceAllows } from "./master-audience";
 import {
   CartRun,
@@ -491,6 +491,12 @@ export async function runMarketing(onlyMessageId?: string) {
     if (isCartCondition(candidate.flowCondition)) {
       try {
         cartRun = await loadCart(candidate.key);
+        const inactive = cartFinalOfferBlock(cartRun.config.cart, candidate.flowCondition);
+        if (inactive) {
+          await prisma.marketingMessage.updateMany({ where: { id: candidate.id, status: "PENDING" },
+            data: { status: "CANCELLED", error: inactive } });
+          continue;
+        }
         const p = await prisma.marketingProfile.findUniqueOrThrow({
           where: { id: candidate.profileId },
         });
@@ -723,6 +729,11 @@ export async function runMarketing(onlyMessageId?: string) {
           }
         }
         if (m.flowKey === "abandoned-cart") {
+          const inactive = cartFinalOfferBlock((f?.data as { cart?: CartConfig })?.cart, m.flowCondition);
+          if (inactive) {
+            await tx.marketingMessage.update({ where: { id: m.id }, data: { status: "CANCELLED", error: inactive } });
+            return null;
+          }
           const testBlock = cartTestBlock(
             (f?.data as { cart?: CartConfig })?.cart,
             cartRun,
@@ -1391,7 +1402,7 @@ export async function runMarketing(onlyMessageId?: string) {
         } catch (error) {
           if (error instanceof CartDiscountStopped) {
             await atomic(async tx => {
-              await cancelCart(tx, cartRunKey(message.key), error.message);
+              if (error.message !== CART_FINAL_OFFER_DISABLED) await cancelCart(tx, cartRunKey(message.key), error.message);
               await tx.marketingMessage.update({ where: { id: message.id }, data: { status: "CANCELLED", error: error.message } });
             });
             continue;

@@ -30,7 +30,7 @@ import {
 } from "@/lib/marketing/welcome-config";
 import { readDraft, writeDraft } from "./flow-drafts";
 
-import { threeStepCartDraft, cartOfferSettingsError, CartConfig } from "@/lib/marketing/cart-config";
+import { threeStepCartDraft, cartOfferSettingsError, cartFinalOfferEnabled, CartConfig } from "@/lib/marketing/cart-config";
 import { FlowConfig, FlowTarget } from "@/lib/marketing/flow-config";
 
 type Step = {
@@ -115,14 +115,19 @@ function FlowEditorState({
   ) => void | Promise<unknown>;
 }) {
   const { marketingFetch, brand } = useMarketingBrand();
-  const upgrade = (data: Data) =>
-    resource.key === "abandoned-cart"
+  const upgrade = (data: Data) => {
+    const next = resource.key === "abandoned-cart"
       ? threeStepCartDraft(data as FlowConfig)
       : resource.key === "welcome"
         ? welcomeDraft(data as FlowConfig)
         : resource.key === "delivery-upsell"
           ? deliveryUpsellDraft(data as FlowConfig)
         : data;
+    // An older unfinished browser draft must not revive a final offer removed from the saved flow.
+    return resource.key === "abandoned-cart" && (resource.data.cart as CartConfig | undefined)?.finalOfferEnabled === false && next.cart
+      ? { ...next, cart: { ...next.cart, finalOfferEnabled: false } }
+      : next;
+  };
   const initial = upgrade(resource.data as unknown as Data);
   const [previewNow] = useState(() => Date.now());
   const [flow, setFlow] = useState<Data>(() =>
@@ -311,6 +316,7 @@ function FlowEditorState({
     ? withBranding(rawContent, brandingDraft)
     : rawContent;
   const threeStepCart = flow.cart?.recoveryVersion === 2;
+  const finalCartOffer = cartFinalOfferEnabled(flow.cart);
   const cartSettingsError = cartOfferSettingsError(flow as FlowConfig);
   const couponHours = flow.cart?.couponHours ?? 168;
   const previewHours = Number.isFinite(couponHours) && couponHours >= 1 && couponHours <= 8760 ? couponHours : 168;
@@ -476,7 +482,9 @@ function FlowEditorState({
       <div className="mk-flow-editor-heading">
         <div>
           <h2>Edit {resource.name}</h2>
-          <p>{flow.description}</p>
+          <p>{threeStepCart && !finalCartOffer && flow.description === "Recover an unfinished checkout with three emails. Stop automatically after a purchase."
+            ? "Recover an unfinished checkout with two emails. Stop automatically after a purchase."
+            : flow.description}</p>
         </div>
         <span className="mk-flow-editor-hint">Click any step to edit it</span>
       </div>
@@ -574,7 +582,12 @@ function FlowEditorState({
         </details>
       )}
       {threeStepCart && <p className="mk-cart-feed-note">Sends at any hour. Other campaign or flow emails do not delay this recovery sequence.</p>}
-      {threeStepCart && <p className="mk-cart-feed-note">Returning customers receive email #1 only. The 10% and 15% offers are for customers with no previous orders.</p>}
+      {threeStepCart && <p className="mk-cart-feed-note">Returning customers receive email #1 only. {finalCartOffer ? "The 10% and 15% offers are" : "The 10% offer is"} for customers with no previous orders.</p>}
+      {threeStepCart && <div className="mk-cart-feed-note">
+        <label className="mk-check"><input type="checkbox" checked={finalCartOffer}
+          onChange={event => setFlow(current => ({ ...current, cart: { ...current.cart!, finalOfferEnabled: event.target.checked } }))} /> Send final 15% offer</label>
+        <p>Turning this off cancels queued 15% emails when you save. Sent history stays.</p>
+      </div>}
       {flow.cart && <CartTools flow={flow as FlowConfig} />}
       {resource.key === "welcome" && <div className="mk-cart-tool-actions"><FlowResults flowKey="welcome" /></div>}
       {resource.key === "low-stock" && (
@@ -750,7 +763,7 @@ function FlowEditorState({
                 onChange={(next) => setFlow(next as Data)}
               />
             )}
-            {selected.target.section === "cart-eligibility" && <p className="mk-cart-feed-note">Any real previous Shopify order, including an unpaid or cancelled order, makes the customer ineligible for the 10% and 15% offers. They can still receive the first cart reminder. If order history is unavailable, offers wait until it can be checked.</p>}
+            {selected.target.section === "cart-eligibility" && <p className="mk-cart-feed-note">Any real previous Shopify order, including an unpaid or cancelled order, makes the customer ineligible for {finalCartOffer ? "the 10% and 15% offers" : "the 10% offer"}. They can still receive the first cart reminder. If order history is unavailable, offers wait until it can be checked.</p>}
             {selected.target.section === "products" && flow.cart && (
               <div className="mk-cart-feed-note">
                 <label>
@@ -790,12 +803,12 @@ function FlowEditorState({
             {selected.target.section === "coupon" && (
               <div className="mk-cart-feed-note">
                 {threeStepCart ? <>
-                  <p>Email #2 creates one personal, single-use code for 10% off. Email #3 upgrades that same code to 15%. No minimum purchase or discount combinations.</p>
+                  <p>Email #2 creates one personal, single-use code for 10% off. {finalCartOffer && "Email #3 upgrades that same code to 15%. "}No minimum purchase or discount combinations.</p>
                   <label>Code valid for (days)
                     <input type="number" min="1" max="365" value={(flow.cart?.couponHours ?? 168) / 24}
                       onChange={event => setFlow(current => ({ ...current, cart: { ...current.cart!, couponHours: Number(event.target.value) * 24 } }))} />
                   </label>
-                  <p>Starts when the 10% code is created. The 15% upgrade keeps the original expiration.</p>
+                  <p>Starts when the 10% code is created.{finalCartOffer && " The 15% upgrade keeps the original expiration."}</p>
                   <p>New checkouts use this lifetime. Existing runs keep the lifetime they started with.</p>
                   {cartSettingsError && <p role="alert">{cartSettingsError}</p>}
                 </> : <p>
