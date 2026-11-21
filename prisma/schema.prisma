@@ -7,6 +7,43 @@ datasource db {
   provider = "postgresql"
 }
 
+model SkuSyncPair {
+  id String @id
+  sourceKey String
+  cloudflareId String
+  name String
+  category String?
+  variantAId String
+  variantBId String
+  present Boolean @default(true)
+  active Boolean @default(true)
+  initializedAt DateTime?
+  baselineSkuA String?
+  baselineSkuB String?
+  currentSkuA String?
+  currentSkuB String?
+  productA Json?
+  productB Json?
+  conflict Boolean @default(false)
+  pending Json?
+  lastChange Json?
+  error String?
+  checkedAt DateTime?
+  processedAt DateTime?
+  syncedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@index([sourceKey, present, active])
+}
+
+model SkuSyncControl {
+  id String @id
+  leaseToken String?
+  leaseUntil DateTime?
+  lastMappingsAt DateTime?
+  lastRunAt DateTime?
+  error String?
+}
+
 model MarketingWebhookInbox {
   id String @id @default(cuid())
   shop String

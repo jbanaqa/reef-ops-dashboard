@@ -9,6 +9,7 @@ const navigation = [
   { label: "Inventory & demand", items: [
     { href: "/receive-shipment", label: "Receive shipment", icon: "shipment" },
     { href: "/inventory-monitor", label: "Inventory monitor", icon: "inventory" },
+    { href: "/sku-sync", label: "SKU sync", icon: "inventory" },
     { href: "/restock-waitlist", label: "Restock alerts", icon: "restock" },
     { href: "/reorder-planner", label: "Reorder planner", icon: "reorder" },
   ] },
@@ -25,6 +26,7 @@ const pageTitles: Record<string, string> = {
   "/reorder-planner": "Reorder planner", "/reorder-planner/upload": "Upload supplier inventory",
   "/reorder-planner/mappings": "Product mappings", "/collection-rotation": "Collection rotation",
   "/sale-rotation": "Sale rotation",
+  "/sku-sync": "SKU sync",
   "/species-library": "Species library", "/feedback": "Customer intelligence", "/feedback/new": "Add customer signal", "/monitoring": "Brand monitoring",
 };
 export function AppShell({ children }: { children: React.ReactNode }) {

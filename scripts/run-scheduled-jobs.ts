@@ -43,6 +43,13 @@ async function main() {
     console.error(`[scheduled] ${job} failed:`, failure.message);
   }
 
+  console.log("[scheduled] Running SKU synchronization.");
+  try {
+    await run(process.execPath, [runner, "scripts/run-sku-sync.ts"]);
+  } catch (error) {
+    recordFailure("SKU synchronization", error);
+  }
+
   console.log("[scheduled] Running marketing worker.");
   try {
     await run(process.execPath, [runner, "scripts/run-marketing.ts"]);
