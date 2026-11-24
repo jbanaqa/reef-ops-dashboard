@@ -53,16 +53,18 @@ function emailHead(baseUrl: string) {
       .bf-daily-button {font-size:11px!important;padding:7px 2px!important}
       .bf-deal-badge {font-size:9px!important;padding:4px 5px!important;left:4px!important;top:4px!important}
       .bf-collection-outer {padding-left:16px!important;padding-right:16px!important;padding-top:34px!important}
-      .bf-collection-item {max-width:100%!important;padding-right:0!important;padding-left:0!important;padding-bottom:15px!important}
       .bf-collection-heading {font-size:28px!important;letter-spacing:0!important;padding-left:8px!important;padding-right:8px!important}
       .bf-collection-rule {width:10%!important}
       .bf-collection-photo {height:150px!important}
+    }
+    @media only screen and (max-width:559px) {
+      .bf-collection-item {width:100%!important;min-width:0!important;max-width:100%!important;padding-right:0!important;padding-left:0!important;padding-bottom:15px!important}
     }
     @media only screen and (max-width:380px) {
       .bf-collection-heading {font-size:23px!important}
     }
   </style>
-  <!--[if mso]><style>body,table,td,a,h2 {font-family:Arial,Helvetica,sans-serif!important}</style><![endif]--></head>`;
+  <!--[if mso]><style>body,table,td,a,h2 {font-family:Arial,Helvetica,sans-serif!important}.bf-collection-item {width:100%!important}</style><![endif]--></head>`;
 }
 
 function linkedArtwork(url: string, image: string, alt: string, height: number) {
@@ -155,11 +157,13 @@ function collectionCard(product: CampaignEmailProduct) {
 
 function collectionCards(products: readonly CampaignEmailProduct[]) {
   if (!products.length) return "";
+  // Fit two cards in narrower desktop email panes and wrap when only one
+  // readable column fits, including clients that discard the media rules.
   const cells = products.map((product, index) => {
     const start = index % 2 === 0;
     const last = index === products.length - 1;
     return `${start ? "<!--[if mso]><tr><![endif]-->" : ""}<!--[if mso]><td width="372" valign="top"><![endif]-->
-      <div class="bf-collection-item" style="display:inline-block;width:100%;max-width:372px;vertical-align:top;box-sizing:border-box;padding:0 12px ${index < products.length - (products.length % 2 || 2) ? 30 : 0}px;text-align:left;line-height:normal;font-family:${font};">${collectionCard(product)}</div>
+      <div class="bf-collection-item" style="display:inline-block;width:50%;min-width:260px;min-width:min(260px,100%);max-width:372px;vertical-align:top;box-sizing:border-box;padding:0 12px ${index < products.length - (products.length % 2 || 2) ? 30 : 0}px;text-align:left;line-height:normal;font-family:${font};">${collectionCard(product)}</div>
       <!--[if mso]></td>${last && start ? '<td width="372"></td>' : ""}${!start || last ? "</tr>" : ""}<![endif]-->`;
   });
   return `<div style="font-size:0;line-height:0;text-align:left;"><!--[if mso]><table role="presentation" width="744" cellpadding="0" cellspacing="0"><![endif]-->${cells.join("")}<!--[if mso]></table><![endif]--></div>`;

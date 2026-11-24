@@ -276,6 +276,50 @@ const { chromium } = require("playwright");
       await page.getByLabel("Start from a template").selectOption("corals-black-friday");
       await page.getByRole("button", { name: "Edit email and preview" }).click();
       const editor = page.getByRole("dialog", { name: "Email editor" });
+      const verifyCollectionGrid = async (cards, columns, label) => {
+        const boxes = await cards.evaluateAll(nodes => nodes.slice(0, 4).map(node => {
+          const { x, y, right, bottom } = node.getBoundingClientRect();
+          return { x, y, right, bottom };
+        }));
+        assert.equal(boxes.length, 4, label);
+        if (columns === 2) {
+          assert.ok(Math.abs(boxes[0].y - boxes[1].y) < 1 && boxes[0].right <= boxes[1].x + 1,
+            label + ": first pair should share a row");
+          assert.ok(Math.abs(boxes[2].y - boxes[3].y) < 1 && boxes[2].right <= boxes[3].x + 1,
+            label + ": second pair should share a row");
+          assert.ok(boxes[2].y >= Math.max(boxes[0].bottom, boxes[1].bottom) - 1, label + ": rows should not overlap");
+        } else {
+          assert.ok(boxes.every((box, index) => !index || Math.abs(box.x - boxes[0].x) < 1 && box.y >= boxes[index - 1].bottom - 1),
+            label + ": cards should stack");
+        }
+      };
+      const iframe = editor.locator("iframe");
+      const previewCards = editor.frameLocator("iframe").locator(".bf-collection-item");
+      await previewCards.first().waitFor();
+      assert.equal(Math.round((await iframe.boundingBox()).width), 640);
+      await verifyCollectionGrid(previewCards, 2, "Reef Ops desktop preview");
+      const messageHtml = await iframe.getAttribute("srcdoc");
+      await editor.getByRole("button", { name: "Mobile", exact: true }).click();
+      await verifyCollectionGrid(previewCards, 1, "Reef Ops mobile preview");
+      await editor.getByRole("button", { name: "Desktop", exact: true }).click();
+      const message = await browser.newPage();
+      try {
+        const imageFixture = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+        await message.route("**/*", route => route.request().resourceType() === "image"
+          ? route.fulfill({ contentType: "image/gif", body: imageFixture })
+          : route.abort());
+        for (const html of [messageHtml, messageHtml.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")]) {
+          for (const [width, columns] of [[800, 2], [640, 2], [600, 2], [390, 1], [320, 1]]) {
+            const label = `Email at ${width}px${html === messageHtml ? "" : " without head styles"}`;
+            await message.setViewportSize({ width, height: 800 });
+            await message.setContent(html.replace("<head>", '<head><base href="https://preview.example/">'));
+            await verifyCollectionGrid(message.locator(".bf-collection-item"), columns, label);
+            assert.ok(await message.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), label + ": no horizontal overflow");
+          }
+        }
+      } finally {
+        await message.close();
+      }
       await editor.getByRole("button", { name: "Edit products and sections" }).click();
       const sections = editor.getByRole("region", { name: "Collection sections" });
       const card = (heading) => sections.locator(".mk-campaign-builder-card").filter({
@@ -330,7 +374,7 @@ const { chromium } = require("playwright");
         assert.equal(await sections.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
       }
       assert.deepEqual(errors, []);
-      console.log("Black Friday template selection, section and product editing, saved links, preview, and 390px/320px editor passed.");
+      console.log("Black Friday template selection, editable sections, desktop pairs, and mobile stacking passed.");
       return;
     }
     if (productTagsOnly) {
