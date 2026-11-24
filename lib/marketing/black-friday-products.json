@@ -62,18 +62,10 @@
     {
       "id": "indo-holy-grail-gold-torch-11",
       "title": "Indo Holy Grail Gold Torch",
-      "url": "https://coralsanonymous.com/products/indo-holy-grail-gold-torch-11",
+      "url": "https://coralsanonymous.com/products/indo-holy-grail-gold-torch-11?variant=43185675763938",
       "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/PA211355.jpg?v=1792624027",
-      "salePrice": "From $359.99",
+      "salePrice": "$359.99",
       "compareAtPrice": "$599.99"
-    },
-    {
-      "id": "cherry-swirl-acans-2-3-polyps",
-      "title": "Cherry Swirl Acans",
-      "url": "https://coralsanonymous.com/products/cherry-swirl-acans-2-3-polyps",
-      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/PA211333_enhanced_4096.jpg?v=1792620986",
-      "salePrice": "$44.99",
-      "compareAtPrice": "$54.99"
     },
     {
       "id": "pink-candyland-zoa-2-3-polyps",
@@ -84,12 +76,20 @@
       "compareAtPrice": "$129.99"
     },
     {
-      "id": "flamin-hot-sea-fan-gorgonian-rare",
-      "title": "Flamin’ Hot Sea Fan",
-      "url": "https://coralsanonymous.com/products/flamin-hot-sea-fan-gorgonian-rare",
-      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/ChatGPTImageMay21_2026_10_50_04PM.png?v=1779429025",
-      "salePrice": "From $52.24",
-      "compareAtPrice": "$94.99"
+      "id": "neon-green-platygyra-1-frag",
+      "title": "Neon Green Platygyra",
+      "url": "https://coralsanonymous.com/products/neon-green-platygyra-1-frag",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/corals-anonymous-platygyra-default-title-neon-green-platygyra-1-frag-39288887017698.jpg?v=1750139880",
+      "salePrice": "$9.00",
+      "compareAtPrice": "$29.99"
+    },
+    {
+      "id": "blue-eyed-goniopora-0-5-1-frag",
+      "title": "Blue Eyed Goniopora",
+      "url": "https://coralsanonymous.com/products/blue-eyed-goniopora-0-5-1-frag",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/P4274478.jpg?v=1777318604",
+      "salePrice": "$15.00",
+      "compareAtPrice": "$49.99"
     }
   ],
   "creatures": [

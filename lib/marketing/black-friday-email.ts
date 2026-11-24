@@ -119,12 +119,12 @@ function productButton(product: CampaignEmailProduct, daily: boolean) {
 
 function productPhoto(product: CampaignEmailProduct, daily: boolean) {
   if (!product.image) return "";
-  const discount = daily ? discountPercent(product) : 0;
-  const badge = discount ? `<span class="bf-deal-badge" style="position:absolute;left:7px;top:7px;padding:5px 8px;background:#ffe24b;color:${plum};font-family:${font};font-size:12px;font-weight:800;font-style:italic;line-height:1;white-space:nowrap;border-radius:4px;">${discount}% OFF</span>` : "";
+  const discount = discountPercent(product);
+  const badge = discount ? `<span class="bf-deal-badge" style="display:inline-block;position:absolute;left:7px;top:7px;padding:5px 8px;background:#ffe24b;color:${plum};font-family:${font};font-size:12px;font-weight:800;font-style:italic;line-height:1;white-space:nowrap;border-radius:4px;">${discount}% OFF</span>` : "";
   const imageClass = daily ? "bf-daily-image" : "bf-collection-photo";
   const height = daily ? 150 : 174;
   const width = daily ? 216 : 140;
-  return `<a href="${escape(product.url)}" style="position:relative;display:block;text-decoration:none;color:${plum};">${badge}<img class="${imageClass}" src="${escape(product.image)}" alt="${escape(product.title)}" width="${width}" height="${height}" style="display:block;width:100%;height:${height}px;${daily ? "height:clamp(75px,18.75vw,150px);" : ""}object-fit:cover;object-position:center;border:0;border-radius:${daily ? "13px 13px 0 0" : "13px 0 0 13px"};background:#e7dcd8;"></a>`;
+  return `<a href="${escape(product.url)}" style="position:relative;display:block;text-align:left;text-decoration:none;color:${plum};">${badge}<img class="${imageClass}" src="${escape(product.image)}" alt="${escape(product.title)}" width="${width}" height="${height}" style="display:block;width:100%;height:${height}px;${daily ? "height:clamp(75px,18.75vw,150px);" : ""}object-fit:cover;object-position:center;border:0;border-radius:${daily ? "13px 13px 0 0" : "13px 0 0 13px"};background:#e7dcd8;"></a>`;
 }
 
 function dailyCards(products: readonly CampaignEmailProduct[]) {

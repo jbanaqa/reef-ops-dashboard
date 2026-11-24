@@ -306,15 +306,39 @@ const { chromium } = require("playwright");
             label + ": cards should stack");
         }
       };
+      const verifyCoralBadges = async (preview, label, overlay = true) => {
+        const corals = preview.locator(".bf-collection-outer").filter({
+          has: preview.getByRole("heading", { name: "Corals", exact: true }),
+        });
+        const cards = await corals.locator(".bf-collection-item").evaluateAll(nodes => nodes.map(card => {
+          const badge = card.querySelector(".bf-deal-badge");
+          const photo = card.querySelector(".bf-collection-photo");
+          if (!badge || !photo) return null;
+          const tag = badge.getBoundingClientRect();
+          const image = photo.getBoundingClientRect();
+          return {
+            discount: badge.textContent,
+            left: tag.left - image.left,
+            top: tag.top - image.top,
+            bottom: tag.bottom - image.top,
+            fits: tag.right <= image.right + 1,
+          };
+        }));
+        assert.deepEqual(cards.map(card => card?.discount), ["40% OFF", "49% OFF", "69% OFF", "69% OFF"], label);
+        assert.ok(cards.every(card => card.fits && card.left >= 0 && card.left <= 7 &&
+          (overlay ? card.top >= 0 && card.top <= 7 : card.bottom <= 0.5)), label + ": readable top-left badge");
+      };
       const iframe = editor.locator("iframe");
       const previewCards = editor.frameLocator("iframe").locator(".bf-collection-item");
       await previewCards.first().waitFor();
       assert.equal(Math.round((await iframe.boundingBox()).width), 640);
       await verifyCollectionGrid(previewCards, 2, "Reef Ops desktop preview");
+      await verifyCoralBadges(editor.frameLocator("iframe"), "Reef Ops desktop preview");
       const messageHtml = await iframe.getAttribute("srcdoc");
       await editor.getByRole("button", { name: "Mobile", exact: true }).click();
       await verifyCollectionGrid(previewCards, 1, "Reef Ops mobile preview");
       await verifyDailyGrid(editor.frameLocator("iframe"), "Reef Ops mobile preview");
+      await verifyCoralBadges(editor.frameLocator("iframe"), "Reef Ops mobile preview");
       await editor.getByRole("button", { name: "Desktop", exact: true }).click();
       const message = await browser.newPage();
       try {
@@ -329,9 +353,13 @@ const { chromium } = require("playwright");
             await message.setContent(html.replace("<head>", '<head><base href="https://preview.example/">'));
             await verifyCollectionGrid(message.locator(".bf-collection-item"), columns, label);
             await verifyDailyGrid(message, label);
+            await verifyCoralBadges(message, label);
             assert.ok(await message.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), label + ": no horizontal overflow");
           }
         }
+        // Gmail removes absolute positioning. Keep the label in the top-left of the photo cell.
+        await message.setContent(messageHtml.replace(/position:(?:relative|absolute);|(?:left|top):7px;/g, ""));
+        await verifyCoralBadges(message, "Email without positioning", false);
       } finally {
         await message.close();
       }
