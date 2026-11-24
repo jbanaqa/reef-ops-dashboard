@@ -1,3 +1,4 @@
+import { blackFridaySalePrice } from "./black-friday";
 import type { CampaignEmailProduct, Content } from "./rules";
 
 export type BlackFridayCollection = {
@@ -60,7 +61,6 @@ function emailHead(baseUrl: string) {
       .bf-collection-photo {height:150px!important}
     }
     @media only screen and (max-width:440px) {
-      .bf-daily-from {font-size:8px!important;margin-right:3px!important}
       .bf-daily-prices s {display:block!important;margin:3px 0 0!important}
     }
     @media only screen and (max-width:559px) {
@@ -78,11 +78,9 @@ function linkedArtwork(url: string, image: string, alt: string, height: number) 
 }
 
 function priceValues(product: CampaignEmailProduct) {
-  const sale = product.showSalePrice === false ? "" : product.salePrice ?? "";
+  const price = blackFridaySalePrice(product);
   const compare = product.showCompareAtPrice === false ? "" : product.compareAtPrice ?? "";
-  const from = /^from\s+/i.test(sale);
-  const price = sale.replace(/^from\s+/i, "");
-  return { price, compare, from };
+  return { price, compare };
 }
 
 function discountPercent(product: CampaignEmailProduct) {
@@ -97,14 +95,11 @@ function discountPercent(product: CampaignEmailProduct) {
 }
 
 function priceMarkup(product: CampaignEmailProduct, daily: boolean) {
-  const { price, compare, from } = priceValues(product);
-  const prefix = from
-    ? `<span class="${daily ? "bf-daily-from" : ""}" style="display:inline-block;margin-right:5px;font-size:9px;color:#617244;font-weight:600;letter-spacing:.2px;">FROM</span>`
-    : "";
+  const { price, compare } = priceValues(product);
   const amount = price ? `<strong class="${daily ? "bf-daily-price" : ""}" style="font-size:25px;font-size:clamp(17px,4vw,25px);color:#42651a;font-weight:800;letter-spacing:-.45px;">${escape(price)}</strong>` : "";
   const currentPrice = daily && amount
-    ? `<span style="display:inline-block;white-space:nowrap;">${prefix}${amount}</span>`
-    : prefix + (prefix ? " " : "") + amount;
+    ? `<span style="display:inline-block;white-space:nowrap;">${amount}</span>`
+    : amount;
   return `<p class="${daily ? "bf-daily-prices" : ""}" style="margin:0 0 9px;line-height:1.1;font-family:${font};">
     ${currentPrice}
     ${compare ? ` <s style="display:inline-block;margin-left:5px;font-size:12px;font-weight:600;color:#817779;white-space:nowrap;">${escape(compare)}</s>` : ""}
@@ -216,7 +211,6 @@ function footer(c: Content, options: BlackFridayEmailOptions) {
       <a href="${escape(options.unsubscribe)}" style="color:#f6e5ed;text-decoration:underline;">${escape(c.footerUnsubscribeLinkText || "Unsubscribe")}</a>
     </p>
     ${options.address ? `<div style="font-size:11px;line-height:1.45;margin:12px 0 0;color:#f8e3ec;">${escape(options.address).replace(/\r?\n/g, "<br>")}</div>` : ""}
-    <div style="margin-top:14px;font-size:11px;color:#d7aec9;">*On select items.</div>
   </td></tr>`;
 }
 
@@ -239,6 +233,7 @@ export function renderBlackFridayEmail(
         ${linkedArtwork(c.url, assets + "hero-v1.jpg", heroAlt, 590)}
         <tr><td bgcolor="${peach}" style="background-color:${peach};background-image:${gradient};">
           <table ${table} style="table-layout:fixed;">
+            <tr><td align="center" style="padding:0 14px 10px;text-align:center;font:11px/1.4 ${font};color:#753956;">*On select items.</td></tr>
             ${dailyBlock(dailyProducts, options)}
             ${sections.map(collectionBlock).join("")}
           </table>

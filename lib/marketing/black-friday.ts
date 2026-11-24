@@ -149,12 +149,16 @@ export function validateBlackFridayEmailSize(html: string) {
     throw new Error("This email is too long. Remove some products or collection sections before sending.");
 }
 
+export function blackFridaySalePrice(product: CampaignEmailProduct) {
+  return product.showSalePrice === false ? "" : (product.salePrice ?? "").replace(/^from\s+/i, "");
+}
+
 export function blackFridayPlainText(source: Content, unsubscribe: string, address: string, organizationName: string) {
   const design = source.blackFriday;
   if (!design) return "";
   const productLines = (items: CampaignEmailProduct[]) => items.map((item) => [
     item.title,
-    item.showSalePrice === false ? "" : item.salePrice,
+    blackFridaySalePrice(item),
     item.showCompareAtPrice === false || !item.compareAtPrice ? "" : "Was " + item.compareAtPrice,
     item.url,
   ].filter(Boolean).join(" · "));
