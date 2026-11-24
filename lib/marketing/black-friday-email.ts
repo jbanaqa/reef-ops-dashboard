@@ -45,10 +45,12 @@ function emailHead(baseUrl: string) {
       .bf-daily-pad {padding:15px 8px 14px!important}
       .bf-daily-title {font-size:30px!important}
       .bf-daily-copy {font-size:14px!important}
-      .bf-daily-gutter {padding-right:4px!important}
+      .bf-daily-gutter {width:4px!important}
       .bf-daily-image {height:clamp(75px,22vw,133px)!important}
-      .bf-daily-info {padding:7px 5px 8px!important}
-      .bf-daily-name {font-size:13px!important;min-height:43px!important}
+      .bf-daily-info {padding-left:5px!important;padding-right:5px!important}
+      .bf-daily-title-cell {padding-top:7px!important}
+      .bf-daily-button-cell {padding-bottom:8px!important}
+      .bf-daily-name {font-size:13px!important;min-height:30px!important}
       .bf-daily-price {font-size:17px!important}
       .bf-daily-button {font-size:11px!important;padding:7px 2px!important}
       .bf-deal-badge {font-size:9px!important;padding:4px 5px!important;left:4px!important;top:4px!important}
@@ -56,6 +58,10 @@ function emailHead(baseUrl: string) {
       .bf-collection-heading {font-size:28px!important;letter-spacing:0!important;padding-left:8px!important;padding-right:8px!important}
       .bf-collection-rule {width:10%!important}
       .bf-collection-photo {height:150px!important}
+    }
+    @media only screen and (max-width:440px) {
+      .bf-daily-from {font-size:8px!important;margin-right:3px!important}
+      .bf-daily-prices s {display:block!important;margin:3px 0 0!important}
     }
     @media only screen and (max-width:559px) {
       .bf-collection-item {width:100%!important;min-width:0!important;max-width:100%!important;padding-right:0!important;padding-left:0!important;padding-bottom:15px!important}
@@ -92,22 +98,28 @@ function discountPercent(product: CampaignEmailProduct) {
 
 function priceMarkup(product: CampaignEmailProduct, daily: boolean) {
   const { price, compare, from } = priceValues(product);
-  return `<p style="margin:0 0 9px;line-height:1.1;font-family:${font};">
-    ${from ? '<span style="display:inline-block;margin-right:5px;font-size:9px;color:#617244;font-weight:600;letter-spacing:.2px;">FROM</span> ' : ""}
-    ${price ? `<strong class="${daily ? "bf-daily-price" : ""}" style="font-size:25px;font-size:clamp(17px,4vw,25px);color:#42651a;font-weight:800;letter-spacing:-.45px;">${escape(price)}</strong>` : ""}
+  const prefix = from
+    ? `<span class="${daily ? "bf-daily-from" : ""}" style="display:inline-block;margin-right:5px;font-size:9px;color:#617244;font-weight:600;letter-spacing:.2px;">FROM</span>`
+    : "";
+  const amount = price ? `<strong class="${daily ? "bf-daily-price" : ""}" style="font-size:25px;font-size:clamp(17px,4vw,25px);color:#42651a;font-weight:800;letter-spacing:-.45px;">${escape(price)}</strong>` : "";
+  const currentPrice = daily && amount
+    ? `<span style="display:inline-block;white-space:nowrap;">${prefix}${amount}</span>`
+    : prefix + (prefix ? " " : "") + amount;
+  return `<p class="${daily ? "bf-daily-prices" : ""}" style="margin:0 0 9px;line-height:1.1;font-family:${font};">
+    ${currentPrice}
     ${compare ? ` <s style="display:inline-block;margin-left:5px;font-size:12px;font-weight:600;color:#817779;white-space:nowrap;">${escape(compare)}</s>` : ""}
   </p>`;
 }
 
-function productInfo(product: CampaignEmailProduct, daily: boolean) {
+function productName(product: CampaignEmailProduct, daily: boolean) {
+  return `<p class="${daily ? "bf-daily-name" : ""}" style="margin:0 0 ${daily ? "9" : "33"}px;min-height:${daily ? "38" : "40"}px;font-family:${font};line-height:1.12;font-size:${daily ? 17 : 18}px;font-weight:700;color:${plum};letter-spacing:-.25px;"><a href="${escape(product.url)}" style="color:${plum};text-decoration:none;">${escape(product.title)}</a></p>`;
+}
+
+function productButton(product: CampaignEmailProduct, daily: boolean) {
+  if (product.showButton === false) return "";
   const url = escape(product.url);
-  const name = escape(product.title);
   const label = escape(product.button || "View deal");
-  return `<div class="${daily ? "bf-daily-info" : ""}" style="padding:${daily ? "11px 5% 12px" : "13px 11px 11px"};text-align:left;overflow-wrap:anywhere;">
-    <p class="${daily ? "bf-daily-name" : ""}" style="margin:0 0 ${daily ? "9" : "33"}px;min-height:${daily ? "38" : "40"}px;font-family:${font};line-height:1.12;font-size:${daily ? 17 : 18}px;font-weight:700;color:${plum};letter-spacing:-.25px;"><a href="${url}" style="color:${plum};text-decoration:none;">${name}</a></p>
-    ${priceMarkup(product, daily)}
-    ${product.showButton === false ? "" : `<a class="${daily ? "bf-daily-button" : ""}" href="${url}" style="display:block;${buttonFill}border-bottom:2px solid #edc248;border-radius:7px;padding:7px 4px;color:${plum};text-decoration:none;text-align:center;font-family:${font};font-weight:800;font-size:${daily ? 14 : 13}px;font-style:italic;line-height:1;text-transform:uppercase;">${label} &nbsp;&#8594;</a>`}
-  </div>`;
+  return `<a class="${daily ? "bf-daily-button" : ""}" href="${url}" style="display:block;${buttonFill}border-bottom:2px solid #edc248;border-radius:7px;padding:7px 4px;color:${plum};text-decoration:none;text-align:center;font-family:${font};font-weight:800;font-size:${daily ? 14 : 13}px;font-style:italic;line-height:1;text-transform:uppercase;">${label} &nbsp;&#8594;</a>`;
 }
 
 function productPhoto(product: CampaignEmailProduct, daily: boolean) {
@@ -123,13 +135,22 @@ function productPhoto(product: CampaignEmailProduct, daily: boolean) {
 function dailyCards(products: readonly CampaignEmailProduct[]) {
   const visible = products.slice(0, 3);
   if (!visible.length) return "";
-  return `<table ${table} style="table-layout:fixed;"><tr>${visible.map((product, i) =>
-    `<td width="${Math.floor(100 / visible.length)}%" valign="top" ${i < visible.length - 1 ? 'class="bf-daily-gutter" style="padding-right:1.5%;"' : ""}>
-      <table ${table} bgcolor="${cream}" style="background:linear-gradient(140deg,#fffaf0,#fff3e7);background-color:${cream};border:1px solid #fff5ea;border-radius:14px;table-layout:fixed;">
-        ${product.image ? `<tr><td>${productPhoto(product, true)}</td></tr>` : ""}
-        <tr><td>${productInfo(product, true)}</td></tr>
-      </table>
-    </td>`).join("")}</tr></table>`;
+  const withPhotos = visible.some(product => product.image);
+  const gutter = '<td class="bf-daily-gutter" width="1.5%" aria-hidden="true" style="width:1.5%;font-size:0;line-height:0;"></td>';
+  const cardWidth = (100 - 1.5 * (visible.length - 1)) / visible.length;
+  const panel = `background-color:${cream};border-left:1px solid #fff5ea;border-right:1px solid #fff5ea;text-align:left;overflow-wrap:anywhere;`;
+  const top = "border-top:1px solid #fff5ea;border-radius:14px 14px 0 0;";
+  const bottom = "border-bottom:1px solid #fff5ea;border-radius:0 0 14px 14px;";
+  // Share row heights so wrapping titles or compare-at prices cannot shift
+  // individual buttons, even when an inbox removes the responsive styles.
+  const row = (className: string, style: string, part: (product: CampaignEmailProduct) => string) =>
+    `<tr>${visible.map(product => `<td class="${className}" width="${cardWidth}%" bgcolor="${cream}" valign="top" style="${panel}${style}">${part(product)}</td>`).join(gutter)}</tr>`;
+  return `<table ${table} style="table-layout:fixed;">
+    ${withPhotos ? row("bf-daily-photo-cell", top, product => productPhoto(product, true)) : ""}
+    ${row("bf-daily-info bf-daily-title-cell", `padding:11px 11px 0;${withPhotos ? "" : top}`, product => productName(product, true))}
+    ${row("bf-daily-info", "padding:0 11px;", product => priceMarkup(product, true))}
+    ${row("bf-daily-info bf-daily-button-cell", `padding:0 11px 12px;${bottom}`, product => productButton(product, true))}
+  </table>`;
 }
 
 function dailyBlock(products: readonly CampaignEmailProduct[], options: BlackFridayEmailOptions) {
@@ -151,7 +172,7 @@ function dailyBlock(products: readonly CampaignEmailProduct[], options: BlackFri
 function collectionCard(product: CampaignEmailProduct) {
   const photo = product.image ? `<td width="40%" valign="top" bgcolor="#e7dcd8" style="width:40%;border-radius:13px 0 0 13px;">${productPhoto(product, false)}</td>` : "";
   return `<table ${table} bgcolor="${cream}" style="table-layout:fixed;background-color:${cream};background-image:linear-gradient(140deg,#fffaf0,#fff3e7);border:1px solid #fff5ea;border-radius:14px;box-shadow:0 4px 0 #7437440d,0 4px 11px #6333430d;"><tr>
-    ${photo}<td valign="top" ${photo ? 'width="60%" style="width:60%;"' : ""}>${productInfo(product, false)}</td>
+    ${photo}<td valign="top" ${photo ? 'width="60%" style="width:60%;"' : ""}><div style="padding:13px 11px 11px;text-align:left;overflow-wrap:anywhere;">${productName(product, false)}${priceMarkup(product, false)}${productButton(product, false)}</div></td>
   </tr></table>`;
 }
 

@@ -276,6 +276,19 @@ const { chromium } = require("playwright");
       await page.getByLabel("Start from a template").selectOption("corals-black-friday");
       await page.getByRole("button", { name: "Edit email and preview" }).click();
       const editor = page.getByRole("dialog", { name: "Email editor" });
+      const verifyDailyGrid = async (preview, label) => {
+        for (const [selector, kind] of [[".bf-daily-image", "photos"], [".bf-daily-price", "prices"], [".bf-daily-button", "buttons"]]) {
+          const boxes = await preview.locator(selector).evaluateAll(nodes => nodes.map(node => {
+            const { x, y, bottom } = node.getBoundingClientRect();
+            return { x, y, bottom };
+          }));
+          assert.equal(boxes.length, 3, label + ": all three daily " + kind);
+          assert.ok(boxes.every((box, i) => i === 0 || box.x > boxes[i - 1].x),
+            label + ": daily " + kind + " should stay three across");
+          assert.ok(boxes.every(box => Math.abs(box.y - boxes[0].y) < 1 && Math.abs(box.bottom - boxes[0].bottom) < 1),
+            label + ": daily " + kind + " should line up " + JSON.stringify(boxes));
+        }
+      };
       const verifyCollectionGrid = async (cards, columns, label) => {
         const boxes = await cards.evaluateAll(nodes => nodes.slice(0, 4).map(node => {
           const { x, y, right, bottom } = node.getBoundingClientRect();
@@ -301,6 +314,7 @@ const { chromium } = require("playwright");
       const messageHtml = await iframe.getAttribute("srcdoc");
       await editor.getByRole("button", { name: "Mobile", exact: true }).click();
       await verifyCollectionGrid(previewCards, 1, "Reef Ops mobile preview");
+      await verifyDailyGrid(editor.frameLocator("iframe"), "Reef Ops mobile preview");
       await editor.getByRole("button", { name: "Desktop", exact: true }).click();
       const message = await browser.newPage();
       try {
@@ -314,6 +328,7 @@ const { chromium } = require("playwright");
             await message.setViewportSize({ width, height: 800 });
             await message.setContent(html.replace("<head>", '<head><base href="https://preview.example/">'));
             await verifyCollectionGrid(message.locator(".bf-collection-item"), columns, label);
+            await verifyDailyGrid(message, label);
             assert.ok(await message.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), label + ": no horizontal overflow");
           }
         }
