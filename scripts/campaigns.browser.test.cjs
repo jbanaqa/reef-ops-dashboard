@@ -8,6 +8,7 @@ const { build } = require("esbuild");
 const { chromium } = require("playwright");
 (async () => {
   const productTagsOnly = process.argv.includes("--product-tags-only");
+  const blackFridayOnly = process.argv.includes("--black-friday-only");
   const output = await fs.mkdtemp(path.join(os.tmpdir(), "reef-shared-email-"));
   const bundle = await build({
     entryPoints: ["scripts/campaigns.browser.fixture.tsx"],
@@ -195,6 +196,15 @@ const { chromium } = require("playwright");
             settings: data.settings,
           },
         });
+      } else if (blackFridayOnly && url.searchParams.get("view") === "black-friday-products") {
+        assert.equal(url.searchParams.get("brand"), "corals-anonymous");
+        assert.equal(url.searchParams.get("q"), "bubble tip");
+        await route.fulfill({ json: { products: [{
+          id: "shopify-picked",
+          title: "Red Bubble Tip Anemone",
+          url: "https://coralsanonymous.com/products/red-bubble-tip-anemone",
+          salePrice: "$39.00",
+        }] } });
       } else if (url.searchParams.get("view") === "campaign-report") {
         if (reportError) return route.fulfill({ status: 503, json: { error: "Orders temporarily unavailable" } });
         const testRun = data.campaignTests.find((item) => item.id === url.searchParams.get("id"));
@@ -259,6 +269,70 @@ const { chromium } = require("playwright");
         });
       else await route.fulfill({ json: data });
     });
+    if (blackFridayOnly) {
+      await page.goto("http://127.0.0.1:" + server.address().port);
+      await page.getByRole("button", { name: "Edit", exact: true }).click();
+      await page.getByRole("button", { name: "Continue to email" }).click();
+      await page.getByLabel("Start from a template").selectOption("corals-black-friday");
+      await page.getByRole("button", { name: "Edit email and preview" }).click();
+      const editor = page.getByRole("dialog", { name: "Email editor" });
+      await editor.getByRole("button", { name: "Edit products and sections" }).click();
+      const sections = editor.getByRole("region", { name: "Collection sections" });
+      const card = (heading) => sections.locator(".mk-campaign-builder-card").filter({
+        has: page.locator("summary").filter({ hasText: heading }),
+      });
+      const daily = editor.locator("details").filter({ has: page.locator("summary").filter({ hasText: /^Daily Super Deals/ }) });
+      await daily.locator("summary").click();
+      assert.equal(await daily.getByRole("list", { name: "Selected products" }).getByRole("listitem").count(), 3);
+      assert.match(await daily.innerText(), /next midnight Pacific/);
+
+      const pickProduct = async section => {
+        await section.getByLabel("Find a Shopify product").fill("bubble tip");
+        await section.getByRole("button", { name: "Search products", exact: true }).click();
+        const result = section.getByRole("button", { name: "Add Red Bubble Tip Anemone" });
+        await result.click();
+        assert.equal(await section.getByRole("button", { name: "Red Bubble Tip Anemone is selected" }).isDisabled(), true);
+      };
+      await card(/^Anemones/).locator("summary").click();
+      await card(/^Anemones/).getByLabel("Section title").fill("Anemone Garden");
+      const anemones = card(/^Anemone Garden/);
+      await anemones.getByLabel("Collection link text").fill("Explore anemones");
+      await anemones.getByLabel("Collection URL").fill("https://coralsanonymous.com/collections/anemones");
+      await pickProduct(anemones);
+      await anemones.getByRole("button", { name: "Move Red Bubble Tip Anemone up" }).click();
+
+      await card(/^Corals/).locator("summary").click();
+      await card(/^Corals/).getByRole("button", { name: "Remove section" }).click();
+      assert.equal(await card(/^Corals/).count(), 0);
+      await sections.getByRole("button", { name: "Add collection section" }).click();
+      await card(/^New collection/).getByLabel("Section title").fill("New arrivals");
+      const arrivals = card(/^New arrivals/);
+      await arrivals.getByLabel("Collection link text").fill("Shop new arrivals");
+      await arrivals.getByLabel("Collection URL").fill("https://coralsanonymous.com/collections/new-arrivals");
+      await pickProduct(arrivals);
+      await arrivals.getByRole("button", { name: "Move up", exact: true }).click();
+      await editor.getByRole("button", { name: "Save email", exact: true }).click();
+      await editor.locator(".mk-designer-notice").filter({ hasText: "Email saved" }).waitFor();
+      const saved = writes.find(write => write.action === "save-campaign").content;
+      assert.equal(saved.layout, "black-friday");
+      assert.equal(saved.blackFriday.dailyProducts.length, 3);
+      assert.deepEqual(saved.blackFriday.sections.map(section => section.title), ["Anemone Garden", "New arrivals", "Mysterious Creatures"]);
+      assert.equal(saved.blackFriday.sections[0].products[3].id, "shopify-picked");
+      assert.equal(saved.blackFriday.sections[0].linkLabel, "Explore anemones");
+      assert.equal(saved.blackFriday.sections[1].linkLabel, "Shop new arrivals");
+      assert.equal(saved.blackFriday.sections[1].linkUrl, "https://coralsanonymous.com/collections/new-arrivals");
+      assert.equal(saved.blackFriday.sections[1].products[0].id, "shopify-picked");
+      const preview = editor.frameLocator("iframe").getByText("Shop new arrivals", { exact: false });
+      await preview.waitFor();
+      assert.equal(await preview.getAttribute("href"), "https://coralsanonymous.com/collections/new-arrivals");
+      for (const width of [390, 320]) {
+        await page.setViewportSize({ width, height: 800 });
+        assert.equal(await sections.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+      }
+      assert.deepEqual(errors, []);
+      console.log("Black Friday template selection, section and product editing, saved links, preview, and 390px/320px editor passed.");
+      return;
+    }
     if (productTagsOnly) {
       const openSections = async () => {
         await page.getByRole("button", { name: "Edit email and preview", exact: true }).click();

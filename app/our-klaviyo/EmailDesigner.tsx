@@ -21,6 +21,7 @@ import RichEmailCopy from "./RichEmailCopy";
 import CampaignEmailFields from "./CampaignEmailFields";
 import Artwork from "./EmailArtwork";
 import MacroNewsletterFields from "./MacroNewsletterFields";
+import BlackFridayFields from "./BlackFridayFields";
 import { applyCoralsReefDesign, reefDesignDefaults } from "@/lib/marketing/corals-reef";
 
 const emailLayoutNames: Record<EmailLayout, string> = {
@@ -32,6 +33,7 @@ const emailLayoutNames: Record<EmailLayout, string> = {
   "campaign-sale": "Campaign sale",
   "macro-newsletter": "Approved Macroalgae Farms newsletter",
   "corals-reef": "Corals Anonymous · Reef cards",
+  "black-friday": "Corals Anonymous · Black Friday Sale",
 };
 
 export default function EmailDesigner({
@@ -100,6 +102,7 @@ export default function EmailDesigner({
   const visualLayout = content.layout || content.template || "standard";
   const isNewsletter = visualLayout === "macro-newsletter" && !!content.macroNewsletter;
   const isReef = visualLayout === "corals-reef" && !isMacro;
+  const blackFriday = visualLayout === "black-friday" && !isMacro ? content.blackFriday : undefined;
   const reef = content.reefDesign || (flowKey ? applyCoralsReefDesign(content, flowKey, flowStepIndex, flowBranch).reefDesign : undefined);
   const reefDefaults = reefDesignDefaults(reef?.variant || "cart");
   const cartCopy = content.template === "cart-recovery" || visualLayout === "cart-recovery";
@@ -246,6 +249,7 @@ export default function EmailDesigner({
           <nav className="mk-designer-tabs" aria-label="Email editing sections">
             {(["content", "layout", "artwork", "footer", "test"] as const)
               .filter((tab) => tab !== "test" || !!onTest)
+              .filter((tab) => !blackFriday || tab !== "artwork")
               .map((tab) => (
                 <button
                   key={tab}
@@ -274,7 +278,13 @@ export default function EmailDesigner({
               </section>
               <MacroNewsletterFields content={content} onChange={changeContent} panel="content" />
             </>}
-            {panel === "content" && !isNewsletter &&
+            {panel === "content" && blackFriday && <section className="mk-editor-section">
+              <h3>Inbox details</h3>
+              <label>{subjectEditable ? "Subject" : "Preview subject"}<input readOnly={!subjectEditable} value={subject} onChange={event => onSubject(event.target.value)} /></label>
+              <label>Preview text<input value={content.preview || ""} onChange={event => changeContent("preview", event.target.value)} /></label>
+              <button type="button" onClick={() => setPanel("layout")}>Edit products and sections</button>
+            </section>}
+            {panel === "content" && !isNewsletter && !blackFriday &&
               (contentFields || (content.template === "campaign-sale" && visualLayout === "campaign-sale" ? (
                 <section className="mk-editor-section">
                   <h3>Inbox details</h3>
@@ -667,7 +677,7 @@ export default function EmailDesigner({
             {panel === "layout" && (
               <>
                 {isNewsletter && <section className="mk-editor-section"><h3>Newsletter layout</h3><p>Choose which sections to include. Remaining sections keep their approved layout. Edit their text in Content and pictures in Artwork.</p></section>}
-                {!isNewsletter && <details className="mk-editor-section mk-editor-disclosure">
+                {!isNewsletter && !blackFriday && <details className="mk-editor-section mk-editor-disclosure">
                   <summary><span>Email layout</span><small>{emailLayoutNames[visualLayout]}</small></summary>
                   <div className="mk-editor-disclosure-body">
                   <p>
@@ -1009,6 +1019,7 @@ export default function EmailDesigner({
                   </details>
                 )}
                 {isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="products" />}
+                {blackFriday && <BlackFridayFields design={blackFriday} onChange={design => changeContent("blackFriday", design)} />}
                 {visualLayout === "campaign-sale" && content.campaignLayout && (
                   <CampaignEmailFields
                     content={content}
@@ -1021,7 +1032,7 @@ export default function EmailDesigner({
               </>
             )}
             {panel === "artwork" && isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="artwork" />}
-            {panel === "artwork" && !isNewsletter && (
+            {panel === "artwork" && !isNewsletter && !blackFriday && (
               <>
                 <div className="mk-editor-section">
                   <h3>Brand artwork</h3>
@@ -1071,7 +1082,13 @@ export default function EmailDesigner({
               </>
             )}
             {panel === "footer" && isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="footer" />}
-            {panel === "footer" && !isNewsletter && (
+            {panel === "footer" && blackFriday && <section className="mk-editor-section">
+              <h3>Footer details</h3>
+              <p>The footer includes the store name and unsubscribe link. The mailing address follows your marketing settings.</p>
+              <label>Business mailing address<textarea readOnly rows={3} value={postalAddress} /></label>
+              <p><a href={href("/our-klaviyo/settings")} target="_blank" rel="noreferrer">Open marketing settings</a></p>
+            </section>}
+            {panel === "footer" && !isNewsletter && !blackFriday && (
               <section className="mk-editor-section">
                 <h3>Footer content</h3>
                 {isReef ? <p>Closing and signature: Content → Flow design. Footer details use this brand&apos;s shared settings.</p> : <p>

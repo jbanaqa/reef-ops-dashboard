@@ -195,8 +195,10 @@ export function sortCampaignProducts(
   );
 }
 
-function emailProduct(product: ShopifyProduct): CampaignEmailProduct {
-  const variant = product.variants.nodes.find((item) => item.availableForSale)!;
+function emailProduct(
+  product: ShopifyProduct,
+  variant = product.variants.nodes.find((item) => item.availableForSale)!,
+): CampaignEmailProduct {
   return {
     id: product.id,
     title: product.title,
@@ -213,9 +215,7 @@ function emailProduct(product: ShopifyProduct): CampaignEmailProduct {
   };
 }
 
-/** A bounded staff search returns choices, never a saved automatic feed. */
-export async function manualNewsletterProducts(value: string): Promise<NewsletterProduct[]> {
-  if (currentMarketingBrand() !== "macroalgae-farms") throw new Error("Choose Macroalgae Farms to select newsletter products.");
+async function manualProductSearch(value: string): Promise<ShopifyProduct[]> {
   const terms = value.trim().slice(0, 120).match(/[\p{L}\p{N}]+/gu) || [];
   if (!terms.length) return [];
   // Prefix each literal word so partial names such as "Chaeto" find
@@ -223,10 +223,35 @@ export async function manualNewsletterProducts(value: string): Promise<Newslette
   const query = `status:active AND ${terms.map(term => `title:${term}*`).join(" AND ")}`;
   const response = await shopifyGraphql<ProductsResponse>(PRODUCTS, { after: null, query, sortKey: "TITLE", reverse: false });
   if (!response.data?.products) throw new Error("Shopify did not return the product catalogue.");
-  return response.data.products.nodes.filter(product => product.onlineStoreUrl && product.variants.nodes.some(variant => variant.availableForSale)).slice(0, 20).map(product => ({
+  return response.data.products.nodes
+    .filter(product => product.onlineStoreUrl && product.variants.nodes.some(variant => variant.availableForSale))
+    .slice(0, 20);
+}
+
+/** A bounded staff search returns choices, never a saved automatic feed. */
+export async function manualNewsletterProducts(value: string): Promise<NewsletterProduct[]> {
+  if (currentMarketingBrand() !== "macroalgae-farms") throw new Error("Choose Macroalgae Farms to select newsletter products.");
+  return (await manualProductSearch(value)).map(product => ({
     ...emailProduct(product), url: `https://www.macroalgaefarms.com/products/${product.handle}`,
     portion: "", pricePrefix: "From", alt: product.title, button: "View product", showCompareAtPrice: false,
   }));
+}
+
+export async function manualBlackFridayProducts(value: string): Promise<CampaignEmailProduct[]> {
+  if (currentMarketingBrand() !== "corals-anonymous") throw new Error("Choose Corals Anonymous to select Black Friday products.");
+  return (await manualProductSearch(value)).map(product => {
+    const variants = product.variants.nodes.filter(variant => variant.availableForSale);
+    const cheapest = variants.reduce((current, variant) => Number(variant.price) < Number(current.price) ? variant : current);
+    const card = emailProduct(product, cheapest);
+    return {
+      ...card,
+      url: `https://coralsanonymous.com/products/${product.handle}`,
+      salePrice: card.salePrice && variants.some(variant => Number(variant.price) !== Number(cheapest.price))
+        ? "From " + card.salePrice : card.salePrice,
+      compareAtPrice: Number(cheapest.compareAtPrice) > Number(cheapest.price) ? card.compareAtPrice : undefined,
+      button: "View deal",
+    };
+  });
 }
 
 export async function resolveCampaignProductFeeds(
@@ -270,7 +295,7 @@ export async function resolveCampaignProductFeeds(
             : matching;
         return {
           ...section,
-          products: selected.slice(0, section.feed.limit).map(emailProduct),
+          products: selected.slice(0, section.feed.limit).map(product => emailProduct(product)),
         };
       }),
     },

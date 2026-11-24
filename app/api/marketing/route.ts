@@ -47,7 +47,8 @@ import {
   sharedEmailFooter,
   withBranding,
 } from "@/lib/marketing/rules";
-import { resendProvider, setup } from "@/lib/marketing/delivery";
+import { blackFridayDeliveryOrigin, resendProvider, setup } from "@/lib/marketing/delivery";
+import { validateBlackFridayCampaign, validateBlackFridayEmailSize } from "@/lib/marketing/black-friday";
 import { processMarketingInbox, inboxUnresolved, ingestionEnabled } from "@/lib/marketing/inbox";
 import { welcomeActivity } from "@/lib/marketing/welcome-activity";
 import { audienceDirectory, contactDetails } from "@/lib/marketing/audiences";
@@ -62,7 +63,7 @@ import { validateFlow } from "@/lib/marketing/flow-config";
 import { deliveryDateFromTags, deliveryUpsellDueAt } from "@/lib/marketing/delivery-upsell-config";
 import { enrollExistingWelcomeTest, removeProfileFromList } from "@/lib/marketing/profile-testing";
 import { shopifyGraphql } from "@/lib/marketing/shopify";
-import { manualNewsletterProducts, resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
+import { manualBlackFridayProducts, manualNewsletterProducts, resolveCampaignProductFeeds, resolveWelcomeSocialProducts } from "@/lib/marketing/campaign-product-feed";
 import { inspectOrderIdentity } from "@/lib/marketing/identity-review";
 import { deliveryReviewConfig, orderUpdateSkipReason } from "@/lib/marketing/order-update-review";
 import { currentMarketingBrand, marketingEnv, runWithMarketingBrand } from "@/lib/marketing/context";
@@ -187,6 +188,22 @@ const campaignOptions = (body: Record<string, unknown>) => ({
     body.recipientMode === "SCHEDULE_TIME" ? "SCHEDULE_TIME" : "SEND_TIME",
 });
 
+function campaignContent(value: unknown) {
+  const normalized = content(value);
+  if (normalized.layout === "black-friday" && currentMarketingBrand() !== "corals-anonymous")
+    throw new Error("The Black Friday template is for Corals Anonymous.");
+  return normalized;
+}
+
+async function checkBlackFridaySend(value: unknown) {
+  if ((value as { layout?: string } | null)?.layout !== "black-friday") return;
+  const source = campaignContent(value);
+  validateBlackFridayCampaign(source);
+  const settings = await loadMarketingSettings();
+  validateBlackFridayEmailSize(render(source, "#unsubscribe", settings.postalAddress, undefined,
+    settings.organizationName, settings.branding, blackFridayDeliveryOrigin()));
+}
+
 async function checkedCampaignAudience(value: unknown) {
   const parsed = campaignAudience(value);
   const resolved = await atomic((tx) => resolveCampaignAudience(tx, parsed));
@@ -202,6 +219,7 @@ async function scheduleCampaign(id: string, scheduledAt: Date) {
     where: { id, shop: shop(), status: "DRAFT" },
   });
   if (!campaign) throw new Error("Only drafts can be scheduled.");
+  await checkBlackFridaySend(campaign.content);
   const { resolved } = await checkedCampaignAudience(campaign.audience);
   if (campaign.recipientMode === "SCHEDULE_TIME") {
     const storedContent = await saveCampaignContent(prisma, shop(), campaign.content);
@@ -255,6 +273,7 @@ async function scheduleCampaignTest(id: string, to: string, scheduledAt: Date) {
   if (!original) throw new Error("Campaign not found.");
   if (original.channel !== "EMAIL")
     throw new Error("One-contact campaign tests currently support email only.");
+  await checkBlackFridaySend(original.content);
   const settings = await loadMarketingSettings();
   const readiness = setup(settings.operations, settings.postalAddress, settings.sender);
   if (!readiness.sendingEnabled || !readiness.emailReady || !readiness.migrationConfirmed)
@@ -686,6 +705,9 @@ async function getMarketing(request: Request) {
     if (view === "campaign-products") {
       return Response.json({ products: await manualNewsletterProducts(url.searchParams.get("q") || "") }, { headers: { "Cache-Control": "no-store" } });
     }
+    if (view === "black-friday-products") {
+      return Response.json({ products: await manualBlackFridayProducts(url.searchParams.get("q") || "") }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (view === "preview") {
       const s = await loadMarketingSettings();
       return new Response(
@@ -1088,7 +1110,7 @@ async function postMarketing(request: Request) {
     if (b.action === "preview") {
       const s = await loadMarketingSettings();
       const previewContent = await resolveCampaignProductFeeds(
-        content(b.content),
+        campaignContent(b.content),
         `campaign-preview:${crypto.randomUUID()}`,
       );
       return Response.json({
@@ -1104,7 +1126,7 @@ async function postMarketing(request: Request) {
     if (b.action === "preview-campaign-feeds")
       return Response.json({
         content: await resolveCampaignProductFeeds(
-          content(b.content),
+          campaignContent(b.content),
           `campaign-preview:${crypto.randomUUID()}`,
         ),
       });
@@ -1119,7 +1141,7 @@ async function postMarketing(request: Request) {
         throw new Error("Complete email provider setup first.");
       const id = crypto.randomUUID();
       const testContent = await resolveCampaignProductFeeds(
-        content(b.content),
+        campaignContent(b.content),
         `campaign-test:${id}`,
       );
       const testBranding = {
@@ -1231,14 +1253,15 @@ async function postMarketing(request: Request) {
       if (!String(b.name || "").trim() || !String(b.subject || "").trim())
         throw new Error("Campaign name and subject are required.");
       const { parsed } = await checkedCampaignAudience(b.audience);
+      const source = campaignContent(b.content);
       const data = {
         name: String(b.name).slice(0, 200),
         subject: String(b.subject).slice(0, 200),
-        content: json(content(b.content)),
+        content: json(source),
         audience: json(parsed),
         ...campaignOptions(b),
       };
-      await saveDiscoveredBranding(data.content, b.brandingSource);
+      if (source.layout !== "black-friday") await saveDiscoveredBranding(data.content, b.brandingSource);
       if (b.id) {
         const result = await prisma.marketingCampaign.updateMany({
           where: { id: b.id, shop: shop(), status: "DRAFT" },
@@ -1373,7 +1396,7 @@ async function postMarketing(request: Request) {
           );
         data = json(f);
       } else
-        data = json(b.kind === "SEGMENT" ? segment(b.data) : content(b.data));
+        data = json(b.kind === "SEGMENT" ? segment(b.data) : campaignContent(b.data));
       const key = String(b.key || crypto.randomUUID()).slice(0, 100);
       const result = await atomic(async tx => {
         if (b.kind === "FLOW" && key === "abandoned-cart" && b.data?.cart?.finalOfferEnabled === undefined) {
@@ -1412,7 +1435,8 @@ async function postMarketing(request: Request) {
         });
         return result;
       });
-      await saveDiscoveredBranding(data, b.brandingSource, { preserveExistingLogo: b.kind === "FLOW" });
+      if ((data as { layout?: string }).layout !== "black-friday")
+        await saveDiscoveredBranding(data, b.brandingSource, { preserveExistingLogo: b.kind === "FLOW" });
       return Response.json(result);
     }
     throw new Error("Unknown action.");

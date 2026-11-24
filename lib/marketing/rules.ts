@@ -4,6 +4,9 @@ import { normalizeMacroNewsletter, renderMacroNewsletter, type MacroNewsletter }
 import { inSegmentSnapshot, inMasterMarketingAudience, masterEngagementAllowed, segmentSnapshot, type SegmentSnapshot, type MasterMarketing } from "./segment-snapshot";
 import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, originalWelcomeFinalBody, finalWelcomeBody } from "./welcome-copy";
 import { normalizeReefDesign, renderCoralsReef, type ReefDesign } from "./corals-reef";
+import { normalizeBlackFriday, type BlackFridayDesign } from "./black-friday";
+import { renderBlackFridayEmail } from "./black-friday-email";
+import { DAILY_DEALS_COUNTDOWN_PATH } from "./daily-deals-countdown-config";
 export const channels = [
   "EMAIL",
   "SMS_MARKETING",
@@ -19,6 +22,7 @@ export const emailLayouts = [
   "campaign-sale",
   "macro-newsletter",
   "corals-reef",
+  "black-friday",
 ] as const;
 export type EmailLayout = (typeof emailLayouts)[number];
 export type CampaignEmailProduct = {
@@ -273,6 +277,7 @@ export type Content = {
   productGridStyle?: ProductGridStyle;
   campaignLayout?: CampaignEmailLayout;
   macroNewsletter?: MacroNewsletter;
+  blackFriday?: BlackFridayDesign;
 };
 export type MarketingOperations = {
   sendingEnabled: boolean;
@@ -1070,6 +1075,7 @@ export function content(value: unknown): Content {
     productGridStyle: normalizedProductGridStyle,
     campaignLayout,
     macroNewsletter,
+    ...(c.layout === "black-friday" ? { blackFriday: normalizeBlackFriday(c.blackFriday) } : {}),
   };
 }
 export function withBranding(c: Content, branding?: EmailBranding): Content {
@@ -1166,7 +1172,7 @@ export function extractEmailBranding(value: unknown): Partial<EmailBranding> {
     if (typeof v.facebookIcon === "string" && v.facebookIcon)
       found.facebookIcon = v.facebookIcon;
     for (const [key, child] of Object.entries(v)) {
-      if (key !== "macroNewsletter" && key !== "reefDesign" && child && typeof child === "object") visit(child);
+      if (key !== "macroNewsletter" && key !== "reefDesign" && key !== "blackFriday" && child && typeof child === "object") visit(child);
     }
   };
   visit(value);
@@ -1577,11 +1583,21 @@ export function render(
   profileName?: string,
   organizationName = "Corals Anonymous",
   branding?: EmailBranding,
+  assetBaseUrl = "",
 ) {
   c = content(withBranding(content(c), branding));
   address = c.showPostalAddress ? address : "";
   const e = escapeHtml;
   const layout = c.layout || c.template || "standard";
+  if (layout === "black-friday" && c.blackFriday) {
+    const design = c.blackFriday;
+    return renderBlackFridayEmail(c, design.sections.map((section) => ({
+      ...section, label: section.linkLabel, url: section.linkUrl,
+    })), design.dailyProducts, {
+      assetBaseUrl, timerUrl: assetBaseUrl + DAILY_DEALS_COUNTDOWN_PATH,
+      dailyDealsUrl: design.dailyDealsUrl, unsubscribe, address, organizationName,
+    });
+  }
   if (layout === "corals-reef") return renderCoralsReef(c, unsubscribe, address, profileName, organizationName);
   if (layout === "macro-newsletter" && c.macroNewsletter)
     return renderMacroNewsletter(c, unsubscribe, address, profileName);

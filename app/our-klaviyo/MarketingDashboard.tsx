@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import EmailDesigner from "./EmailDesigner";
 import { flowEmailTemplates } from "@/lib/marketing/flow-email-templates";
+import { blackFridayCampaignTemplate } from "@/lib/marketing/black-friday";
 import { macroNewsletterDefinitions, macroNewsletterTemplates } from "@/lib/marketing/macro-newsletters";
 import FlowsWorkspace from "./FlowsWorkspace";
 import "./flows.css";
@@ -40,6 +41,17 @@ type Resource = {
   data: Record<string, unknown>;
   subject?: string;
   sourceFlow?: string;
+  builtIn?: boolean;
+};
+const blackFridayTemplate: Resource = {
+  id: blackFridayCampaignTemplate.key,
+  key: blackFridayCampaignTemplate.key,
+  kind: "TEMPLATE",
+  name: blackFridayCampaignTemplate.name,
+  data: { ...blackFridayCampaignTemplate.content },
+  subject: blackFridayCampaignTemplate.subject,
+  enabled: false,
+  builtIn: true,
 };
 type Profile = {
   id: string;
@@ -330,6 +342,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   );
   const templates: Resource[] = data
     ? [
+        ...(!isMacro ? [blackFridayTemplate] : []),
         ...(isMacro ? macroNewsletterTemplates(data.resources) : flowEmailTemplates(data.resources)),
         ...data.resources.filter((r) => r.kind === "TEMPLATE").map(resource => ({ ...resource, subject: resource.subject || (isMacro ? macroNewsletterDefinitions.find(definition => resource.key === `macro-newsletter-${definition.design}`)?.subject : undefined) })),
       ]
@@ -493,7 +506,9 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           status={
             error ||
             notice ||
-            (resource?.sourceFlow
+            (resource?.builtIn
+              ? "Save email creates an editable copy of this preset."
+              : resource?.sourceFlow
               ? "Save creates a separate template; the flow email stays unchanged."
               : "Save email to keep your changes.")
           }
@@ -527,13 +542,13 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
           }}
           onSave={async () =>
             !!(await run(async () => {
-              if (resource?.sourceFlow) {
+              if (resource?.builtIn || resource?.sourceFlow) {
                 const copy = await action({
                   action: "save-resource",
                   kind: "TEMPLATE",
                   name: `${resource.name} copy`,
                   data: resource.data,
-                  brandingSource: editingContent,
+                  ...(resource.builtIn ? {} : { brandingSource: editingContent }),
                 });
                 setResource({
                   ...resource,
@@ -541,6 +556,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                   key: copy.key,
                   name: copy.name,
                   sourceFlow: undefined,
+                  builtIn: undefined,
                 });
               } else if (resource)
                 await action({
@@ -1392,7 +1408,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                   <div>
                     <p className="mk-eyebrow">STANDALONE TEMPLATES</p>
                     <h2>Reusable templates</h2>
-                    <p>Saved layouts that are not tied to a specific flow.</p>
+                    <p>Campaign presets and saved layouts for this brand.</p>
                   </div>
                   <span className="mk-status">
                     {reusableTemplates.length} template{reusableTemplates.length === 1 ? "" : "s"}
@@ -1404,11 +1420,11 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
                       <article className="mk-template-card" key={template.id}>
                         <div className="mk-template-card-topline">
                           <span>{template.name}</span>
-                          <span className="mk-status">Reusable</span>
+                          <span className="mk-status">{template.builtIn ? "Preset" : "Reusable"}</span>
                         </div>
                         <p className="mk-template-label">Template layout</p>
                         <h3>{template.subject || `${brand.name} email layout`}</h3>
-                        <button onClick={() => setResource(template)}>Review and edit</button>
+                        <button onClick={() => setResource(template)}>{template.builtIn ? "Customize preset" : "Review and edit"}</button>
                       </article>
                     ))}
                   </div>

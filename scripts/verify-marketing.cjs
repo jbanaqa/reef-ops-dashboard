@@ -14,5 +14,5 @@ run([require.resolve("prisma/build/index.js"), "generate"]);
 if (mode === "build") {
   run([require.resolve("next/dist/bin/next"), "build"]);
 } else {
-  run(["node_modules/tsx/dist/cli.mjs", "--tsconfig", "scripts/tsconfig.marketing-tests.json", "--test", "--test-timeout=60000", "scripts/marketing.test.ts", "scripts/marketing.editor.test.tsx", "scripts/marketing.integration.test.ts", "scripts/macro-newsletters.test.ts"]);
+  run(["node_modules/tsx/dist/cli.mjs", "--tsconfig", "scripts/tsconfig.marketing-tests.json", "--test", "--test-timeout=60000", "scripts/marketing.test.ts", "scripts/marketing.editor.test.tsx", "scripts/marketing.integration.test.ts", "scripts/macro-newsletters.test.ts", "scripts/daily-deals-countdown.test.ts", "scripts/black-friday.test.ts"]);
 }

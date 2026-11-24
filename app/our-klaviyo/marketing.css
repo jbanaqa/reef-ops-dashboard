@@ -34,6 +34,18 @@ button.mk-flow-node{font:inherit;text-align:left;cursor:pointer;color:inherit;wi
 .mk-campaign-builder-card>summary,.mk-campaign-product-card>summary{cursor:pointer;color:var(--text-main);font-size:13px;font-weight:650;line-height:1.45}
 .mk-campaign-builder-card[open]>summary,.mk-campaign-product-card[open]>summary{padding-bottom:10px;border-bottom:1px solid var(--border)}
 .mk-campaign-builder-actions,.mk-campaign-add-row{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.marketing .mk-editor-section .mk-bf-link-help{margin-top:8px}
+.mk-bf-product-picker{border-top:1px solid var(--border);margin-top:16px;padding-top:14px}
+.mk-bf-product-picker>button{margin-top:8px}
+.mk-bf-product-count{display:flex;justify-content:space-between;gap:8px;font-size:13px;margin-bottom:8px}
+.mk-bf-product-count>span{color:var(--text-muted);font-variant-numeric:tabular-nums}
+.mk-bf-product-list{list-style:none;padding:0;margin:10px 0 0;display:grid;gap:8px}
+.mk-bf-product-list>li{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:8px;min-width:0}
+.mk-bf-product-list>li>button{margin-top:7px}
+.mk-bf-product-list .mk-campaign-builder-actions{margin-bottom:0}
+.mk-bf-product-info{display:flex;align-items:center;gap:8px;min-width:0;font-size:13px;overflow-wrap:anywhere}
+.mk-bf-product-info span{display:block;margin-top:2px;color:var(--text-muted);font-size:12px}
+.mk-bf-product-photo{display:block;flex:none;object-fit:cover;border-radius:4px}
 .marketing .mk-campaign-builder-actions button,.marketing .mk-campaign-add-row button{padding:7px 9px;font-size:12px}
 .mk-campaign-products{display:grid;gap:8px;margin-top:12px}
 .mk-campaign-feed-card{display:grid;gap:7px;padding:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}

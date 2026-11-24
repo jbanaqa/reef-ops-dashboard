@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import type { Context } from "./cart-launch.integration";
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { defaultMacroCampaignContent } from "../lib/marketing/brands";
+import { blackFridayCampaignTemplate } from "../lib/marketing/black-friday";
 import { defaultContent, withBranding } from "../lib/marketing/rules";
 import { newsletterTextDocument } from "../lib/marketing/newsletter-rich-text";
 import { paidOrderFixture } from "./paid-order.fixture";
@@ -31,6 +32,38 @@ async function isolatedCampaigns(context: Context, work: (coralsShop: string, ma
 }
 
 export function registerMarketingBrandRouteTests(context: () => Context) {
+  test("Black Friday drafts and reusable copies persist edited sections in Corals Anonymous only", async () => isolatedCampaigns(context(), async (coralsShop) => {
+    const { prisma } = context();
+    const api = await import("../app/api/marketing/route");
+    const source = structuredClone(blackFridayCampaignTemplate.content);
+    const first = source.blackFriday.sections[0];
+    first.title = "Featured anemones";
+    first.linkLabel = "See all anemones";
+    first.products = first.products.slice(1, 3);
+    source.blackFriday.sections.splice(1, 2);
+    const draft = {
+      action: "save-campaign", name: "Black Friday draft", subject: blackFridayCampaignTemplate.subject,
+      content: source, audience: { version: 2, includeKeys: [], excludeKeys: [] },
+    };
+    assert.equal((await api.POST(request("macroalgae-farms", draft))).status, 400);
+    const response = await api.POST(request("corals-anonymous", draft));
+    assert.equal(response.status, 200);
+    const { id } = await response.json();
+    const saved = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id } });
+    assert.equal(saved.shop, coralsShop);
+    assert.equal(saved.status, "DRAFT");
+    assert.deepEqual((saved.content as { blackFriday?: unknown }).blackFriday, source.blackFriday);
+    assert.equal((await prisma.marketingMessage.count({ where: { campaignId: id } })), 0);
+
+    const template = { action: "save-resource", kind: "TEMPLATE", name: "Edited Black Friday", data: source };
+    assert.equal((await api.POST(request("macroalgae-farms", template))).status, 400);
+    const copy = await api.POST(request("corals-anonymous", template));
+    assert.equal(copy.status, 200);
+    const savedCopy = await copy.json();
+    assert.deepEqual(savedCopy.data.blackFriday, source.blackFriday);
+    assert.equal(blackFridayCampaignTemplate.content.blackFriday.sections.length, 3);
+  }));
+
   test("Brand routes: campaign archiving and restoration are visual only across every lifecycle and both brands", async () => isolatedCampaigns(context(), async (coralsShop, macroShop) => {
     const { prisma, store } = context();
     const api = await import("../app/api/marketing/route");

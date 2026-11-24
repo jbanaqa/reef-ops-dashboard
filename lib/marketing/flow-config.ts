@@ -52,6 +52,12 @@ const subject = (v: unknown) => {
     throw new Error("Add a subject of 1–200 characters.");
   return v.trim();
 };
+function flowContent(value: unknown) {
+  const normalized = content(value);
+  if (normalized.layout === "black-friday")
+    throw new Error("The Black Friday template is available for campaigns.");
+  return normalized;
+}
 export function validateFlow(key: string, value: unknown): FlowConfig {
   if (!flowDefaults.some((f) => f.key === key))
     throw new Error("Unknown flow.");
@@ -108,7 +114,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
       minutes: minutes(s.minutes, 0),
       subject: subject(s.subject),
       channel: s.channel,
-      content: content(s.content),
+      content: flowContent(s.content),
     };
   });
   if (key === "b2b-welcome" && steps.length !== 1)
@@ -148,7 +154,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     );
   const branch = (b: Branch) => {
     if (!b) throw new Error("Both legacy branch objects are required.");
-    return { subject: subject(b.subject), content: content(b.content) };
+    return { subject: subject(b.subject), content: flowContent(b.content) };
   };
   if (f.cart && (cartV2 ? steps.filter((_, index) => index !== 2 || cartFinalOfferEnabled(f.cart)).reduce((total, step) => total + step.minutes, 0)
     : steps[0].minutes + minutes(f.smsMinutes, 30) + minutes(f.branchMinutes, 1440)) >= CART_EXPIRY_MINUTES)
@@ -182,7 +188,7 @@ export function validateFlow(key: string, value: unknown): FlowConfig {
     steps,
     ...(!cartV2 && f.smsContent
       ? {
-          smsContent: content(f.smsContent),
+          smsContent: flowContent(f.smsContent),
           smsMinutes: minutes(f.smsMinutes, 30),
         }
       : {}),

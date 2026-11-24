@@ -1,0 +1,129 @@
+{
+  "daily": [
+    {
+      "id": "blueberry-gorgonian",
+      "title": "Blueberry Gorgonian",
+      "url": "https://coralsanonymous.com/products/blueberry-gorgonian",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/corals-anonymous-gorgonian-small-1-2-frag-blueberry-gorgonian-42901858124002.jpg?v=1750138353",
+      "salePrice": "From $8.99"
+    },
+    {
+      "id": "giant-cinnabon-feather-duster-fan-worm-3-4",
+      "title": "Cinnabon Feather Duster",
+      "url": "https://coralsanonymous.com/products/giant-cinnabon-feather-duster-fan-worm-3-4",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/corals-anonymous-worm-1-giant-feather-duster-giant-cinnabon-feather-duster-fan-worm-3-4-40204401443042.jpg?v=1750140820",
+      "salePrice": "From $4.99",
+      "compareAtPrice": "$29.99"
+    },
+    {
+      "id": "aussie-duncan-single-polyp-special-deal",
+      "title": "Aussie Duncan",
+      "url": "https://coralsanonymous.com/products/aussie-duncan-single-polyp-special-deal",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/P9177111.jpg?v=1758142220",
+      "salePrice": "$7.99",
+      "compareAtPrice": "$24.99"
+    }
+  ],
+  "anemones": [
+    {
+      "id": "pink-phantom-tube-anemone",
+      "title": "Pink Phantom Tube Anemone",
+      "url": "https://coralsanonymous.com/products/pink-phantom-tube-anemone",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/RadiantCoralAnemoneMacro.jpg?v=1793226169",
+      "salePrice": "$41.99",
+      "compareAtPrice": "$69.99"
+    },
+    {
+      "id": "green-bubble-tip-anemone-6",
+      "title": "Green Bubble Tip Anemone",
+      "url": "https://coralsanonymous.com/products/green-bubble-tip-anemone-6",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/preview_images/60bf53cdedd4472899d20c820cd61a88.thumbnail.0000000000.jpg?v=1762555851",
+      "salePrice": "From $39.99",
+      "compareAtPrice": "$49.99"
+    },
+    {
+      "id": "purple-tip-hydra-bubble-tip-anemone",
+      "title": "Purple-Tip Hydra Anemone",
+      "url": "https://coralsanonymous.com/products/purple-tip-hydra-bubble-tip-anemone",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/corals-anonymous-bubbletipanemone-1-3-purple-tip-hydra-bubble-tip-anemone-40373512143074.jpg?v=1759884112",
+      "salePrice": "From $55.24",
+      "compareAtPrice": "$84.99"
+    },
+    {
+      "id": "ca-pikachu-mini-carpet-anemone",
+      "title": "CA Pikachu Mini Carpet Anemone",
+      "url": "https://coralsanonymous.com/products/ca-pikachu-mini-carpet-anemone",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/P4284829.jpg?v=1777411130",
+      "salePrice": "From $56.00",
+      "compareAtPrice": "$159.99"
+    }
+  ],
+  "corals": [
+    {
+      "id": "indo-holy-grail-gold-torch-11",
+      "title": "Indo Holy Grail Gold Torch",
+      "url": "https://coralsanonymous.com/products/indo-holy-grail-gold-torch-11",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/PA211355.jpg?v=1792624027",
+      "salePrice": "From $359.99",
+      "compareAtPrice": "$599.99"
+    },
+    {
+      "id": "cherry-swirl-acans-2-3-polyps",
+      "title": "Cherry Swirl Acans",
+      "url": "https://coralsanonymous.com/products/cherry-swirl-acans-2-3-polyps",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/PA211333_enhanced_4096.jpg?v=1792620986",
+      "salePrice": "$44.99",
+      "compareAtPrice": "$54.99"
+    },
+    {
+      "id": "pink-candyland-zoa-2-3-polyps",
+      "title": "Pink Candyland Zoas",
+      "url": "https://coralsanonymous.com/products/pink-candyland-zoa-2-3-polyps",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/pinkcandyland.jpg?v=1781572937",
+      "salePrice": "$65.00",
+      "compareAtPrice": "$129.99"
+    },
+    {
+      "id": "flamin-hot-sea-fan-gorgonian-rare",
+      "title": "Flamin’ Hot Sea Fan",
+      "url": "https://coralsanonymous.com/products/flamin-hot-sea-fan-gorgonian-rare",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/ChatGPTImageMay21_2026_10_50_04PM.png?v=1779429025",
+      "salePrice": "From $52.24",
+      "compareAtPrice": "$94.99"
+    }
+  ],
+  "creatures": [
+    {
+      "id": "spider-conch-snail-lambis-lambis",
+      "title": "Spider Conch Snail",
+      "url": "https://coralsanonymous.com/products/spider-conch-snail-lambis-lambis",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/hf_20260127_035136_33ce350f-8982-483d-b9d8-620e20a20494.png?v=1769486042",
+      "salePrice": "$39.99",
+      "compareAtPrice": "$49.99"
+    },
+    {
+      "id": "blue-tuxedo-urchin-algae-eater",
+      "title": "Blue Tuxedo Urchin",
+      "url": "https://coralsanonymous.com/products/blue-tuxedo-urchin-algae-eater",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/corals-anonymous-urchin-default-title-blue-tuxedo-globe-gazer-urchin-40196794450146.jpg?v=1750139744",
+      "salePrice": "$39.99",
+      "compareAtPrice": "$49.99"
+    },
+    {
+      "id": "yellow-sea-cucumber",
+      "title": "Yellow Sea Cucumber",
+      "url": "https://coralsanonymous.com/products/yellow-sea-cucumber",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/ChatGPTImageApr3_2026_11_09_29AM.png?v=1775239863",
+      "salePrice": "From $14.99",
+      "compareAtPrice": "$24.99"
+    },
+    {
+      "id": "midnight-black-feather-star",
+      "title": "Midnight Black Feather Star",
+      "url": "https://coralsanonymous.com/products/midnight-black-feather-star",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/ChatGPTImageApr30_2026_02_31_45PM.png?v=1777584945",
+      "salePrice": "$56.00",
+      "compareAtPrice": "$139.99"
+    }
+  ]
+}
