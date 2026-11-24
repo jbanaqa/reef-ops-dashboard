@@ -67,6 +67,10 @@ test("Black Friday delivery uses public Reef Ops assets, real unsubscribe, and s
     assert.match(hero?.closest("tr")?.nextElementSibling?.textContent ?? "", /\*On select items\./);
     const dailyPrices = Array.from(document.querySelectorAll(".bf-daily-prices"), (price) => price.textContent ?? "");
     assert.equal(dailyPrices.length, 3);
+    assert.match(dailyPrices[0], /\$8\.99\s+\$34\.99/);
+    const blueberryPhoto = document.querySelector('img.bf-daily-image[alt="Blueberry Gorgonian"]');
+    assert.equal(blueberryPhoto?.closest("a")?.querySelector(".bf-deal-badge")?.textContent, "74% OFF");
+    assert.equal(new URL(blueberryPhoto?.closest("a")?.href ?? "").searchParams.get("variant"), "36321092993184");
     assert.match(dailyPrices[1], /\$4\.99\s+\$29\.99/);
     for (const price of dailyPrices) assert.doesNotMatch(price, /\bfrom\b/i);
     const collectionText = Array.from(document.querySelectorAll(".bf-collection-item"), (card) => card.textContent).join(" ");
