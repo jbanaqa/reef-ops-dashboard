@@ -9,6 +9,7 @@ const { chromium } = require("playwright");
 (async () => {
   const productTagsOnly = process.argv.includes("--product-tags-only");
   const blackFridayOnly = process.argv.includes("--black-friday-only");
+  const macroBlackFridayOnly = process.argv.includes("--macro-black-friday-only");
   const output = await fs.mkdtemp(path.join(os.tmpdir(), "reef-shared-email-"));
   const bundle = await build({
     entryPoints: ["scripts/campaigns.browser.fixture.tsx"],
@@ -196,6 +197,25 @@ const { chromium } = require("playwright");
             settings: data.settings,
           },
         });
+      } else if (macroBlackFridayOnly && url.searchParams.get("view") === "black-friday-products") {
+        assert.equal(url.searchParams.get("brand"), "macroalgae-farms");
+        assert.equal(url.searchParams.get("q"), "macroalgae");
+        await route.fulfill({ json: { products: [
+          {
+            id: "gid://shopify/Product/100",
+            title: "Cardinal Feather Macroalgae",
+            url: "https://www.macroalgaefarms.com/products/cardinal-feather-macroalgae?variant=100",
+            salePrice: "$25.99",
+          },
+          {
+            id: "gid://shopify/Product/200",
+            title: "Short Leaf Fern Macroalgae",
+            variantLabel: "Starter portion",
+            url: "https://www.macroalgaefarms.com/products/short-leaf-fern-macroalgae?variant=200",
+            salePrice: "$12.00",
+            compareAtPrice: "$20.00",
+          },
+        ] } });
       } else if (blackFridayOnly && url.searchParams.get("view") === "black-friday-products") {
         assert.equal(url.searchParams.get("brand"), "corals-anonymous");
         assert.equal(url.searchParams.get("q"), "bubble tip");
@@ -269,6 +289,74 @@ const { chromium } = require("playwright");
         });
       else await route.fulfill({ json: data });
     });
+    if (macroBlackFridayOnly) {
+      const openCampaign = async () => {
+        await page.getByRole("button", { name: "Edit", exact: true }).click();
+        await page.getByRole("button", { name: "Continue to email" }).click();
+      };
+      const origin = "http://127.0.0.1:" + server.address().port;
+      const template = page.getByLabel("Start from a template");
+      await page.goto(origin + "/?brand=corals-anonymous");
+      await openCampaign();
+      assert.equal(await template.locator('option[value="corals-black-friday"]').count(), 1);
+      assert.equal(await template.locator('option[value="macro-black-friday"]').count(), 0);
+      data.settings.organizationName = "Macroalgae Farms";
+      await page.goto(origin + "/?brand=macroalgae-farms");
+      await openCampaign();
+      assert.equal(await template.locator('option[value="corals-black-friday"]').count(), 0);
+      await template.selectOption("macro-black-friday");
+      const openEditor = () => page.getByRole("button", { name: "Edit email and preview" }).click();
+      await openEditor();
+      const editor = page.getByRole("dialog", { name: "Email editor" });
+      const preview = editor.frameLocator("iframe");
+      const subtext = editor.getByLabel("Subtext under Black Friday Sale");
+      assert.match(await subtext.inputValue(), /^Up to 50% OFF on qualifying \$1,000\+ orders\./);
+      assert.equal(await editor.getByRole("button", { name: "Artwork", exact: true }).count(), 0);
+      assert.equal(await editor.getByRole("button", { name: "Footer", exact: true }).count(), 0);
+      await preview.getByText("Cardinal Feather Macroalgae", { exact: true }).waitFor();
+      const newCopy = "Black Friday savings across macroalgae, fish, and reef invertebrates.";
+      await subtext.fill(newCopy);
+      await preview.getByText(newCopy, { exact: true }).waitFor();
+      await editor.getByRole("button", { name: "Products", exact: true }).click();
+      assert.equal(await editor.getByLabel("Visual preset", { exact: true }).count(), 0);
+      const featured = editor.locator("details").filter({ has: page.locator("summary", { hasText: "Featured products" }) });
+      const grid = editor.locator("details").filter({ has: page.locator("summary", { hasText: "Product grid" }) });
+      assert.equal(await featured.getByRole("list", { name: "Selected products" }).getByRole("listitem").count(), 2);
+      await grid.locator("summary").click();
+      assert.equal(await grid.getByRole("list", { name: "Selected products" }).getByRole("listitem").count(), 8);
+      await featured.getByRole("button", { name: "Remove Pink Rose Frogspawn" }).click();
+      await featured.getByLabel("Find a Shopify product").fill("macroalgae");
+      await featured.getByRole("button", { name: "Search products", exact: true }).click();
+      const alreadySelected = featured.getByRole("button", { name: "Cardinal Feather Macroalgae is selected" });
+      await alreadySelected.waitFor();
+      assert.equal(await alreadySelected.isDisabled(), true);
+      await featured.getByRole("button", { name: "Add Short Leaf Fern Macroalgae" }).click();
+      await featured.getByLabel("Variant label for Short Leaf Fern Macroalgae").fill("Starter bunch");
+      await featured.getByRole("button", { name: "Move Short Leaf Fern Macroalgae up" }).click();
+      await preview.getByText("Starter bunch", { exact: true }).waitFor();
+      const pickedProduct = preview.getByText("Short Leaf Fern Macroalgae", { exact: true });
+      assert.equal(await pickedProduct.evaluate(node => node.closest("a")?.href), "https://www.macroalgaefarms.com/products/short-leaf-fern-macroalgae?variant=200");
+      await editor.getByRole("button", { name: "Mobile", exact: true }).click();
+      await preview.getByText("Orange Skittle Tube Anemone", { exact: true }).waitFor();
+      await editor.getByRole("button", { name: "Save email", exact: true }).click();
+      await editor.locator(".mk-designer-notice").filter({ hasText: "Email saved" }).waitFor();
+      const saved = writes.findLast(write => write.action === "save-campaign").content;
+      assert.equal(saved.layout, "macro-black-friday");
+      assert.equal(saved.body, newCopy);
+      assert.deepEqual(saved.macroBlackFriday.featuredProducts.map(product => product.title), ["Short Leaf Fern Macroalgae", "Cardinal Feather Macroalgae"]);
+      assert.equal(saved.macroBlackFriday.gridProducts.length, 8);
+      await page.reload();
+      await openCampaign();
+      await openEditor();
+      assert.equal(await subtext.inputValue(), newCopy);
+      await preview.getByText("Starter bunch", { exact: true }).waitFor();
+      await editor.getByRole("button", { name: "Products", exact: true }).click();
+      const selected = featured.getByRole("list", { name: "Selected products" }).getByRole("listitem");
+      assert.deepEqual(await selected.locator("strong").allTextContents(), ["Short Leaf Fern Macroalgae", "Cardinal Feather Macroalgae"]);
+      assert.deepEqual(errors, []);
+      console.log("Macroalgae Farms Black Friday preset, fixed design, editable products, preview, and save/reopen passed.");
+      return;
+    }
     if (blackFridayOnly) {
       await page.goto("http://127.0.0.1:" + server.address().port);
       await page.getByRole("button", { name: "Edit", exact: true }).click();

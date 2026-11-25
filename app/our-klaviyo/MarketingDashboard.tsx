@@ -6,6 +6,7 @@ import Link from "next/link";
 import EmailDesigner from "./EmailDesigner";
 import { flowEmailTemplates } from "@/lib/marketing/flow-email-templates";
 import { blackFridayCampaignTemplate } from "@/lib/marketing/black-friday";
+import { macroBlackFridayCampaignTemplate } from "@/lib/marketing/macro-black-friday";
 import { macroNewsletterDefinitions, macroNewsletterTemplates } from "@/lib/marketing/macro-newsletters";
 import FlowsWorkspace from "./FlowsWorkspace";
 import "./flows.css";
@@ -43,16 +44,20 @@ type Resource = {
   sourceFlow?: string;
   builtIn?: boolean;
 };
-const blackFridayTemplate: Resource = {
-  id: blackFridayCampaignTemplate.key,
-  key: blackFridayCampaignTemplate.key,
-  kind: "TEMPLATE",
-  name: blackFridayCampaignTemplate.name,
-  data: { ...blackFridayCampaignTemplate.content },
-  subject: blackFridayCampaignTemplate.subject,
-  enabled: false,
-  builtIn: true,
-};
+function campaignPreset(template: { key: string; name: string; content: Content; subject: string }): Resource {
+  return {
+    id: template.key,
+    key: template.key,
+    kind: "TEMPLATE",
+    name: template.name,
+    data: { ...template.content },
+    subject: template.subject,
+    enabled: false,
+    builtIn: true,
+  };
+}
+const blackFridayTemplate = campaignPreset(blackFridayCampaignTemplate);
+const macroBlackFridayTemplate = campaignPreset(macroBlackFridayCampaignTemplate);
 type Profile = {
   id: string;
   email: string | null;
@@ -342,7 +347,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   );
   const templates: Resource[] = data
     ? [
-        ...(!isMacro ? [blackFridayTemplate] : []),
+        isMacro ? macroBlackFridayTemplate : blackFridayTemplate,
         ...(isMacro ? macroNewsletterTemplates(data.resources) : flowEmailTemplates(data.resources)),
         ...data.resources.filter((r) => r.kind === "TEMPLATE").map(resource => ({ ...resource, subject: resource.subject || (isMacro ? macroNewsletterDefinitions.find(definition => resource.key === `macro-newsletter-${definition.design}`)?.subject : undefined) })),
       ]

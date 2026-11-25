@@ -33,10 +33,11 @@ function ProductThumbnail({ product }: { product: CampaignEmailProduct }) {
   return <img className="mk-bf-product-photo" width={40} height={40} alt="" loading="lazy" src={product.image} />;
 }
 
-function ProductPicker({ products, limit, onChange }: {
+export function BlackFridayProductPicker({ products, limit, onChange, editVariantLabel = false }: {
   products: CampaignEmailProduct[];
   limit: number;
   onChange: (products: CampaignEmailProduct[]) => void;
+  editVariantLabel?: boolean;
 }) {
   const request = useMarketingRequest();
   const searchVersion = useRef(0);
@@ -82,6 +83,16 @@ function ProductPicker({ products, limit, onChange }: {
           <ProductThumbnail product={product} />
           <div><strong>{product.title}</strong>{product.salePrice && <span>{product.salePrice}</span>}</div>
         </div>
+        {editVariantLabel && <label>Variant label
+          <input
+            aria-label={`Variant label for ${product.title}`}
+            value={product.variantLabel || ""}
+            maxLength={120}
+            onChange={event => onChange(products.map((current, itemIndex) =>
+              itemIndex === index ? { ...current, variantLabel: event.target.value } : current,
+            ))}
+          />
+        </label>}
         <div className="mk-campaign-builder-actions">
           <button type="button" aria-label={`Move ${product.title} up`} disabled={index === 0} onClick={() => onChange(move(products, index, -1))}>↑</button>
           <button type="button" aria-label={`Move ${product.title} down`} disabled={index === products.length - 1} onClick={() => onChange(move(products, index, 1))}>↓</button>
@@ -120,13 +131,13 @@ function ProductPicker({ products, limit, onChange }: {
         return <li key={product.id}>
           <div className="mk-bf-product-info">
             <ProductThumbnail product={product} />
-            <div><strong>{product.title}</strong>{product.salePrice && <span>{product.salePrice}</span>}</div>
+            <div><strong>{product.title}</strong>{editVariantLabel && product.variantLabel && <span>{product.variantLabel}</span>}{product.salePrice && <span>{product.salePrice}</span>}</div>
           </div>
           <button
             type="button"
             aria-label={selected ? `${product.title} is selected` : `Add ${product.title}`}
             disabled={selected || products.length >= limit}
-            onClick={() => onChange([...products, { ...product, button: "View deal" }])}
+            onClick={() => onChange([...products, editVariantLabel ? product : { ...product, button: "View deal" }])}
           >{selected ? "Selected" : "Add"}</button>
         </li>;
       })}
@@ -153,7 +164,7 @@ export default function BlackFridayFields({ design, onChange }: {
         <label>Live Daily Super Deals URL
           <input type="url" maxLength={500} value={design.dailyDealsUrl} onChange={event => onChange({ ...design, dailyDealsUrl: event.target.value })} />
         </label>
-        <ProductPicker products={design.dailyProducts} limit={BLACK_FRIDAY_DAILY_PRODUCTS} onChange={dailyProducts => onChange({ ...design, dailyProducts })} />
+        <BlackFridayProductPicker products={design.dailyProducts} limit={BLACK_FRIDAY_DAILY_PRODUCTS} onChange={dailyProducts => onChange({ ...design, dailyProducts })} />
       </div>
     </details>
     <section className="mk-editor-section" aria-label="Collection sections">
@@ -182,7 +193,7 @@ export default function BlackFridayFields({ design, onChange }: {
             <input type="url" maxLength={500} placeholder="https://coralsanonymous.com/collections/…" value={section.linkUrl || ""} onChange={event => patchSection(section.id, { linkUrl: event.target.value })} />
           </label>
           <p className="mk-bf-link-help">The collection link appears below the products when you enter both fields.</p>
-          <ProductPicker products={section.products} limit={BLACK_FRIDAY_MAX_SECTION_PRODUCTS} onChange={products => patchSection(section.id, { products })} />
+          <BlackFridayProductPicker products={section.products} limit={BLACK_FRIDAY_MAX_SECTION_PRODUCTS} onChange={products => patchSection(section.id, { products })} />
         </details>)}
       </div>
       {design.sections.length === 0 && <p>Add a collection section to feature more products below Daily Super Deals.</p>}

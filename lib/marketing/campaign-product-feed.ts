@@ -8,6 +8,7 @@ import {
 import { recommendationHistory } from "./cart-feed";
 import { currentMarketingBrand } from "./context";
 import type { NewsletterProduct } from "./macro-newsletters";
+import { MACROALGAE_STOREFRONT } from "./macro-black-friday";
 
 type ShopifyProduct = {
   id: string;
@@ -20,6 +21,7 @@ type ShopifyProduct = {
   variants: {
     nodes: Array<{
       id: string;
+      title: string;
       availableForSale: boolean;
       price: string;
       compareAtPrice: string | null;
@@ -44,7 +46,7 @@ const PRODUCTS = `
         id title handle tags createdAt onlineStoreUrl
         featuredImage { url }
         variants(first: 10) {
-          nodes { id availableForSale price compareAtPrice image { url } }
+          nodes { id title availableForSale price compareAtPrice image { url } }
         }
       }
       pageInfo { hasNextPage endCursor }
@@ -238,17 +240,27 @@ export async function manualNewsletterProducts(value: string): Promise<Newslette
 }
 
 export async function manualBlackFridayProducts(value: string): Promise<CampaignEmailProduct[]> {
-  if (currentMarketingBrand() !== "corals-anonymous") throw new Error("Choose Corals Anonymous to select Black Friday products.");
+  const macro = currentMarketingBrand() === "macroalgae-farms";
   return (await manualProductSearch(value)).map(product => {
     const variants = product.variants.nodes.filter(variant => variant.availableForSale);
     const cheapest = variants.reduce((current, variant) => Number(variant.price) < Number(current.price) ? variant : current);
     const card = emailProduct(product, cheapest);
+    const compareAtPrice = Number(cheapest.compareAtPrice) > Number(cheapest.price) ? card.compareAtPrice : undefined;
+    if (macro) {
+      const url = new URL(`/products/${product.handle}`, MACROALGAE_STOREFRONT);
+      const variantLabel = cheapest.title?.trim();
+      if (variantLabel && variantLabel !== "Default Title") {
+        url.searchParams.set("variant", cheapest.id.split("/").at(-1)!);
+        return { ...card, url: url.href, compareAtPrice, variantLabel };
+      }
+      return { ...card, url: url.href, compareAtPrice };
+    }
     return {
       ...card,
       url: `https://coralsanonymous.com/products/${product.handle}`,
       salePrice: card.salePrice && variants.some(variant => Number(variant.price) !== Number(cheapest.price))
         ? "From " + card.salePrice : card.salePrice,
-      compareAtPrice: Number(cheapest.compareAtPrice) > Number(cheapest.price) ? card.compareAtPrice : undefined,
+      compareAtPrice,
       button: "View deal",
     };
   });

@@ -10,6 +10,10 @@ const mediaTypes = {
   "barlow-normal-800-v1.woff2": "font/woff2",
   "barlow-italic-800-v1.woff2": "font/woff2",
   "barlow-italic-900-v1.woff2": "font/woff2",
+  "macro-hero-v1.jpg": "image/jpeg",
+  "macro-hero-mobile-v1.jpg": "image/jpeg",
+  "macro-logo-v1.png": "image/png",
+  "macro-headline-v1.png": "image/png",
 } as const;
 
 // These immutable public files also work when the dashboard requires login.

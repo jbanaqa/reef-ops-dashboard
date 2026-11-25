@@ -19,7 +19,8 @@ import { currentMarketingBrand, marketingEnv } from "./context";
 import { marketingBrand } from "./brands";
 import { macroNewsletterText } from "./macro-newsletters";
 import { reefDesignDefaults, resolveReefSocialContent, type ReefDesign } from "./corals-reef";
-import { blackFridayPlainText, validateBlackFridayCampaign, validateBlackFridayEmailSize } from "./black-friday";
+import { blackFridayCampaignBrand, blackFridayPlainText, validateBlackFridayCampaign, validateBlackFridayEmailSize } from "./black-friday";
+import { macroBlackFridayPlainText } from "./macro-black-friday-email";
 
 function coralsReefText(c: Content, d: ReefDesign, unsubscribe: string, address: string, name: string | undefined, organizationName: string) {
   c = resolveReefSocialContent(c);
@@ -96,13 +97,13 @@ export function emailBody(
 ) {
   const effectiveContent = content(withBranding(m.content, m.branding));
   const reefDesign = effectiveContent.layout === "corals-reef" ? effectiveContent.reefDesign || reefDesignDefaults("message") : undefined;
-  const blackFriday = effectiveContent.layout === "black-friday";
-  if (blackFriday) {
-    if (currentMarketingBrand() !== "corals-anonymous")
-      throw new Error("The Black Friday template is for Corals Anonymous.");
+  const blackFridayBrand = blackFridayCampaignBrand(effectiveContent.layout);
+  if (blackFridayBrand) {
+    if (currentMarketingBrand() !== blackFridayBrand)
+      throw new Error(`The Black Friday template is for ${marketingBrand(blackFridayBrand).name}.`);
     validateBlackFridayCampaign(effectiveContent);
   }
-  const attachOnlyRendered = blackFriday || !!reefDesign || effectiveContent.layout === "macro-newsletter" && !!effectiveContent.macroNewsletter;
+  const attachOnlyRendered = !!blackFridayBrand || !!reefDesign || effectiveContent.layout === "macro-newsletter" && !!effectiveContent.macroNewsletter;
   let html = render(
     effectiveContent,
     m.unsubscribe,
@@ -110,9 +111,9 @@ export function emailBody(
     m.profileName,
     organizationName,
     m.branding,
-    blackFriday ? blackFridayDeliveryOrigin() : undefined,
+    blackFridayBrand ? blackFridayDeliveryOrigin() : undefined,
   );
-  if (blackFriday) validateBlackFridayEmailSize(html);
+  if (blackFridayBrand) validateBlackFridayEmailSize(html);
   const attachments: {
     filename: string;
     content: string;
@@ -165,7 +166,9 @@ export function emailBody(
   return {
     html,
     attachments: attachments.length ? attachments : undefined,
-    text: blackFriday
+    text: effectiveContent.layout === "macro-black-friday"
+      ? macroBlackFridayPlainText(effectiveContent, m.unsubscribe, m.branding?.showPostalAddress ? address : "", organizationName)
+      : effectiveContent.layout === "black-friday"
       ? blackFridayPlainText(effectiveContent, m.unsubscribe, effectiveContent.showPostalAddress ? address : "", organizationName)
       : effectiveContent.macroNewsletter && (effectiveContent.layout || effectiveContent.template) === "macro-newsletter"
       ? macroNewsletterText(effectiveContent, m.unsubscribe, address, m.profileName)

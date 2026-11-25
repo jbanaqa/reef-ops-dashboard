@@ -21,8 +21,9 @@ import RichEmailCopy from "./RichEmailCopy";
 import CampaignEmailFields from "./CampaignEmailFields";
 import Artwork from "./EmailArtwork";
 import MacroNewsletterFields from "./MacroNewsletterFields";
-import BlackFridayFields from "./BlackFridayFields";
+import BlackFridayFields, { BlackFridayProductPicker } from "./BlackFridayFields";
 import { applyCoralsReefDesign, reefDesignDefaults } from "@/lib/marketing/corals-reef";
+import { MACRO_BLACK_FRIDAY_FEATURED_LIMIT, MACRO_BLACK_FRIDAY_GRID_LIMIT } from "@/lib/marketing/macro-black-friday";
 
 const emailLayoutNames: Record<EmailLayout, string> = {
   standard: "Standard",
@@ -34,6 +35,7 @@ const emailLayoutNames: Record<EmailLayout, string> = {
   "macro-newsletter": "Approved Macroalgae Farms newsletter",
   "corals-reef": "Corals Anonymous · Reef cards",
   "black-friday": "Corals Anonymous · Black Friday Sale",
+  "macro-black-friday": "Macroalgae Farms · Black Friday Sale",
 };
 
 export default function EmailDesigner({
@@ -103,6 +105,7 @@ export default function EmailDesigner({
   const isNewsletter = visualLayout === "macro-newsletter" && !!content.macroNewsletter;
   const isReef = visualLayout === "corals-reef" && !isMacro;
   const blackFriday = visualLayout === "black-friday" && !isMacro ? content.blackFriday : undefined;
+  const macroBlackFriday = visualLayout === "macro-black-friday" && isMacro ? content.macroBlackFriday : undefined;
   const reef = content.reefDesign || (flowKey ? applyCoralsReefDesign(content, flowKey, flowStepIndex, flowBranch).reefDesign : undefined);
   const reefDefaults = reefDesignDefaults(reef?.variant || "cart");
   const cartCopy = content.template === "cart-recovery" || visualLayout === "cart-recovery";
@@ -250,6 +253,7 @@ export default function EmailDesigner({
             {(["content", "layout", "artwork", "footer", "test"] as const)
               .filter((tab) => tab !== "test" || !!onTest)
               .filter((tab) => !blackFriday || tab !== "artwork")
+              .filter((tab) => !macroBlackFriday || (tab !== "artwork" && tab !== "footer"))
               .map((tab) => (
                 <button
                   key={tab}
@@ -260,7 +264,7 @@ export default function EmailDesigner({
                    {tab === "content"
                       ? "Content"
                     : tab === "layout"
-                      ? "Layout"
+                      ? macroBlackFriday ? "Products" : "Layout"
                     : tab === "artwork"
                       ? "Artwork"
                       : tab === "footer"
@@ -278,13 +282,20 @@ export default function EmailDesigner({
               </section>
               <MacroNewsletterFields content={content} onChange={changeContent} panel="content" />
             </>}
-            {panel === "content" && blackFriday && <section className="mk-editor-section">
+            {panel === "content" && (blackFriday || macroBlackFriday) && <section className="mk-editor-section">
               <h3>Inbox details</h3>
               <label>{subjectEditable ? "Subject" : "Preview subject"}<input readOnly={!subjectEditable} value={subject} onChange={event => onSubject(event.target.value)} /></label>
               <label>Preview text<input value={content.preview || ""} onChange={event => changeContent("preview", event.target.value)} /></label>
-              <button type="button" onClick={() => setPanel("layout")}>Edit products and sections</button>
+              {blackFriday && <button type="button" onClick={() => setPanel("layout")}>Edit products and sections</button>}
             </section>}
-            {panel === "content" && !isNewsletter && !blackFriday &&
+            {panel === "content" && macroBlackFriday && <section className="mk-editor-section">
+              <h3>Sale message</h3>
+              <label>Subtext under Black Friday Sale
+                <textarea rows={4} value={content.body} onChange={event => changeContent("body", event.target.value)} />
+              </label>
+              <button type="button" onClick={() => setPanel("layout")}>Edit products</button>
+            </section>}
+            {panel === "content" && !isNewsletter && !blackFriday && !macroBlackFriday &&
               (contentFields || (content.template === "campaign-sale" && visualLayout === "campaign-sale" ? (
                 <section className="mk-editor-section">
                   <h3>Inbox details</h3>
@@ -677,7 +688,7 @@ export default function EmailDesigner({
             {panel === "layout" && (
               <>
                 {isNewsletter && <section className="mk-editor-section"><h3>Newsletter layout</h3><p>Choose which sections to include. Remaining sections keep their approved layout. Edit their text in Content and pictures in Artwork.</p></section>}
-                {!isNewsletter && !blackFriday && <details className="mk-editor-section mk-editor-disclosure">
+                {!isNewsletter && !blackFriday && !macroBlackFriday && <details className="mk-editor-section mk-editor-disclosure">
                   <summary><span>Email layout</span><small>{emailLayoutNames[visualLayout]}</small></summary>
                   <div className="mk-editor-disclosure-body">
                   <p>
@@ -1020,6 +1031,30 @@ export default function EmailDesigner({
                 )}
                 {isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="products" />}
                 {blackFriday && <BlackFridayFields design={blackFriday} onChange={design => changeContent("blackFriday", design)} />}
+                {macroBlackFriday && <>
+                  <details className="mk-editor-section mk-editor-disclosure" open>
+                    <summary><span>Featured products</span><small>{macroBlackFriday.featuredProducts.length} / {MACRO_BLACK_FRIDAY_FEATURED_LIMIT} products</small></summary>
+                    <div className="mk-editor-disclosure-body">
+                      <BlackFridayProductPicker
+                        products={macroBlackFriday.featuredProducts}
+                        limit={MACRO_BLACK_FRIDAY_FEATURED_LIMIT}
+                        onChange={featuredProducts => changeContent("macroBlackFriday", { ...macroBlackFriday, featuredProducts })}
+                        editVariantLabel
+                      />
+                    </div>
+                  </details>
+                  <details className="mk-editor-section mk-editor-disclosure">
+                    <summary><span>Product grid</span><small>{macroBlackFriday.gridProducts.length} / {MACRO_BLACK_FRIDAY_GRID_LIMIT} products</small></summary>
+                    <div className="mk-editor-disclosure-body">
+                      <BlackFridayProductPicker
+                        products={macroBlackFriday.gridProducts}
+                        limit={MACRO_BLACK_FRIDAY_GRID_LIMIT}
+                        onChange={gridProducts => changeContent("macroBlackFriday", { ...macroBlackFriday, gridProducts })}
+                        editVariantLabel
+                      />
+                    </div>
+                  </details>
+                </>}
                 {visualLayout === "campaign-sale" && content.campaignLayout && (
                   <CampaignEmailFields
                     content={content}
@@ -1032,7 +1067,7 @@ export default function EmailDesigner({
               </>
             )}
             {panel === "artwork" && isNewsletter && <MacroNewsletterFields content={content} onChange={changeContent} panel="artwork" />}
-            {panel === "artwork" && !isNewsletter && !blackFriday && (
+            {panel === "artwork" && !isNewsletter && !blackFriday && !macroBlackFriday && (
               <>
                 <div className="mk-editor-section">
                   <h3>Brand artwork</h3>
@@ -1088,7 +1123,7 @@ export default function EmailDesigner({
               <label>Business mailing address<textarea readOnly rows={3} value={postalAddress} /></label>
               <p><a href={href("/our-klaviyo/settings")} target="_blank" rel="noreferrer">Open marketing settings</a></p>
             </section>}
-            {panel === "footer" && !isNewsletter && !blackFriday && (
+            {panel === "footer" && !isNewsletter && !blackFriday && !macroBlackFriday && (
               <section className="mk-editor-section">
                 <h3>Footer content</h3>
                 {isReef ? <p>Closing and signature: Content → Flow design. Footer details use this brand&apos;s shared settings.</p> : <p>

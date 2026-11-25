@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { blackFridayCampaignTemplate, validateBlackFridayCampaign } from "../lib/marketing/black-friday";
+import { MACRO_BLACK_FRIDAY_URL, macroBlackFridayCampaignTemplate } from "../lib/marketing/macro-black-friday";
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { emailBody } from "../lib/marketing/delivery";
 import { content, extractEmailBranding, render } from "../lib/marketing/rules";
@@ -90,5 +91,49 @@ test("Black Friday delivery uses public Reef Ops assets, real unsubscribe, and s
   } finally {
     if (previous === undefined) delete process.env.APP_BASE_URL;
     else process.env.APP_BASE_URL = previous;
+  }
+});
+
+test("Macroalgae Farms Black Friday keeps approved artwork and colors while publishing edited copy and product picks", () => {
+  const source = structuredClone(macroBlackFridayCampaignTemplate.content);
+  assert.equal(source.macroBlackFriday.featuredProducts.length, 2);
+  assert.equal(source.macroBlackFriday.gridProducts.length, 8);
+  source.macroBlackFriday.featuredProducts.reverse();
+  source.macroBlackFriday.gridProducts.pop();
+  const removed = macroBlackFridayCampaignTemplate.content.macroBlackFriday.gridProducts.at(-1)!;
+  source.body = "Up to 50% OFF on qualifying orders. Try a coral & new macroalgae.";
+  const saved = content(JSON.parse(JSON.stringify({
+    ...source,
+    heading: "Injected title",
+    url: "https://example.com/other-sale",
+    bodyHtml: "<em>Ignored rich-text override</em>",
+  })));
+  assert.equal(saved.heading, "Black Friday Sale");
+  assert.equal(saved.url, MACRO_BLACK_FRIDAY_URL);
+  assert.equal(saved.bodyHtml, undefined);
+  const delivery = { id: "test", to: "staff@example.com", channel: "EMAIL", subject: "Preview", content: saved, unsubscribe };
+  const previous = process.env.MACROALGAE_APP_BASE_URL;
+  process.env.MACROALGAE_APP_BASE_URL = "https://dashboard.example";
+  try {
+    assert.throws(() => emailBody(delivery, "", "Corals Anonymous"), /for Macroalgae Farms/);
+    const result = runWithMarketingBrand("macroalgae-farms", () => emailBody({
+      ...delivery, branding: { showPostalAddress: true },
+    }, "123 Reef Street", "Macroalgae Farms"));
+    const document = new JSDOM(result.html).window.document;
+    assert.equal(document.querySelector('meta[name="color-scheme"]')?.getAttribute("content"), "light only");
+    assert.match(result.html, /https:\/\/dashboard\.example\/api\/marketing\/black-friday-assets\/macro-hero-v1\.jpg/);
+    assert.match(result.html, /macro-headline-v1\.png/);
+    assert.match(document.body.textContent || "", /Try a coral & new macroalgae\./);
+    assert.match(result.text, /Try a coral & new macroalgae\./);
+    assert.doesNotMatch(result.html, /example\.com\/other-sale|data:image|Ignored rich-text override/);
+    assert.equal(document.querySelectorAll(`a[href="${MACRO_BLACK_FRIDAY_URL}"]`).length, 2);
+    assert.ok(document.querySelector(`a[href="${unsubscribe}"]`));
+    assert.ok(!Array.from(document.links).some(link => link.href === removed.url));
+    assert.match(result.text, /123 Reef Street/);
+    assert.equal(result.attachments, undefined);
+    assert.ok(result.text.indexOf("Pink Rose Frogspawn") < result.text.indexOf("Cardinal Feather Macroalgae"));
+  } finally {
+    if (previous === undefined) delete process.env.MACROALGAE_APP_BASE_URL;
+    else process.env.MACROALGAE_APP_BASE_URL = previous;
   }
 });

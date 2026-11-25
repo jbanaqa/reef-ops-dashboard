@@ -6,6 +6,8 @@ import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, or
 import { normalizeReefDesign, renderCoralsReef, type ReefDesign } from "./corals-reef";
 import { normalizeBlackFriday, type BlackFridayDesign } from "./black-friday";
 import { renderBlackFridayEmail } from "./black-friday-email";
+import { normalizeMacroBlackFriday, type MacroBlackFridayDesign } from "./macro-black-friday";
+import { renderMacroBlackFridayEmail } from "./macro-black-friday-email";
 import { DAILY_DEALS_COUNTDOWN_PATH } from "./daily-deals-countdown-config";
 export const channels = [
   "EMAIL",
@@ -23,6 +25,7 @@ export const emailLayouts = [
   "macro-newsletter",
   "corals-reef",
   "black-friday",
+  "macro-black-friday",
 ] as const;
 export type EmailLayout = (typeof emailLayouts)[number];
 export type CampaignEmailProduct = {
@@ -32,6 +35,7 @@ export type CampaignEmailProduct = {
   image?: string;
   salePrice?: string;
   compareAtPrice?: string;
+  variantLabel?: string;
   button?: string;
   showSalePrice?: boolean;
   showCompareAtPrice?: boolean;
@@ -278,6 +282,7 @@ export type Content = {
   campaignLayout?: CampaignEmailLayout;
   macroNewsletter?: MacroNewsletter;
   blackFriday?: BlackFridayDesign;
+  macroBlackFriday?: MacroBlackFridayDesign;
 };
 export type MarketingOperations = {
   sendingEnabled: boolean;
@@ -778,6 +783,7 @@ export function content(value: unknown): Content {
   if (!value || typeof value !== "object")
     throw new Error("Message content is required.");
   const c = value as Content;
+  if (c.layout === "macro-black-friday") return normalizeMacroBlackFriday(c);
   const macroNewsletter = normalizeMacroNewsletter(c.macroNewsletter);
   if (c.layout === "macro-newsletter" && !macroNewsletter) throw new Error("Select an approved newsletter template.");
   if (typeof c.heading !== "string" || typeof c.body !== "string" || (c.layout !== "macro-newsletter" && (!c.heading.trim() || (!c.body.trim() && !(c.template === "welcome" && c.welcomeVariant === "reminder")))) || c.body.length > 20000)
@@ -1585,6 +1591,13 @@ export function render(
   branding?: EmailBranding,
   assetBaseUrl = "",
 ) {
+  if (c.layout === "macro-black-friday") {
+    return renderMacroBlackFridayEmail(content(c), {
+      assetBaseUrl, unsubscribe,
+      address: branding?.showPostalAddress ? address : "",
+      organizationName,
+    });
+  }
   c = content(withBranding(content(c), branding));
   address = c.showPostalAddress ? address : "";
   const e = escapeHtml;

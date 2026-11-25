@@ -1,0 +1,91 @@
+{
+  "featuredProducts": [
+    {
+      "id": "cardinal-feather-macroalgae",
+      "title": "Cardinal Feather Macroalgae",
+      "url": "https://www.macroalgaefarms.com/products/cardinal-feather-macroalgae?variant=50347744461059",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/Detailed_Burgundy_Macroalgae_Aquarium.jpg?v=1795577970&crop=center",
+      "salePrice": "$25.99",
+      "compareAtPrice": "$39.99",
+      "variantLabel": "Full Starter Plant"
+    },
+    {
+      "id": "pink-rose-frogspawn",
+      "title": "Pink Rose Frogspawn",
+      "url": "https://www.macroalgaefarms.com/products/pink-rose-frogspawn",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/hf_20260903_214551_09c79db5-43bb-4375-b9c2-6b86bb089a1c.jpg?v=1788476562&crop=center",
+      "salePrice": "$38.99",
+      "compareAtPrice": "$59.99"
+    }
+  ],
+  "gridProducts": [
+    {
+      "id": "ocellaris-clownfish",
+      "title": "Ocellaris Clownfish",
+      "url": "https://www.macroalgaefarms.com/products/ocellaris-clownfish?variant=48054890103043",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/9E5F5310-0C7D-4745-B99A-349A253B98B8.jpg?v=1773972746&crop=center",
+      "salePrice": "$16.24",
+      "compareAtPrice": "$24.99",
+      "variantLabel": "Juvenile (0.5–1″)"
+    },
+    {
+      "id": "halloween-urchin-algae-eater",
+      "title": "Halloween Urchin",
+      "url": "https://www.macroalgaefarms.com/products/halloween-urchin-algae-eater",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/e36667c2-e938-4763-8e54-2bd074237fe2.png?v=1774931732&crop=center",
+      "salePrice": "$19.49",
+      "compareAtPrice": "$29.99"
+    },
+    {
+      "id": "lysmata-kuekenthali-cleaner-shrimp",
+      "title": "Lysmata Kuekenthali Cleaner Shrimp",
+      "url": "https://www.macroalgaefarms.com/products/lysmata-kuekenthali-cleaner-shrimp",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/VibrantRed-and-WhiteShrimponReefSand.png?v=1795380676&crop=center",
+      "salePrice": "$27.94",
+      "compareAtPrice": "$42.99"
+    },
+    {
+      "id": "electric-daisy-carpet-anemone",
+      "title": "Electric Daisy Mini Carpet Anemone",
+      "url": "https://www.macroalgaefarms.com/products/electric-daisy-carpet-anemone",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/P4284858.jpg?v=1777425518&crop=center",
+      "salePrice": "$142.99",
+      "compareAtPrice": "$219.99"
+    },
+    {
+      "id": "blue-octhodes-macroalgae",
+      "title": "Blue Octhodes Macroalgae",
+      "url": "https://www.macroalgaefarms.com/products/blue-octhodes-macroalgae?variant=45544264466691",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/hf_20260821_230904_d9d313e7-c4c5-44d4-b159-9b9c2107488d.jpg?v=1787353883&crop=center",
+      "salePrice": "$19.49",
+      "compareAtPrice": "$29.99",
+      "variantLabel": "Golf Ball (1.5″)"
+    },
+    {
+      "id": "daisy-polyp-cloves",
+      "title": "Daisy Polyp Cloves",
+      "url": "https://www.macroalgaefarms.com/products/daisy-polyp-cloves?variant=49703740899587",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/hf_20260925_195330_196e4ecc-a3e9-4f93-8640-e3f3cc108fa2.jpg?v=1790366438&crop=center",
+      "salePrice": "$16.24",
+      "compareAtPrice": "$24.99",
+      "variantLabel": "1″ Frag"
+    },
+    {
+      "id": "codium-green-seaweed-macroalgae",
+      "title": "Codium Green Macroalgae",
+      "url": "https://www.macroalgaefarms.com/products/codium-green-seaweed-macroalgae?variant=47815876378883",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/hf_20260821_194938_92487c34-a2ae-495a-9172-d56723e1b116_1.png?v=1787344673&crop=center",
+      "salePrice": "$9.74",
+      "compareAtPrice": "$14.99",
+      "variantLabel": "Full Starter Plant"
+    },
+    {
+      "id": "orange-skittle-tube-anemone",
+      "title": "Orange Skittle Tube Anemone",
+      "url": "https://www.macroalgaefarms.com/products/orange-skittle-tube-anemone?variant=49529807765763",
+      "image": "https://cdn.shopify.com/s/files/1/0667/7151/7699/files/hf_20260827_195539_8acf9480-166a-4e56-b66c-86ca9cd6a4cf.jpg?v=1787861343&crop=center",
+      "salePrice": "$51.99",
+      "compareAtPrice": "$79.99"
+    }
+  ]
+}

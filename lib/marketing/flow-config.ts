@@ -8,6 +8,7 @@ import {
   type DeliveryUpsellConfig,
 } from "./delivery-upsell-config";
 import { channels, content, Content, email, flowDefaults } from "./rules";
+import { blackFridayCampaignBrand } from "./black-friday";
 
 export type FlowStep = {
   minutes: number;
@@ -54,7 +55,7 @@ const subject = (v: unknown) => {
 };
 function flowContent(value: unknown) {
   const normalized = content(value);
-  if (normalized.layout === "black-friday")
+  if (blackFridayCampaignBrand(normalized.layout))
     throw new Error("The Black Friday template is available for campaigns.");
   return normalized;
 }

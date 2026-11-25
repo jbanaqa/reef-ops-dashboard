@@ -48,7 +48,7 @@ import {
   withBranding,
 } from "@/lib/marketing/rules";
 import { blackFridayDeliveryOrigin, resendProvider, setup } from "@/lib/marketing/delivery";
-import { validateBlackFridayCampaign, validateBlackFridayEmailSize } from "@/lib/marketing/black-friday";
+import { blackFridayCampaignBrand, validateBlackFridayCampaign, validateBlackFridayEmailSize } from "@/lib/marketing/black-friday";
 import { processMarketingInbox, inboxUnresolved, ingestionEnabled } from "@/lib/marketing/inbox";
 import { welcomeActivity } from "@/lib/marketing/welcome-activity";
 import { audienceDirectory, contactDetails } from "@/lib/marketing/audiences";
@@ -67,7 +67,7 @@ import { manualBlackFridayProducts, manualNewsletterProducts, resolveCampaignPro
 import { inspectOrderIdentity } from "@/lib/marketing/identity-review";
 import { deliveryReviewConfig, orderUpdateSkipReason } from "@/lib/marketing/order-update-review";
 import { currentMarketingBrand, marketingEnv, runWithMarketingBrand } from "@/lib/marketing/context";
-import { defaultMacroCampaignContent, marketingBrands, type MarketingBrand } from "@/lib/marketing/brands";
+import { defaultMacroCampaignContent, marketingBrand, marketingBrands, type MarketingBrand } from "@/lib/marketing/brands";
 import { scopedMarketingSettings as marketingSettings, validateMarketingSender } from "@/lib/marketing/settings";
 import { shopifySubscriberStatus, syncShopifySubscribers, setShopifySubscriberSyncRunning } from "@/lib/marketing/shopify-subscribers";
 import { previewCoralsFlowDesign, applyCoralsFlowDesign, coralsFlowDesignEvidence } from "@/lib/marketing/flow-design-rollout";
@@ -190,13 +190,14 @@ const campaignOptions = (body: Record<string, unknown>) => ({
 
 function campaignContent(value: unknown) {
   const normalized = content(value);
-  if (normalized.layout === "black-friday" && currentMarketingBrand() !== "corals-anonymous")
-    throw new Error("The Black Friday template is for Corals Anonymous.");
+  const blackFridayBrand = blackFridayCampaignBrand(normalized.layout);
+  if (blackFridayBrand && currentMarketingBrand() !== blackFridayBrand)
+    throw new Error(`The Black Friday template is for ${marketingBrand(blackFridayBrand).name}.`);
   return normalized;
 }
 
 async function checkBlackFridaySend(value: unknown) {
-  if ((value as { layout?: string } | null)?.layout !== "black-friday") return;
+  if (!blackFridayCampaignBrand((value as { layout?: string } | null)?.layout)) return;
   const source = campaignContent(value);
   validateBlackFridayCampaign(source);
   const settings = await loadMarketingSettings();
@@ -1120,6 +1121,8 @@ async function postMarketing(request: Request) {
           s.postalAddress,
           undefined,
           s.organizationName,
+          previewContent.layout === "macro-black-friday" ? s.branding : undefined,
+          previewContent.layout === "macro-black-friday" ? new URL(request.url).origin : undefined,
         ),
       });
     }
@@ -1144,7 +1147,7 @@ async function postMarketing(request: Request) {
         campaignContent(b.content),
         `campaign-test:${id}`,
       );
-      const testBranding = {
+      const testBranding = testContent.layout === "macro-black-friday" ? s.branding : {
         ...s.branding,
         ...sharedEmailFooter(testContent),
       };
@@ -1261,7 +1264,7 @@ async function postMarketing(request: Request) {
         audience: json(parsed),
         ...campaignOptions(b),
       };
-      if (source.layout !== "black-friday") await saveDiscoveredBranding(data.content, b.brandingSource);
+      if (!blackFridayCampaignBrand(source.layout)) await saveDiscoveredBranding(data.content, b.brandingSource);
       if (b.id) {
         const result = await prisma.marketingCampaign.updateMany({
           where: { id: b.id, shop: shop(), status: "DRAFT" },
@@ -1435,7 +1438,7 @@ async function postMarketing(request: Request) {
         });
         return result;
       });
-      if ((data as { layout?: string }).layout !== "black-friday")
+      if (!blackFridayCampaignBrand((data as { layout?: string }).layout))
         await saveDiscoveredBranding(data, b.brandingSource, { preserveExistingLogo: b.kind === "FLOW" });
       return Response.json(result);
     }

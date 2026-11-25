@@ -1,10 +1,16 @@
 import products from "./black-friday-products.json";
+import type { MarketingBrand } from "./brands";
 import type { CampaignEmailProduct, Content } from "./rules";
 
 const storefront = "https://coralsanonymous.com";
 export const BLACK_FRIDAY_MAX_SECTIONS = 12;
 export const BLACK_FRIDAY_MAX_SECTION_PRODUCTS = 8;
 export const BLACK_FRIDAY_DAILY_PRODUCTS = 3;
+
+export function blackFridayCampaignBrand(layout: unknown): MarketingBrand | undefined {
+  if (layout === "black-friday") return "corals-anonymous";
+  if (layout === "macro-black-friday") return "macroalgae-farms";
+}
 
 export type BlackFridayCollection = {
   id: string;
