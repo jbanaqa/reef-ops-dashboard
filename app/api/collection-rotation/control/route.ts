@@ -29,6 +29,8 @@ type SaveControlBody = {
   bottomAssignments?: unknown;
 };
 
+class CollectionMembershipChangedError extends Error {}
+
 function normalizeCollectionId(
   value: unknown
 ) {
@@ -92,8 +94,16 @@ export async function GET(
         }),
       ]);
 
+    // A pin can outlive a product's membership (for example, when /sale is
+    // reused for a new promotion). Don't send hidden pins back to the editor.
+    // Loading is read-only; a successful save replaces the old assignments.
+    const liveProductIds = new Set(collection.products.map((product) => product.id));
+    const currentAssignments = (rotation?.controlledProducts ?? []).filter(
+      (assignment) => liveProductIds.has(assignment.shopifyProductId)
+    );
+
     const topAssignments =
-      rotation?.controlledProducts
+      currentAssignments
         .filter(
           (assignment) =>
             assignment.zone === "TOP"
@@ -102,10 +112,10 @@ export async function GET(
           position: assignment.position,
           productId:
             assignment.shopifyProductId,
-        })) ?? [];
+        }));
 
     const bottomAssignments =
-      rotation?.controlledProducts
+      currentAssignments
         .filter(
           (assignment) =>
             assignment.zone === "BOTTOM"
@@ -114,7 +124,7 @@ export async function GET(
           position: assignment.position,
           productId:
             assignment.shopifyProductId,
-        })) ?? [];
+        }));
 
     return NextResponse.json({
       ok: true,
@@ -333,8 +343,8 @@ export async function POST(
             productById.get(productId);
 
           if (!product) {
-            throw new Error(
-              "A selected product no longer belongs to this collection."
+            throw new CollectionMembershipChangedError(
+              `The product assigned to ${zone === "TOP" ? "top" : "bottom"} position ${position} is no longer in this collection. Reopen Fixed product positions to refresh the list, then try again.`
             );
           }
 
@@ -458,6 +468,10 @@ export async function POST(
         bottomAssignments.length,
     });
   } catch (error) {
+    if (error instanceof CollectionMembershipChangedError) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 409 });
+    }
+
     console.error(
       "Failed to save controlled products:",
       error
