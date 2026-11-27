@@ -14,6 +14,11 @@ const mediaTypes = {
   "macro-hero-mobile-v1.jpg": "image/jpeg",
   "macro-logo-v1.png": "image/png",
   "macro-headline-v1.png": "image/png",
+  "today-sunset-reef-v1.jpg": "image/jpeg",
+  "today-corals-logo-v1.png": "image/png",
+  "today-headline-v1.png": "image/png",
+  "today-caption-v1.png": "image/png",
+  "today-shop-button-v1.png": "image/png",
 } as const;
 
 // These immutable public files also work when the dashboard requires login.

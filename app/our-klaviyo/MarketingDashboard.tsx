@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import EmailDesigner from "./EmailDesigner";
 import { flowEmailTemplates } from "@/lib/marketing/flow-email-templates";
-import { blackFridayCampaignTemplate } from "@/lib/marketing/black-friday";
+import { blackFridayCampaignTemplate, blackFridayTodayCampaignTemplate } from "@/lib/marketing/black-friday";
 import { macroBlackFridayCampaignTemplate } from "@/lib/marketing/macro-black-friday";
 import { macroNewsletterDefinitions, macroNewsletterTemplates } from "@/lib/marketing/macro-newsletters";
 import FlowsWorkspace from "./FlowsWorkspace";
@@ -57,6 +57,7 @@ function campaignPreset(template: { key: string; name: string; content: Content;
   };
 }
 const blackFridayTemplate = campaignPreset(blackFridayCampaignTemplate);
+const blackFridayTodayTemplate = campaignPreset(blackFridayTodayCampaignTemplate);
 const macroBlackFridayTemplate = campaignPreset(macroBlackFridayCampaignTemplate);
 type Profile = {
   id: string;
@@ -347,7 +348,7 @@ export default function MarketingDashboard({ tab }: { tab: string }) {
   );
   const templates: Resource[] = data
     ? [
-        isMacro ? macroBlackFridayTemplate : blackFridayTemplate,
+        ...(isMacro ? [macroBlackFridayTemplate] : [blackFridayTodayTemplate, blackFridayTemplate]),
         ...(isMacro ? macroNewsletterTemplates(data.resources) : flowEmailTemplates(data.resources)),
         ...data.resources.filter((r) => r.kind === "TEMPLATE").map(resource => ({ ...resource, subject: resource.subject || (isMacro ? macroNewsletterDefinitions.find(definition => resource.key === `macro-newsletter-${definition.design}`)?.subject : undefined) })),
       ]

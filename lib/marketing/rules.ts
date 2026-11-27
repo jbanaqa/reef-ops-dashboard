@@ -6,6 +6,7 @@ import { firstWelcomeBody, firstWelcomeBodyHtml, originalWelcomeReminderBody, or
 import { normalizeReefDesign, renderCoralsReef, type ReefDesign } from "./corals-reef";
 import { normalizeBlackFriday, type BlackFridayDesign } from "./black-friday";
 import { renderBlackFridayEmail } from "./black-friday-email";
+import { renderBlackFridayTodayEmail } from "./black-friday-today-email";
 import { normalizeMacroBlackFriday, type MacroBlackFridayDesign } from "./macro-black-friday";
 import { renderMacroBlackFridayEmail } from "./macro-black-friday-email";
 import { DAILY_DEALS_COUNTDOWN_PATH } from "./daily-deals-countdown-config";
@@ -1604,6 +1605,7 @@ export function render(
   const layout = c.layout || c.template || "standard";
   if (layout === "black-friday" && c.blackFriday) {
     const design = c.blackFriday;
+    if (design.design === "today") return renderBlackFridayTodayEmail(c, design, { assetBaseUrl, unsubscribe, address });
     return renderBlackFridayEmail(c, design.sections.map((section) => ({
       ...section, label: section.linkLabel, url: section.linkUrl,
     })), design.dailyProducts, {

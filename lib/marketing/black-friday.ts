@@ -1,4 +1,5 @@
 import products from "./black-friday-products.json";
+import todayProducts from "./black-friday-today-products.json";
 import type { MarketingBrand } from "./brands";
 import type { CampaignEmailProduct, Content } from "./rules";
 
@@ -6,6 +7,8 @@ const storefront = "https://coralsanonymous.com";
 export const BLACK_FRIDAY_MAX_SECTIONS = 12;
 export const BLACK_FRIDAY_MAX_SECTION_PRODUCTS = 8;
 export const BLACK_FRIDAY_DAILY_PRODUCTS = 3;
+export const BLACK_FRIDAY_TODAY_GRID_PRODUCTS = 4;
+export const BLACK_FRIDAY_TODAY_DEADLINE = "2026-11-28T08:00:00.000Z";
 
 export function blackFridayCampaignBrand(layout: unknown): MarketingBrand | undefined {
   if (layout === "black-friday") return "corals-anonymous";
@@ -22,6 +25,7 @@ export type BlackFridayCollection = {
 };
 
 export type BlackFridayDesign = {
+  design?: "today";
   dailyDealsUrl: string;
   dailyProducts: CampaignEmailProduct[];
   sections: BlackFridayCollection[];
@@ -48,6 +52,35 @@ export const blackFridayCampaignTemplate = {
         { id: "corals", title: "Corals", linkLabel: "Shop corals", linkUrl: storefront + "/collections/all-corals", products: products.corals },
         { id: "mysterious-creatures", title: "Mysterious Creatures", subtitle: "Unusual inverts for your reef.", linkLabel: "Shop mysterious creatures", linkUrl: storefront + "/collections/mysterious-creatures", products: products.creatures },
       ],
+    },
+  } satisfies Content,
+};
+
+const todaySection = {
+  id: "more-black-friday-picks",
+  title: "More Black Friday Picks",
+  linkLabel: "",
+  linkUrl: "",
+};
+
+export const blackFridayTodayCampaignTemplate = {
+  key: "corals-black-friday-today",
+  name: "Black Friday Is Today!",
+  subject: "Black Friday is today! 🪸",
+  content: {
+    layout: "black-friday",
+    template: "campaign-sale",
+    heading: "Black Friday is today!",
+    body: "Shop today while your picks are still available.",
+    preview: "Today’s Black Friday deals and more reef picks, all in one place.",
+    button: "Shop Today’s Picks",
+    url: storefront + "/collections/sale",
+    showPostalAddress: true,
+    blackFriday: {
+      design: "today",
+      dailyDealsUrl: storefront + "/collections/sale",
+      dailyProducts: todayProducts.daily,
+      sections: [{ ...todaySection, products: todayProducts.picks }],
     },
   } satisfies Content,
 };
@@ -112,6 +145,14 @@ function productCards(value: unknown, limit: number) {
 export function normalizeBlackFriday(value: unknown): BlackFridayDesign {
   const design = record(value);
   const sections: unknown[] = Array.isArray(design.sections) ? design.sections : [];
+  if (design.design === "today") {
+    return {
+      design: "today",
+      dailyDealsUrl: storefront + "/collections/sale",
+      dailyProducts: productCards(design.dailyProducts, BLACK_FRIDAY_DAILY_PRODUCTS),
+      sections: [{ ...todaySection, products: productCards(record(sections[0]).products, BLACK_FRIDAY_TODAY_GRID_PRODUCTS) }],
+    };
+  }
   if (sections.length > BLACK_FRIDAY_MAX_SECTIONS)
     throw new Error(`Use up to ${BLACK_FRIDAY_MAX_SECTIONS} collection sections.`);
   const ids = new Set<string>();
@@ -138,9 +179,9 @@ export function normalizeBlackFriday(value: unknown): BlackFridayDesign {
 
 export function validateBlackFridayCampaign(source: Content) {
   if (source.layout !== "black-friday" || !source.blackFriday) return;
-  const { dailyProducts, sections } = source.blackFriday;
+  const { dailyProducts, sections, design } = source.blackFriday;
   if (dailyProducts.length !== BLACK_FRIDAY_DAILY_PRODUCTS)
-    throw new Error("Choose three products for Daily Super Deals before sending.");
+    throw new Error(`Choose three products for ${design === "today" ? "Limited Time Only" : "Daily Super Deals"} before sending.`);
   for (const section of sections) {
     if (!section.title || !section.products.length)
       throw new Error("Add a heading and at least one product to each collection section.");
@@ -168,6 +209,23 @@ export function blackFridayPlainText(source: Content, unsubscribe: string, addre
     item.showCompareAtPrice === false || !item.compareAtPrice ? "" : "Was " + item.compareAtPrice,
     item.url,
   ].filter(Boolean).join(" · "));
+  if (design.design === "today") {
+    return [
+      "Black Friday is today!",
+      "Shop today while your picks are still available.",
+      `Shop today’s picks: ${source.url}`,
+      "LIMITED TIME ONLY!",
+      "Daily deals reset at midnight Pacific at the end of Friday, November 27.",
+      ...productLines(design.dailyProducts),
+      "MORE BLACK FRIDAY PICKS",
+      ...productLines(design.sections[0]?.products ?? []),
+      "Pick your next reef favorite.",
+      `Shop all Black Friday deals: ${source.url}`,
+      organizationName,
+      address,
+      `Unsubscribe: ${unsubscribe}`,
+    ].filter(Boolean).join("\n\n");
+  }
   return [
     "Black Friday Sale · Up to 85% off select items",
     "Big savings on corals, anemones, and more!",

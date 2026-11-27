@@ -286,7 +286,9 @@ export default function EmailDesigner({
               <h3>Inbox details</h3>
               <label>{subjectEditable ? "Subject" : "Preview subject"}<input readOnly={!subjectEditable} value={subject} onChange={event => onSubject(event.target.value)} /></label>
               <label>Preview text<input value={content.preview || ""} onChange={event => changeContent("preview", event.target.value)} /></label>
-              {blackFriday && <button type="button" onClick={() => setPanel("layout")}>Edit products and sections</button>}
+              {blackFriday && <button type="button" onClick={() => setPanel("layout")}>
+                {blackFriday.design === "today" ? "Edit products" : "Edit products and sections"}
+              </button>}
             </section>}
             {panel === "content" && macroBlackFriday && <section className="mk-editor-section">
               <h3>Sale message</h3>

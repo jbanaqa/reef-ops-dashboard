@@ -41,10 +41,48 @@ test("Daily Deals GIF visibly ticks once per second, crosses midnight and stops 
 });
 
 test("The public Daily Deals URL serves an uncached GIF and supports metadata requests", async () => {
-  const response = GET();
+  const response = GET(new Request("https://reef.example/api/marketing/daily-deals-countdown"));
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Content-Type"), "image/gif");
   assert.match(response.headers.get("Cache-Control") ?? "", /no-store/);
   assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 6).toString(), "GIF89a");
   assert.equal(HEAD().body, null);
+});
+
+test("A fixed deadline stops at expiry and the plum design stays opaque", async () => {
+  const deadline = Date.parse("2026-11-28T08:00:00Z");
+  const before = new Date(deadline - 2000);
+  const options = { deadline, background: "plum" } as const;
+  const active = dailyDealsCountdownGif(before, options);
+  const expired = dailyDealsCountdownGif(new Date(deadline), options);
+  const legacy = dailyDealsCountdownGif(before);
+
+  const { width, pageHeight, pages, delay, loop } = await sharp(active, { animated: true }).metadata();
+  assert.equal(pages, 3);
+  assert.deepEqual(delay, [1000, 1000, 1000]);
+  assert.equal(loop, 1);
+  assert.equal((await sharp(expired, { animated: true }).metadata()).pages, 1);
+  assert.ok(pageHeight);
+
+  const decode = (data: Uint8Array<ArrayBuffer>) => sharp(data, { animated: true }).ensureAlpha().raw().toBuffer();
+  const [activePixels, expiredPixels, legacyPixels] = await Promise.all([decode(active), decode(expired), decode(legacy)]);
+  const frameBytes = width * pageHeight * 4;
+  assert.notDeepEqual(activePixels.subarray(0, frameBytes), activePixels.subarray(frameBytes, frameBytes * 2));
+  assert.deepEqual(activePixels.subarray(frameBytes * 2), expiredPixels);
+  assert.deepEqual([...activePixels.subarray(0, 4)], [51, 23, 63, 255]);
+  assert.equal(legacyPixels[3], 0);
+});
+
+test("A malformed supplied deadline shows the same neutral image as a past deadline", async () => {
+  const request = (deadline: string) => new Request(
+    `https://example.com/api/marketing/daily-deals-countdown?deadline=${encodeURIComponent(deadline)}&background=plum`,
+  );
+  const past = Buffer.from(await GET(request("1970-01-01T00:00:00Z")).arrayBuffer());
+  const invalid = Buffer.from(await GET(request("invalid")).arrayBuffer());
+  assert.deepEqual(invalid, past);
+  assert.equal((await sharp(invalid, { animated: true }).metadata()).pages, 1);
+
+  const upcoming = new Date(Date.now() + 30_000).toISOString();
+  const active = Buffer.from(await GET(request(upcoming)).arrayBuffer());
+  assert.ok(((await sharp(active, { animated: true }).metadata()).pages ?? 0) > 1);
 });

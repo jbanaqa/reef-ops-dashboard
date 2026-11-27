@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
-import { blackFridayCampaignTemplate, validateBlackFridayCampaign } from "../lib/marketing/black-friday";
+import { blackFridayCampaignTemplate, blackFridayTodayCampaignTemplate, BLACK_FRIDAY_TODAY_DEADLINE, validateBlackFridayCampaign } from "../lib/marketing/black-friday";
 import { MACRO_BLACK_FRIDAY_URL, macroBlackFridayCampaignTemplate } from "../lib/marketing/macro-black-friday";
 import { runWithMarketingBrand } from "../lib/marketing/context";
 import { emailBody } from "../lib/marketing/delivery";
@@ -9,6 +9,43 @@ import { content, extractEmailBranding, render } from "../lib/marketing/rules";
 
 const unsubscribe = "https://unsubscribe.example/u";
 const template = () => content(structuredClone(blackFridayCampaignTemplate.content));
+
+test("Black Friday Today delivers the approved design, discounts, fixed timer and recipient unsubscribe", (t) => {
+  const previous = process.env.APP_BASE_URL;
+  process.env.APP_BASE_URL = "https://dashboard.example";
+  t.after(() => {
+    if (previous === undefined) delete process.env.APP_BASE_URL;
+    else process.env.APP_BASE_URL = previous;
+  });
+  const source = content(structuredClone(blackFridayTodayCampaignTemplate.content));
+  const original = source.blackFriday!.sections[0].products;
+  const saved = content(JSON.parse(JSON.stringify({
+    ...source,
+    blackFriday: {
+      ...source.blackFriday,
+      sections: [{ ...source.blackFriday!.sections[0], products: [original[2], original[0], original[1]] }],
+    },
+  })));
+  validateBlackFridayCampaign(saved);
+  const message = emailBody({
+    id: "test", to: "staff@example.com", channel: "EMAIL", subject: blackFridayTodayCampaignTemplate.subject,
+    content: saved, unsubscribe: unsubscribe + "?token=recipient&other=1",
+  }, "123 Reef Street", "Corals Anonymous");
+  const document = new JSDOM(message.html).window.document;
+  assert.equal(document.querySelector(".offer-mark")?.getAttribute("alt"), "Black Friday is today!");
+  assert.equal(document.querySelector('meta[name="color-scheme"]')?.getAttribute("content"), "light only");
+  assert.deepEqual(Array.from(document.querySelectorAll(".today-badge"), node => node.textContent), ["53% OFF", "80% OFF", "65% OFF"]);
+  assert.deepEqual(Array.from(document.querySelectorAll(".pick-flag"), node => node.textContent), ["75% OFF", "85% OFF", "45% OFF"]);
+  assert.deepEqual(Array.from(document.querySelectorAll(".pick-name"), node => node.textContent), [original[2].title, original[0].title, original[1].title]);
+  assert.match(document.querySelector(".offer-mark")?.getAttribute("src") ?? "", /^https:\/\/.*\/today-headline-v1\.png$/);
+  const timer = new URL(document.querySelector(".clock-img")!.getAttribute("src")!);
+  assert.equal(timer.searchParams.get("deadline"), BLACK_FRIDAY_TODAY_DEADLINE);
+  assert.equal(document.querySelector('a[href^="https://unsubscribe.example"]')?.getAttribute("href"), unsubscribe + "?token=recipient&other=1");
+  assert.ok(message.text.includes("Unsubscribe: " + unsubscribe + "?token=recipient&other=1"));
+  assert.ok(message.text.includes("123 Reef Street"));
+  assert.match(document.querySelector(".stage")?.getAttribute("style") ?? "", /today-sunset-reef-v1\.jpg/);
+  assert.ok(!document.querySelector(`a[href="${original[3].url}"]`));
+});
 
 test("Black Friday keeps manual picks and collection links through save, reorder, and render", () => {
   const source = template();

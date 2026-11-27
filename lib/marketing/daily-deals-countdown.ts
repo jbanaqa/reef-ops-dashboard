@@ -37,23 +37,29 @@ export function nextPacificMidnight(instant: number) {
 
 const secondsPerFrame = 1;
 const animationSeconds = 60;
+const maxClockSeconds = 99 * 3600 + 59 * 60 + 59;
 const digitWidth = 31;
 const digitHeight = 47;
 const digitStarts = [14, 45, 129, 160, 244, 275];
-const background = [75, 18, 78];
 const ink = [
   [255, 230, 80], // digits
   [206, 139, 184], // colons
   [255, 235, 248], // labels and final frame
 ];
 const shadeCount = 4;
-// Index zero is transparent. Blend the remaining edge shades into the matching plum panel.
-const palette = [[0, 0, 0], ...ink.flatMap(color =>
-  Array.from({ length: shadeCount }, (_, level) => color.map((value, channel) => {
-    const opacity = (level + 1) / shadeCount;
-    return Math.round(background[channel] * (1 - opacity) + value * opacity);
-  })),
-)];
+
+function makePalette(background: number[], transparent: boolean) {
+  // Blend the edges into the panel color even when index zero is transparent.
+  return [transparent ? [0, 0, 0] : background, ...ink.flatMap(color =>
+    Array.from({ length: shadeCount }, (_, level) => color.map((value, channel) => {
+      const opacity = (level + 1) / shadeCount;
+      return Math.round(background[channel] * (1 - opacity) + value * opacity);
+    })),
+  )];
+}
+
+const transparentPalette = makePalette([75, 18, 78], true);
+const plumPalette = makePalette([51, 23, 63], false);
 
 /** Barlow weight 800 numerals/colons and weight 700 labels, rasterized from the design preview. */
 function imageMask(compressed: string, inkIndex: number) {
@@ -83,36 +89,51 @@ function clockFace(seconds: number) {
   return pixels;
 }
 
-let lastImage: { epochSecond: number; data: Uint8Array<ArrayBuffer> } | undefined;
+type CountdownOptions = { deadline?: number; background?: "plum" };
+let lastImage: CountdownOptions & { start: number; data: Uint8Array<ArrayBuffer> } | undefined;
 
 /** Animate once, then leave a neutral link prompt instead of looping outdated figures. */
-export function dailyDealsCountdownGif(now = new Date()) {
-  const epochSecond = Math.floor(now.getTime() / 1000);
-  if (lastImage?.epochSecond === epochSecond) return lastImage.data;
+export function dailyDealsCountdownGif(now = new Date(), { deadline, background }: CountdownOptions = {}) {
+  const instant = now.getTime();
+  const start = deadline === undefined
+    ? Math.floor(instant / 1000) * 1000
+    : deadline - Math.ceil((deadline - instant) / 1000) * 1000;
+  if (lastImage?.start === start && lastImage.deadline === deadline && lastImage.background === background) {
+    return lastImage.data;
+  }
 
-  const start = epochSecond * 1000;
-  let midnight = nextPacificMidnight(start);
+  let target = deadline ?? nextPacificMidnight(start);
+  const transparent = background !== "plum";
+  const palette = transparent ? transparentPalette : plumPalette;
   const gif = GIFEncoder({ initialCapacity: 64 * 1024 });
   const animatedFrame = {
     colorDepth: 4,
-    transparent: true,
+    transparent,
     dispose: 2,
     delay: secondsPerFrame * 1000,
     repeat: -1,
   };
+  let hasClockFrame = false;
   for (let offset = 0; offset < animationSeconds; offset += secondsPerFrame) {
     const at = start + offset * 1000;
-    if (at >= midnight) midnight = nextPacificMidnight(at);
+    if (deadline === undefined && at >= target) target = nextPacificMidnight(at);
+    const seconds = (target - at) / 1000;
+    if (seconds < 1 || seconds > maxClockSeconds) break;
     gif.writeFrame(
-      clockFace((midnight - at) / 1000),
+      clockFace(seconds),
       width,
       height,
       offset === 0 ? { ...animatedFrame, palette } : animatedFrame,
     );
+    hasClockFrame = true;
   }
-  gif.writeFrame(neutral, width, height, { ...animatedFrame, dispose: 1 });
+  gif.writeFrame(neutral, width, height, {
+    ...animatedFrame,
+    dispose: 1,
+    palette: hasClockFrame ? undefined : palette,
+  });
   gif.finish();
   const data = gif.bytes();
-  lastImage = { epochSecond, data };
+  lastImage = { start, deadline, background, data };
   return data;
 }

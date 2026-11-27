@@ -1,0 +1,62 @@
+{
+  "daily": [
+    {
+      "id": "toxic-splatter-branching-frogspawn-1",
+      "title": "Toxic Splatter Frogspawn",
+      "url": "https://coralsanonymous.com/products/toxic-splatter-branching-frogspawn-1?variant=47691506843874",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/P4143071.jpg?v=1776186247&width=412",
+      "salePrice": "$34.99",
+      "compareAtPrice": "$74.99"
+    },
+    {
+      "id": "trojan-feather-duster-fan-worm-holiday-special",
+      "title": "Trojan Feather Duster",
+      "url": "https://coralsanonymous.com/products/trojan-feather-duster-fan-worm-holiday-special",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/856D1A38-8D9F-42AE-A28F-899866F7624E.png?v=1775173904&width=412",
+      "salePrice": "$24.99",
+      "compareAtPrice": "$124.99"
+    },
+    {
+      "id": "neon-goniopora-0-5-1-frag",
+      "title": "Neon Goniopora",
+      "url": "https://coralsanonymous.com/products/neon-goniopora-0-5-1-frag",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/corals-anonymous-goniopora-default-title-neon-goniopora-0-5-1-frag-40548758356194.png?v=1750141343&width=412",
+      "salePrice": "$10.50",
+      "compareAtPrice": "$29.99"
+    }
+  ],
+  "picks": [
+    {
+      "id": "nuclear-starlight-rhodactis-mushroom",
+      "title": "Nuclear Starlight Rhodactis",
+      "url": "https://coralsanonymous.com/products/nuclear-starlight-rhodactis-mushroom",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/P7082926.jpg?v=1783563350&width=560",
+      "salePrice": "$9.00",
+      "compareAtPrice": "$59.99"
+    },
+    {
+      "id": "wysiwyg-aussie-lava-button-scoly-0-19",
+      "title": "Aussie Lava Button Scoly",
+      "url": "https://coralsanonymous.com/products/wysiwyg-aussie-lava-button-scoly-0-19",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/PB169726.jpg?v=1794882056&width=560",
+      "salePrice": "$93.49",
+      "compareAtPrice": "$169.99"
+    },
+    {
+      "id": "ocellaris-clownfish-black-friday-steal",
+      "title": "Ocellaris Clownfish",
+      "url": "https://coralsanonymous.com/products/ocellaris-clownfish-black-friday-steal?variant=44705355333858",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/corals-anonymous-fish-single-ocellaris-clownfish-43242762436834.jpg?v=1762557478&width=560",
+      "salePrice": "$8.75",
+      "compareAtPrice": "$34.99"
+    },
+    {
+      "id": "neon-glowstick-cabbage-leather-soft-coral-special-deal",
+      "title": "Neon Glowstick Cabbage Leather",
+      "url": "https://coralsanonymous.com/products/neon-glowstick-cabbage-leather-soft-coral-special-deal?variant=44880754671842",
+      "image": "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/P5208555.jpg?v=1779429183&width=560",
+      "salePrice": "$6.75",
+      "compareAtPrice": "$44.99"
+    }
+  ]
+}

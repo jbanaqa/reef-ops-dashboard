@@ -5,6 +5,7 @@ import {
   BLACK_FRIDAY_DAILY_PRODUCTS,
   BLACK_FRIDAY_MAX_SECTION_PRODUCTS,
   BLACK_FRIDAY_MAX_SECTIONS,
+  BLACK_FRIDAY_TODAY_GRID_PRODUCTS,
   type BlackFridayCollection,
   type BlackFridayDesign,
 } from "@/lib/marketing/black-friday";
@@ -155,6 +156,32 @@ export default function BlackFridayFields({ design, onChange }: {
       sections: design.sections.map(section => section.id === id ? { ...section, ...patch } : section),
     });
   const [openSectionId, setOpenSectionId] = useState("");
+
+  if (design.design === "today") {
+    const picks = design.sections[0];
+    return <>
+      <details className="mk-editor-section mk-editor-disclosure" open>
+        <summary><span>Limited Time Only</span><small>{design.dailyProducts.length} / {BLACK_FRIDAY_DAILY_PRODUCTS} products</small></summary>
+        <div className="mk-editor-disclosure-body">
+          <BlackFridayProductPicker
+            products={design.dailyProducts}
+            limit={BLACK_FRIDAY_DAILY_PRODUCTS}
+            onChange={dailyProducts => onChange({ ...design, dailyProducts })}
+          />
+        </div>
+      </details>
+      {picks && <details className="mk-editor-section mk-editor-disclosure">
+        <summary><span>More Black Friday Picks</span><small>{picks.products.length} / {BLACK_FRIDAY_TODAY_GRID_PRODUCTS} products</small></summary>
+        <div className="mk-editor-disclosure-body">
+          <BlackFridayProductPicker
+            products={picks.products}
+            limit={BLACK_FRIDAY_TODAY_GRID_PRODUCTS}
+            onChange={products => patchSection(picks.id, { products })}
+          />
+        </div>
+      </details>}
+    </>;
+  }
 
   return <>
     <details className="mk-editor-section mk-editor-disclosure">
