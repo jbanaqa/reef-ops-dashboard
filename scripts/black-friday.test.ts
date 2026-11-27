@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
+import sharp from "sharp";
+import { GET as badgedPhoto } from "../app/api/marketing/black-friday-deal-photo/route";
 import { blackFridayCampaignTemplate, blackFridayTodayCampaignTemplate, BLACK_FRIDAY_TODAY_DEADLINE, validateBlackFridayCampaign } from "../lib/marketing/black-friday";
 import { MACRO_BLACK_FRIDAY_URL, macroBlackFridayCampaignTemplate } from "../lib/marketing/macro-black-friday";
 import { runWithMarketingBrand } from "../lib/marketing/context";
@@ -34,7 +36,14 @@ test("Black Friday Today delivers the approved design, discounts, fixed timer an
   const document = new JSDOM(message.html).window.document;
   assert.equal(document.querySelector(".offer-mark")?.getAttribute("alt"), "Black Friday is today!");
   assert.equal(document.querySelector('meta[name="color-scheme"]')?.getAttribute("content"), "light only");
-  assert.deepEqual(Array.from(document.querySelectorAll(".today-badge"), node => node.textContent), ["53% OFF", "80% OFF", "65% OFF"]);
+  const featured = Array.from(document.querySelectorAll<HTMLImageElement>(".today-img"));
+  assert.deepEqual(featured.map(image => image.alt.split(" · ").at(-1)), ["53% OFF", "80% OFF", "65% OFF"]);
+  assert.deepEqual(featured.map(image => new URL(image.src).searchParams.get("discount")), ["53", "80", "65"]);
+  for (const image of featured) {
+    assert.equal(new URL(image.src).pathname, "/api/marketing/black-friday-deal-photo");
+    assert.equal(image.parentElement?.children.length, 1);
+    assert.equal(image.parentElement?.textContent, "");
+  }
   assert.deepEqual(Array.from(document.querySelectorAll(".pick-flag"), node => node.textContent), ["75% OFF", "85% OFF", "45% OFF"]);
   assert.deepEqual(Array.from(document.querySelectorAll(".pick-name"), node => node.textContent), [original[2].title, original[0].title, original[1].title]);
   assert.match(document.querySelector(".offer-mark")?.getAttribute("src") ?? "", /^https:\/\/.*\/today-headline-v1\.png$/);
@@ -45,6 +54,36 @@ test("Black Friday Today delivers the approved design, discounts, fixed timer an
   assert.ok(message.text.includes("123 Reef Street"));
   assert.match(document.querySelector(".stage")?.getAttribute("style") ?? "", /today-sunset-reef-v1\.jpg/);
   assert.ok(!document.querySelector(`a[href="${original[3].url}"]`));
+});
+
+test("Black Friday featured photo contains a gold label inside the JPEG and limits upstream requests", async (t) => {
+  const source = await sharp({ create: { width: 512, height: 512, channels: 3, background: "#143954" } }).png().toBuffer();
+  const fetchPhoto = t.mock.method(globalThis, "fetch", async () => new Response(new Uint8Array(source), {
+    headers: { "Content-Type": "image/png" },
+  }));
+  const request = (image: string, discount = "53") => {
+    const url = new URL("https://dashboard.example/api/marketing/black-friday-deal-photo");
+    url.search = new URLSearchParams({ image, discount }).toString();
+    return new Request(url);
+  };
+  const valid = "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/reef.png?v=123&width=1200";
+  assert.equal((await badgedPhoto(request("https://example.com/reef.png"))).status, 400);
+  assert.equal((await badgedPhoto(request(valid, "53% OFF"))).status, 400);
+  assert.equal((await badgedPhoto(request("https://cdn.shopify.com/s/files/1/0123/4567/8901/files/reef.png"))).status, 400);
+  assert.equal(fetchPhoto.mock.callCount(), 0);
+  const result = await badgedPhoto(request(valid));
+  assert.equal(result.status, 200);
+  assert.equal(result.headers.get("Content-Type"), "image/jpeg");
+  const args = fetchPhoto.mock.calls[0].arguments as unknown as [URL, RequestInit];
+  assert.equal(args[0].href, "https://cdn.shopify.com/s/files/1/0443/0689/0912/files/reef.png?v=123&width=640");
+  assert.equal(args[1].redirect, "error");
+  const { data, info } = await sharp(Buffer.from(await result.arrayBuffer())).raw().toBuffer({ resolveWithObject: true });
+  assert.deepEqual([info.width, info.height], [360, 312]);
+  const pixel = (x: number, y: number) => [...data.subarray((y * info.width + x) * 3, (y * info.width + x) * 3 + 3)];
+  const [red, green, blue] = pixel(45, 27);
+  assert.ok(red > 180 && green > 130 && blue < green);
+  const [photoRed, , photoBlue] = pixel(360 - 10, 312 - 10);
+  assert.ok(photoRed < photoBlue);
 });
 
 test("Black Friday keeps manual picks and collection links through save, reorder, and render", () => {

@@ -1,4 +1,5 @@
 import { BLACK_FRIDAY_TODAY_DEADLINE, type BlackFridayDesign } from "./black-friday";
+import { blackFridayBadgedPhotoUrl } from "./black-friday-badged-photo-url";
 import { DAILY_DEALS_COUNTDOWN_PATH } from "./daily-deals-countdown-config";
 import { escapeHtml as escape, type CampaignEmailProduct, type Content } from "./rules";
 
@@ -20,34 +21,33 @@ function productPrices(product: CampaignEmailProduct) {
   const percentOff = saleAmount > 0 && originalAmount > saleAmount
     ? Math.round(100 * (originalAmount - saleAmount) / originalAmount)
     : 0;
-  return { price, original, discount: percentOff ? percentOff + "% OFF" : "" };
+  return { price, original, percentOff, discount: percentOff ? percentOff + "% OFF" : "" };
 }
 
-function productPhoto(product: CampaignEmailProduct, daily: boolean, discount: string) {
+function productPhoto(product: CampaignEmailProduct, daily: boolean, image = product.image, discount = "") {
+  if (!image) return "";
   const url = escape(product.url);
-  const title = escape(product.title);
+  const alt = escape(discount ? `${product.title} · ${discount}` : product.title);
   const style = daily ? "width:100%;height:156px;object-fit:cover;object-position:center;background-color:#4e214e;"
     : "width:100%;height:175px;object-fit:cover;object-position:center;background-color:#392145;";
-  const photo = product.image ? `<img class="${daily ? "today-img" : "pick-image"}" src="${escape(product.image)}" width="${daily ? 180 : 275}" height="${daily ? 156 : 175}" alt="${title}" style="display:block;${style}color:#fff9ef;">` : "";
-  const tagStyle = "background-color:#f8cf7b;background-image:linear-gradient(135deg,#ffe5a5,#efb455);border:1px solid #be8140;border-radius:3px;padding:4px 6px;color:#48213e;font-size:11px;font-weight:900;font-style:italic;line-height:14px;white-space:nowrap;";
-  const badge = daily && discount ? `<!--[if !mso]><!--><span class="today-badge" style="position:absolute;top:7px;left:6px;display:inline-block;${tagStyle}">${discount}</span><!--<![endif]-->
-    <!--[if mso]><span style="${tagStyle}">${discount}</span><![endif]-->` : "";
-  return photo || badge ? `<a href="${url}" style="position:relative;display:block;color:#fff9ef;text-decoration:none;">${badge}${photo}</a>` : "";
+  return `<a href="${url}" style="display:block;color:#fff9ef;text-decoration:none;"><img class="${daily ? "today-img" : "pick-image"}" src="${escape(image)}" width="${daily ? 180 : 275}" height="${daily ? 156 : 175}" alt="${alt}" style="display:block;${style}color:#fff9ef;"></a>`;
 }
 
-function dailyGrid(products: readonly CampaignEmailProduct[]) {
+function dailyGrid(products: readonly CampaignEmailProduct[], base: string) {
   if (!products.length) return "";
   return `<table ${table} style="margin-top:8px;table-layout:fixed;"><tr>${products.map((product, index) => {
-    const { price, original, discount } = productPrices(product);
+    const { price, original, percentOff, discount } = productPrices(product);
+    const badgedPhoto = product.image && percentOff ? blackFridayBadgedPhotoUrl(base, product.image, percentOff) : "";
+    const textDiscount = discount && !badgedPhoto ? ` <span style="color:#48213e;font-weight:bold;white-space:nowrap;">${discount}</span>` : "";
     const spaceLeft = index === 0 ? 0 : 2.5;
     const spaceRight = index === products.length - 1 ? 0 : 2.5;
     const width = (100 / products.length).toFixed(2);
     return `<td width="${width}%" valign="top" style="width:${width}%;padding:0 ${spaceRight}px 0 ${spaceLeft}px;">
       <table class="today-card" ${table} bgcolor="#fff9ef" style="border-collapse:separate;border-spacing:0;background-color:#fff9ef;border:1px solid #e7ab9c;box-shadow:0 3px 0 #a8576335;">
-        <tr><td>${productPhoto(product, true, discount)}</td></tr>
+        <tr><td>${productPhoto(product, true, badgedPhoto || product.image, badgedPhoto ? discount : "")}</td></tr>
         <tr><td class="today-info" style="padding:9px 8px 10px;">
           <h3 class="today-name" style="margin:0 0 3px;min-height:40px;font-size:16px;line-height:20px;font-weight:800;color:#361735;"><a href="${escape(product.url)}" style="color:#361735;text-decoration:none;">${escape(product.title)}</a></h3>
-          <p class="today-price" style="margin:0;color:#695061;font-size:11px;line-height:19px;"><strong style="font-size:19px;color:#467900;">${escape(price)}</strong>${original ? ` <s>${escape(original)}</s>` : ""}</p>
+          <p class="today-price" style="margin:0;color:#695061;font-size:11px;line-height:19px;"><strong style="font-size:19px;color:#467900;">${escape(price)}</strong>${original ? ` <s>${escape(original)}</s>` : ""}${textDiscount}</p>
         </td></tr>
       </table>
     </td>`;
@@ -59,7 +59,7 @@ function pickCard(product: CampaignEmailProduct, side: "left" | "right") {
   const discountBar = discount ? `<tr><td class="pick-flag" align="center" bgcolor="#f8cf7b" style="padding:5px 3px 4px;background-color:#f8cf7b;background-image:linear-gradient(90deg,#f6bb68,#ffe5a5);color:#48213e;font-size:16px;line-height:19px;font-style:italic;font-weight:900;letter-spacing:.85px;white-space:nowrap;">${discount}</td></tr>` : "";
   return `<td class="pick-${side}" width="50%" valign="top" style="width:50%;padding-${side === "left" ? "right" : "left"}:6px;">
     <table ${table} bgcolor="#fff8ee" style="border-collapse:separate;border-spacing:0;background-color:#fff8ee;border:1px solid #e6aba9;box-shadow:0 3px 0 #d1949570;">
-      <tr><td>${productPhoto(product, false, discount)}</td></tr>
+      <tr><td>${productPhoto(product, false)}</td></tr>
       ${discountBar}
       <tr><td class="pick-info" style="padding:12px 13px 13px;">
         <h3 class="pick-name" style="margin:0 0 5px;min-height:40px;color:#361936;font-size:17px;line-height:20px;font-weight:800;"><a href="${escape(product.url)}" style="text-decoration:none;color:#361936;">${escape(product.title)}</a></h3>
@@ -132,7 +132,6 @@ export function renderBlackFridayTodayEmail(source: Content, design: BlackFriday
       .brand-row { padding: 11px 15px !important; }
       .hero-content { padding-bottom: 51px !important; }
       .today-img { height: clamp(90px, 29vw, 148px) !important; }
-      .today-badge { top: 5px !important; left: 4px !important; font-size: 10px !important; padding: 3px 5px !important; }
       .today-info { padding: 7px 5px 8px !important; }
       .today-name { font-size: 12px !important; line-height: 15px !important; min-height: 30px !important; }
       .today-price strong { font-size: 16px !important; }
@@ -196,7 +195,7 @@ export function renderBlackFridayTodayEmail(source: Content, design: BlackFriday
               </td>
             </tr>
           </table>
-          ${dailyGrid(design.dailyProducts)}
+          ${dailyGrid(design.dailyProducts, base)}
         </td></tr>
         <tr><td class="picks" bgcolor="#ffdfcf" style="padding:18px 25px 25px;background-color:#ffdfcf;background-image:linear-gradient(180deg,#ffdfcd 0%,#ffd9cf 68%,#ffded1 100%);">
           <table class="picks-divider" role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 13px;">
