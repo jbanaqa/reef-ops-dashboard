@@ -7,6 +7,7 @@ import { normalizeProductVariantId } from "./mapping-source";
 export type StoreSide = "A" | "B";
 export type VariantSnapshot = {
   variantId: string;
+  inventoryItemId?: string;
   productId: string;
   title: string;
   variantTitle: string;
@@ -39,6 +40,7 @@ export const SKU_SYNC_VARIANTS_QUERY = `
       __typename
       ... on ProductVariant {
         id title sku
+        inventoryItem { id }
         product { id title onlineStoreUrl }
       }
     }
@@ -64,6 +66,11 @@ function productId(value: unknown): string {
   if (typeof value !== "string" || !/^gid:\/\/shopify\/Product\/[1-9]\d*$/.test(value))
     throw new Error("Invalid Shopify product ID in variant snapshot.");
   return value;
+}
+
+export function parseInventoryItemId(value: unknown): string | undefined {
+  return typeof value === "string" && /^gid:\/\/shopify\/InventoryItem\/[1-9]\d{0,19}$/.test(value)
+    ? value : undefined;
 }
 
 function variantUrl(value: unknown): string | null {
@@ -155,8 +162,12 @@ export function createSkuSyncShopifyAdapter(transport: SkuSyncGraphqlTransport =
             throw new Error("Shopify returned an invalid SKU snapshot.");
           const id = normalizeProductVariantId(node.id);
           if (!expected.has(id) || snapshots.has(id)) throw new Error("Shopify returned an unexpected or duplicate variant.");
+          const inventoryItemId = record(node.inventoryItem) ? parseInventoryItemId(node.inventoryItem.id) : undefined;
+          if (node.inventoryItem !== undefined && !inventoryItemId)
+            throw new Error("Shopify returned an invalid inventory item in the SKU snapshot.");
           snapshots.set(id, {
-            variantId: id, productId: productId(node.product.id), title: node.product.title,
+            variantId: id, ...(inventoryItemId ? { inventoryItemId } : {}),
+            productId: productId(node.product.id), title: node.product.title,
             variantTitle: node.title, sku: node.sku ?? "", url: variantUrl(node.product.onlineStoreUrl),
           });
         }

@@ -15,6 +15,8 @@ model SkuSyncPair {
   category String?
   variantAId String
   variantBId String
+  inventoryItemAId String?
+  inventoryItemBId String?
   present Boolean @default(true)
   active Boolean @default(true)
   initializedAt DateTime?
@@ -33,6 +35,8 @@ model SkuSyncPair {
   syncedAt DateTime?
   updatedAt DateTime @updatedAt
   @@index([sourceKey, present, active])
+  @@index([sourceKey, inventoryItemAId], map: "SkuSyncPair_inventory_a_idx")
+  @@index([sourceKey, inventoryItemBId], map: "SkuSyncPair_inventory_b_idx")
 }
 
 model SkuSyncControl {
@@ -42,6 +46,32 @@ model SkuSyncControl {
   lastMappingsAt DateTime?
   lastRunAt DateTime?
   error String?
+}
+
+model SkuSyncWebhookShop {
+  id String @id
+  sourceKey String
+  shop String
+  side String
+  subscriptionId String?
+  @@unique([sourceKey, shop])
+  @@unique([sourceKey, side])
+}
+
+model SkuSyncWebhookEvent {
+  id String @id
+  sourceKey String
+  shop String
+  side String
+  variantId String
+  receivedAt DateTime @default(now())
+  dueAt DateTime @default(now())
+  attempts Int @default(0)
+  claimedAt DateTime?
+  processedAt DateTime?
+  error String?
+  @@index([sourceKey, processedAt, dueAt])
+  @@index([processedAt])
 }
 
 model MarketingWebhookInbox {

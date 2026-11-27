@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient, type SkuSyncPair } from "@/app/generated/prisma/client";
-import type { CloudflareMapping } from "./mapping-source";
+import { normalizeProductVariantId, type CloudflareMapping } from "./mapping-source";
 import { SkuSyncMutationRejectedError, type StoreSide, type VariantSnapshot } from "./shopify";
 import { ShopifyRequestNotExecutedError } from "../shopify-request-error";
 
@@ -36,6 +36,7 @@ type Dependencies = {
   db: PrismaClient; namespace: string; fetchMappings(): Promise<CloudflareMapping[]>;
   shopify: Provider; now?: () => Date;
 };
+export type SkuSyncVariantResult = { status: "busy" | "ignored" | "checked"; synced?: boolean };
 export class SkuSyncConflictError extends Error { readonly status = 409; }
 export class SkuSyncBusyError extends SkuSyncConflictError {}
 const LEASE_MS = 120_000;
@@ -130,9 +131,18 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
       }),
     };
   }
-  async function importMappings() {
-    // Nothing is retired if download/validation fails. A valid empty feed retires all pairs.
-    const mappings = await fetchMappings();
+  async function readMappings() {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("SKU Sync mapping check exceeded its deadline.");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // A timed-out GET has no side effects. Never race an entire reconciliation,
+    // which could otherwise keep writing after its caller releases the lease.
+    const mappings = await Promise.race([
+      fetchMappings(),
+      new Promise<CloudflareMapping[]>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("SKU Sync mapping check exceeded its deadline.")), remaining);
+      }),
+    ]).finally(() => clearTimeout(timer));
     if (!Array.isArray(mappings)) throw new Error("The mapping source did not return a complete mapping list.");
     const seen = new Set<string>();
     for (const m of mappings) {
@@ -140,6 +150,11 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
       seen.add(m.id);
     }
     await assertLease();
+    return mappings;
+  }
+  async function importMappings() {
+    // Nothing is retired if download/validation fails. A valid empty feed retires all pairs.
+    const mappings = await readMappings();
     const previous = await db.skuSyncPair.findMany({ where: { sourceKey: namespace } });
     const byId = new Map(previous.map(row => [row.id, row]));
     const countsA = new Map<string, number>(), countsB = new Map<string, number>();
@@ -156,6 +171,7 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
       const data = {
         name: m.name, category: m.category, variantAId: m.variantAId, variantBId: m.variantBId, present: true, active: m.active,
         ...(reset || !m.active ? { initializedAt: null, baselineSkuA: null, baselineSkuB: null, currentSkuA: null, currentSkuB: null,
+          inventoryItemAId: null, inventoryItemBId: null,
           productA: Prisma.DbNull, productB: Prisma.DbNull, pending: Prisma.DbNull, conflict: false } : {}),
         error: ambiguous ? "This variant appears in more than one active mapping. Correct the Cloudflare mappings first." : null,
       };
@@ -164,7 +180,8 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
     const ids = mappings.map(m => `${namespace}:${m.id}`);
     await assertLease();
     await db.skuSyncPair.updateMany({ where: { sourceKey: namespace, id: { notIn: ids } },
-      data: { present: false, active: false, initializedAt: null, pending: Prisma.DbNull, conflict: false } });
+      data: { present: false, active: false, initializedAt: null, inventoryItemAId: null, inventoryItemBId: null,
+        pending: Prisma.DbNull, conflict: false } });
     await assertLease();
     await db.skuSyncControl.update({ where: { id: namespace }, data: { error: null } });
     return mappings;
@@ -191,7 +208,8 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
       const seed = !row.initializedAt && first && second && !error;
       await updatePair(row.id, {
         currentSkuA: first?.sku ?? null, currentSkuB: second?.sku ?? null,
-        ...(first ? { productA: json(first) } : {}), ...(second ? { productB: json(second) } : {}),
+        ...(first ? { productA: json(first), inventoryItemAId: first.inventoryItemId ?? null } : {}),
+        ...(second ? { productB: json(second), inventoryItemBId: second.inventoryItemId ?? null } : {}),
         checkedAt: now(), error,
         ...(seed ? { initializedAt: now(), baselineSkuA: first.sku, baselineSkuB: second.sku, conflict: false, pending: Prisma.DbNull } : {}),
       });
@@ -214,14 +232,17 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
   }
   async function settle(row: SkuSyncPair, a: VariantSnapshot, b: VariantSnapshot, source?: StoreSide) {
     await updatePair(row.id, { baselineSkuA: a.sku, baselineSkuB: b.sku, currentSkuA: a.sku, currentSkuB: b.sku,
+      inventoryItemAId: a.inventoryItemId ?? null, inventoryItemBId: b.inventoryItemId ?? null,
       productA: json(a), productB: json(b), pending: Prisma.DbNull, conflict: false, error: null, checkedAt: now(),
       ...(source ? { syncedAt: now(), lastChange: json({ source, fromA: row.baselineSkuA, fromB: row.baselineSkuB, sku: a.sku, at: now().toISOString() }) } : {}) });
   }
   async function markConflict(row: SkuSyncPair, a: VariantSnapshot, b: VariantSnapshot) {
     await updatePair(row.id, { currentSkuA: a.sku, currentSkuB: b.sku, productA: json(a), productB: json(b),
+      inventoryItemAId: a.inventoryItemId ?? null, inventoryItemBId: b.inventoryItemId ?? null,
       pending: Prisma.DbNull, conflict: true, error: null, checkedAt: now() });
   }
-  async function applyPending(row: SkuSyncPair, operation: Pending, explicitRetry = false): Promise<boolean> {
+  async function applyPending(row: SkuSyncPair, operation: Pending,
+    options: { explicitRetry?: boolean; throwOnFailure?: boolean } = {}): Promise<boolean> {
     const { a, b } = await readPair(row);
     if (a.sku === operation.desired && b.sku === operation.desired) { await settle(row, a, b, operation.source); return true; }
     const source = operation.source === "A" ? a : b, target = operation.source === "A" ? b : a;
@@ -229,7 +250,7 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
     if (source.sku !== operation.desired || target.sku !== expectedTarget) {
       await markConflict(row, a, b); return false;
     }
-    if (operation.state === "uncertain" && !explicitRetry) {
+    if (operation.state === "uncertain" && !options.explicitRetry) {
       await updatePair(row.id, { error: "The previous SKU update could not be confirmed. Refresh to check its result, or choose the same SKU again to retry." });
       return false;
     }
@@ -243,6 +264,7 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
       // The saved attempt survives Refresh, which replaces only errors from reading the pair.
       await updatePair(row.id, { pending: json({ ...operation, writeFailed: true,
         state: error instanceof ShopifyRequestNotExecutedError || error instanceof SkuSyncMutationRejectedError ? "prepared" : "uncertain" }), error: message(error) });
+      if (options.throwOnFailure) throw error;
       return false;
     }
     const actual = await readPair(row);
@@ -257,6 +279,29 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
         error: "Shopify accepted the request, but the new SKU is not yet confirmed. It will be checked again automatically." });
     }
     return false;
+  }
+  /** Both automatic paths use the same baseline/pending/conflict decisions. */
+  async function reconcilePair(row: SkuSyncPair, throwOnFailure = false) {
+    const pending = pendingOf(row);
+    if (pending) return { synced: await applyPending(row, pending, { throwOnFailure }), conflicts: 0 };
+    if (row.currentSkuA === row.currentSkuB) {
+      if (row.baselineSkuA !== row.currentSkuA || row.baselineSkuB !== row.currentSkuB || row.conflict) {
+        const actual = await readPair(row);
+        if (actual.a.sku === actual.b.sku) await settle(row, actual.a, actual.b);
+      }
+    } else if (row.conflict) return { synced: false, conflicts: 1 };
+    else {
+      const changedA = row.currentSkuA !== row.baselineSkuA, changedB = row.currentSkuB !== row.baselineSkuB;
+      if (changedA && changedB) { await updatePair(row.id, { conflict: true }); return { synced: false, conflicts: 1 }; }
+      if ((changedA || changedB) && row.currentSkuA !== null && row.currentSkuB !== null) {
+        const source: StoreSide = changedA ? "A" : "B";
+        const operation: Pending = { source, desired: changedA ? row.currentSkuA : row.currentSkuB,
+          expectedA: row.currentSkuA, expectedB: row.currentSkuB, variantAId: row.variantAId, variantBId: row.variantBId, state: "prepared" };
+        await updatePair(row.id, { pending: json(operation) });
+        return { synced: await applyPending(row, operation, { throwOnFailure }), conflicts: 0 };
+      }
+    }
+    return { synced: false, conflicts: 0 };
   }
   async function refresh(): Promise<SkuSyncView> {
     try { return await locked(async () => { await observe(); return view(); }); }
@@ -277,25 +322,9 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
           checked++;
           if (row.error?.startsWith("This variant appears") || row.currentSkuA === null || row.currentSkuB === null) continue;
           try {
-            const pending = pendingOf(row);
-            if (pending) { if (await applyPending(row, pending)) synced++; }
-            else if (row.currentSkuA === row.currentSkuB) {
-              if (row.baselineSkuA !== row.currentSkuA || row.baselineSkuB !== row.currentSkuB || row.conflict) {
-                const actual = await readPair(row);
-                if (actual.a.sku === actual.b.sku) await settle(row, actual.a, actual.b);
-              }
-            } else if (row.conflict) conflicts++;
-            else {
-              const changedA = row.currentSkuA !== row.baselineSkuA, changedB = row.currentSkuB !== row.baselineSkuB;
-              if (changedA && changedB) { await updatePair(row.id, { conflict: true }); conflicts++; }
-              else if (changedA || changedB) {
-                const source: StoreSide = changedA ? "A" : "B";
-                const operation: Pending = { source, desired: changedA ? row.currentSkuA : row.currentSkuB,
-                  expectedA: row.currentSkuA, expectedB: row.currentSkuB, variantAId: row.variantAId, variantBId: row.variantBId, state: "prepared" };
-                await updatePair(row.id, { pending: json(operation) });
-                if (await applyPending(row, operation)) synced++;
-              }
-            }
+            const result = await reconcilePair(row);
+            if (result.synced) synced++;
+            conflicts += result.conflicts;
           } catch (error) {
             if (error instanceof SkuSyncBusyError) throw error;
             await updatePair(row.id, { error: message(error) });
@@ -308,6 +337,46 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
       });
     } catch (error) {
       if (error instanceof SkuSyncBusyError) return { checked: 0, synced: 0, initialized: 0, conflicts: 0, busy: true };
+      throw error;
+    }
+  }
+  /** A notification is only a wake-up hint, never proof of a SKU or permission to seed a pair. */
+  async function runForVariant(side: StoreSide, variantId: string,
+    options: { timeoutMs?: number } = {}): Promise<SkuSyncVariantResult> {
+    if (side !== "A" && side !== "B") throw new Error("Invalid SKU Sync store.");
+    const id = normalizeProductVariantId(variantId);
+    const timeoutMs = options.timeoutMs ?? 25_000;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("SKU Sync target check needs a positive timeout.");
+    const targetDeadline = Date.now() + Math.min(timeoutMs, RUN_MS);
+    try {
+      return await locked(async (): Promise<SkuSyncVariantResult> => {
+        deadline = Math.min(deadline, targetDeadline);
+        const active = (await readMappings()).filter(mapping => mapping.active);
+        const matches = active.filter(mapping => (side === "A" ? mapping.variantAId : mapping.variantBId) === id);
+        if (matches.length !== 1) return { status: "ignored" };
+        const mapping = matches[0];
+        if (active.some(other => other.id !== mapping.id &&
+          (other.variantAId === mapping.variantAId || other.variantBId === mapping.variantBId))) return { status: "ignored" };
+        const row = await db.skuSyncPair.findUnique({ where: { id: `${namespace}:${mapping.id}` } });
+        if (!row || row.sourceKey !== namespace || !row.present || !row.active || !row.initializedAt ||
+          row.variantAId !== mapping.variantAId || row.variantBId !== mapping.variantBId ||
+          row.error?.startsWith("This variant appears")) return { status: "ignored" };
+        try {
+          const { a, b } = await readPair(row);
+          const observed = await updatePair(row.id, { currentSkuA: a.sku, currentSkuB: b.sku,
+            productA: json(a), productB: json(b), inventoryItemAId: a.inventoryItemId ?? null,
+            inventoryItemBId: b.inventoryItemId ?? null, checkedAt: now(), error: null });
+          const result = await reconcilePair(observed, true);
+          await updatePair(row.id, { processedAt: now() });
+          return { status: "checked", synced: result.synced };
+        } catch (error) {
+          if (error instanceof SkuSyncBusyError) throw error;
+          await updatePair(row.id, { error: message(error) });
+          throw error;
+        }
+      });
+    } catch (error) {
+      if (error instanceof SkuSyncBusyError) return { status: "busy" };
       throw error;
     }
   }
@@ -330,12 +399,12 @@ export function createSkuSyncService({ db, namespace, fetchMappings, shopify, no
       const operation: Pending = { source: choice.source, desired, expectedA: a.sku, expectedB: b.sku,
         variantAId: row.variantAId, variantBId: row.variantBId, state: "prepared" };
       await updatePair(row.id, { pending: json(operation), conflict: false, error: null });
-      if (!await applyPending(row, operation, true)) {
+      if (!await applyPending(row, operation, { explicitRetry: true })) {
         const latest = await db.skuSyncPair.findUniqueOrThrow({ where: { id: row.id } });
         throw new SkuSyncConflictError(latest.error || "A SKU changed during the update. Refresh to review both stores.");
       }
       return view();
     });
   }
-  return { refresh, run, resolve };
+  return { refresh, run, runForVariant, resolve };
 }

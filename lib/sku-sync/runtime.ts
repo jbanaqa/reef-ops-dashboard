@@ -15,12 +15,15 @@ export function unavailableSkuSyncView(error: string): SkuSyncView {
   return { configured: false, error, busy: false, checkedAt: null, lastAutomaticCheckAt: null, mappings: [] };
 }
 
-export function getSkuSyncService() {
+export function getSkuSyncNamespace() {
   // Changing either store/source establishes new baselines, not another tenant's saved SKUs.
-  const namespace = createHash("sha256").update(JSON.stringify([
+  return createHash("sha256").update(JSON.stringify([
     process.env.SHOPIFY_SHOP_DOMAIN?.toLowerCase().trim(),
     process.env.SPECIES_LIBRARY_SHOP_DOMAIN?.toLowerCase().trim(), getSkuSyncMappingsUrl(),
   ])).digest("hex").slice(0, 24);
-  return createSkuSyncService({ db: prisma, namespace, fetchMappings: fetchCloudflareMappings,
+}
+
+export function getSkuSyncService() {
+  return createSkuSyncService({ db: prisma, namespace: getSkuSyncNamespace(), fetchMappings: fetchCloudflareMappings,
     shopify: { fetchVariantSnapshots, updateVariantSku } });
 }

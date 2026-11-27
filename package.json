@@ -22,7 +22,7 @@
     "marketing:engagement-backfill": "tsx scripts/run-engagement-backfill.ts",
     "scheduled:all": "tsx scripts/run-scheduled-jobs.ts",
     "sku-sync:scheduled": "tsx scripts/run-sku-sync.ts",
-    "sku-sync:test": "tsx --test scripts/sku-sync.test.ts scripts/sku-sync-adapters.test.ts scripts/sku-sync-auth.test.ts",
+    "sku-sync:test": "tsx --test scripts/sku-sync.test.ts scripts/sku-sync-adapters.test.ts scripts/sku-sync-auth.test.ts scripts/sku-sync-webhook.test.ts scripts/sku-sync-webhook-queue.test.ts scripts/register-sku-sync-webhooks.test.ts",
     "marketing:test": "node scripts/verify-marketing.cjs test",
     "build:check": "node scripts/verify-marketing.cjs build",
     "marketing:browser:test": "node scripts/marketing.browser.test.cjs",

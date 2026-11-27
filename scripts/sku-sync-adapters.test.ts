@@ -158,7 +158,8 @@ test("snapshot reader batches unique IDs without mutating or fetching inventory 
   const batches: number[] = [];
   const adapter = createSkuSyncShopifyAdapter(async (side, query, variables) => {
     assert.equal(side, "A");
-    assert.doesNotMatch(query, /mutation|inventoryItem|quantities|price|compareAtPrice/);
+    assert.match(query, /inventoryItem\s*\{\s*id\s*\}/);
+    assert.doesNotMatch(query, /mutation|inventoryLevels|quantities|price|compareAtPrice/);
     const ids = variables.ids as string[];
     batches.push(ids.length);
     return { data: { nodes: ids.map((id) => node(Number(id.split("/").at(-1)))) } };

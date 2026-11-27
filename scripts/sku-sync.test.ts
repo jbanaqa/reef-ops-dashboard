@@ -33,6 +33,7 @@ type Snapshot = {
   variantTitle: string;
   sku: string;
   url: string | null;
+  inventoryItemId?: string;
 };
 type Write = { side: Side; variantId: string; sku: string };
 type Service = ReturnType<typeof import("../lib/sku-sync/service").createSkuSyncService>;
@@ -42,6 +43,7 @@ before(async () => {
   globalThis.fetch = async () => { throw Error("SKU integration tests must never contact a real service."); };
   database = await PGlite.create();
   await database.exec(await readFile("prisma/migrations/20261120120000_sku_sync/migration.sql", "utf8"));
+  await database.exec(await readFile("prisma/migrations/20261127210000_sku_sync_webhooks/migration.sql", "utf8"));
   socket = new PGLiteSocketServer({ db: database, host: "127.0.0.1", port: 0, maxConnections: 1 });
   await socket.start();
   process.env.DATABASE_URL = "postgresql://postgres:postgres@" + socket.getServerConn() + "/postgres";
@@ -67,7 +69,8 @@ function mapping(id = 1, a = 11, b = 22): Mapping {
 function snapshot(id: string, sku: string): Snapshot {
   const suffix = id.split("/").at(-1)!;
   return { variantId: id, productId: `gid://shopify/Product/${suffix}`, title: `Product ${suffix}`,
-    variantTitle: "Default Title", sku, url: `https://store.example/products/product-${suffix}` };
+    variantTitle: "Default Title", sku, url: `https://store.example/products/product-${suffix}`,
+    inventoryItemId: `gid://shopify/InventoryItem/${suffix}` };
 }
 
 function fixture(skuA = "CORALS-OLD", skuB = "MACRO-OLD") {
@@ -632,5 +635,286 @@ test("losing ownership during mapping import prevents later upserts, retirement 
   const retained = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:2` } });
   assert.equal(retained.present, true, "An old owner cannot retire a previously imported pair.");
   assert.equal((await db.skuSyncControl.findUniqueOrThrow({ where: { id: h.dependencies.namespace } })).leaseToken, replacementToken);
+  assert.equal(h.state.writes.length, 0);
+});
+
+test("targeted checks reconcile only one existing pair in either direction and ignore their own echo", async () => {
+  const h = fixture();
+  const other = mapping(2, 33, 44);
+  h.state.mappings.push(other);
+  h.state.variants.A.set(other.variantAId, snapshot(other.variantAId, "OTHER-A"));
+  h.state.variants.B.set(other.variantBId, snapshot(other.variantBId, "OTHER-B"));
+  await h.service.refresh();
+  const otherBefore = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:2` } });
+  const controlBefore = await db.skuSyncControl.findUniqueOrThrow({ where: { id: h.dependencies.namespace } });
+  h.setSku("A", "FAST-CA");
+  h.setSku("A", "UNRELATED-EDIT", other.variantAId);
+  h.state.reads.length = 0;
+  h.advance(60_000);
+  assert.deepEqual(await h.service.runForVariant("A", "11"), { status: "checked", synced: true });
+  assert.equal(h.sku("B"), "FAST-CA");
+  assert.equal(h.sku("B", other.variantBId), "OTHER-B");
+  assert.deepEqual(await db.skuSyncPair.findUniqueOrThrow({ where: { id: otherBefore.id } }), otherBefore);
+  assert.ok(h.state.reads.every(read => read.ids.length === 1 && read.ids[0] ===
+    (read.side === "A" ? h.initial.variantAId : h.initial.variantBId)), "The fast path must not read unrelated pairs.");
+  assert.deepEqual(await h.service.runForVariant("B", h.initial.variantBId), { status: "checked", synced: false });
+  assert.equal(h.state.writes.length, 1, "The destination webhook must not echo the app's write back.");
+
+  h.setSku("B", "FAST-MACRO");
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "checked", synced: true });
+  assert.equal(h.sku("A"), "FAST-MACRO", "A notification's side must not override the freshly observed winning side.");
+  assert.deepEqual(h.state.writes.map(write => write.side), ["B", "A"]);
+  const controlAfter = await db.skuSyncControl.findUniqueOrThrow({ where: { id: h.dependencies.namespace } });
+  assert.deepEqual(controlAfter.lastRunAt, controlBefore.lastRunAt, "A targeted check is not a completed full cron pass.");
+  assert.deepEqual(controlAfter.lastMappingsAt, controlBefore.lastMappingsAt);
+});
+
+test("targeted notifications do not initialize mappings or reconcile untouched initial differences", async () => {
+  const h = fixture();
+  assert.deepEqual(await h.service.runForVariant("A", variantId(999)), { status: "ignored" });
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "ignored" });
+  assert.equal(await db.skuSyncPair.count({ where: { sourceKey: h.dependencies.namespace } }), 0);
+  assert.equal(h.state.reads.length, 0);
+  await h.service.refresh();
+  const baseline = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } });
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "checked", synced: false });
+  assert.equal(h.state.writes.length, 0);
+  const after = await db.skuSyncPair.findUniqueOrThrow({ where: { id: baseline.id } });
+  assert.equal(after.baselineSkuA, baseline.baselineSkuA);
+  assert.equal(after.baselineSkuB, baseline.baselineSkuB);
+});
+
+test("fresh mapping evidence blocks inactive, removed, remapped and overlapping targeted updates without importing", async () => {
+  for (const condition of ["inactive", "removed", "remapped", "overlap-a", "overlap-b"] as const) {
+    const h = fixture();
+    await h.service.refresh();
+    h.setSku("A", "DO-NOT-COPY");
+    const before = await db.skuSyncPair.findMany({ where: { sourceKey: h.dependencies.namespace } });
+    if (condition === "inactive") h.state.mappings[0].active = false;
+    if (condition === "removed") h.state.mappings = [];
+    if (condition === "remapped") h.state.mappings = [mapping(1, 11, 44)];
+    if (condition === "overlap-a") h.state.mappings.push(mapping(2, 11, 44));
+    if (condition === "overlap-b") h.state.mappings.push(mapping(2, 33, 22));
+    h.state.reads.length = 0;
+    assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "ignored" }, condition);
+    assert.deepEqual(await db.skuSyncPair.findMany({ where: { sourceKey: h.dependencies.namespace } }), before, condition);
+    assert.equal(h.state.reads.length, 0, condition);
+    assert.equal(h.state.writes.length, 0, condition);
+  }
+});
+
+test("targeted checks cannot bypass a baseline reset required after reactivation or ambiguity", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  h.state.mappings[0].active = false;
+  await h.service.refresh();
+  h.state.mappings[0].active = true;
+  h.setSku("A", "REACTIVATED-EDIT");
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "ignored" });
+  await h.service.refresh();
+  h.state.mappings.push(mapping(2, 11, 44));
+  h.state.variants.B.set(variantId(44), snapshot(variantId(44), "OTHER"));
+  await h.service.refresh();
+  h.state.mappings.pop();
+  h.setSku("A", "UNAMBIGUOUS-EDIT");
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "ignored" });
+  assert.equal(h.state.writes.length, 0);
+  await h.run();
+  assert.equal(h.state.writes.length, 0, "The regular baseline reset must remain non-destructive.");
+});
+
+test("targeted checks do not choose a winner for two-sided edits or clear sticky conflicts", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  h.setSku("A", "CA-CHANGED"); h.setSku("B", "MACRO-CHANGED");
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "checked", synced: false });
+  let saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } });
+  assert.equal(saved.conflict, true);
+  h.setSku("A", "CA-CHANGED-AGAIN");
+  assert.deepEqual(await h.service.runForVariant("B", h.initial.variantBId), { status: "checked", synced: false });
+  saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id: saved.id } });
+  assert.equal(saved.conflict, true);
+  assert.equal(h.state.writes.length, 0);
+  h.setSku("B", "CA-CHANGED-AGAIN");
+  await h.service.runForVariant("B", h.initial.variantBId);
+  saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id: saved.id } });
+  assert.equal(saved.conflict, false, "A freshly verified matching pair may settle naturally.");
+  assert.equal(h.state.writes.length, 0);
+});
+
+test("targeted checks preserve exact SKU text and intentional clearing", async () => {
+  const h = fixture("OLD", "OLD");
+  await h.service.refresh();
+  h.setSku("A", " Case Sensitive ");
+  await h.service.runForVariant("A", h.initial.variantAId);
+  assert.equal(h.sku("B"), " Case Sensitive ");
+  h.setSku("B", "");
+  await h.service.runForVariant("B", h.initial.variantBId);
+  assert.equal(h.sku("A"), "");
+});
+
+test("targeted provider and mapping failures throw without consuming baselines", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  h.setSku("A", "WAIT-FOR-PROVIDERS");
+  h.state.mappingFailure = Error("Fixture mapping source unavailable.");
+  await assert.rejects(h.service.runForVariant("A", h.initial.variantAId), /Fixture mapping/);
+  h.state.mappingFailure = null;
+  h.state.readFailure = "B";
+  await assert.rejects(h.service.runForVariant("A", h.initial.variantAId), /Fixture Shopify/);
+  h.state.readFailure = null;
+  const missing = h.state.variants.B.get(h.initial.variantBId)!;
+  h.state.variants.B.delete(h.initial.variantBId);
+  await assert.rejects(h.service.runForVariant("A", h.initial.variantAId), /unavailable/);
+  h.state.variants.B.set(h.initial.variantBId, missing);
+  const saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } });
+  assert.equal(saved.baselineSkuA, "CORALS-OLD"); assert.equal(saved.baselineSkuB, "MACRO-OLD");
+  assert.equal(h.state.writes.length, 0);
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "checked", synced: true });
+  assert.equal(h.sku("B"), "WAIT-FOR-PROVIDERS");
+});
+
+test("a targeted rejected mutation remains durable, throws and safely retries the same target", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  h.setSku("A", "RETRY-TARGETED");
+  h.state.beforeWrite = async () => { throw new SkuSyncMutationRejectedError("Fixture targeted mutation rejected."); };
+  await assert.rejects(h.service.runForVariant("A", h.initial.variantAId), /Fixture targeted/);
+  const failed = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } });
+  assert.equal((failed.pending as { state: string }).state, "prepared");
+  assert.equal(failed.baselineSkuA, "CORALS-OLD");
+  assert.equal(h.row(await h.service.refresh()).status, "sync-error");
+  h.state.beforeWrite = null;
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "checked", synced: true });
+  assert.equal(h.sku("B"), "RETRY-TARGETED");
+  assert.ok(h.state.writes.every(write => write.side === "B"));
+});
+
+test("targeted unknown outcomes never automatically repeat an unconfirmed mutation", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  h.setSku("A", "UNCERTAIN-TARGETED");
+  h.state.beforeWrite = async () => { throw Error("Fixture targeted outcome unknown."); };
+  await assert.rejects(h.service.runForVariant("A", h.initial.variantAId), /Fixture targeted/);
+  h.state.beforeWrite = null;
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "checked", synced: false });
+  assert.equal(h.state.writes.length, 1);
+  assert.equal(h.sku("B"), "MACRO-OLD");
+  h.setSku("A", "DO-NOT-REPLAY-OLD-VALUE");
+  await h.service.runForVariant("A", h.initial.variantAId);
+  assert.equal(h.state.writes.length, 1);
+  assert.equal((await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } })).conflict, true);
+});
+
+test("targeted readback settles an accepted timeout without duplicate or reverse writes", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  h.setSku("A", "ACCEPTED-TARGETED");
+  h.state.afterWrite = async () => { throw Error("Fixture targeted response lost after acceptance."); };
+  await assert.rejects(h.service.runForVariant("A", h.initial.variantAId), /Fixture targeted/);
+  h.state.afterWrite = null;
+  assert.deepEqual(await h.service.runForVariant("B", h.initial.variantBId), { status: "checked", synced: true });
+  assert.equal(h.state.writes.length, 1);
+  const saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } });
+  assert.equal(saved.pending, null);
+  assert.equal(saved.baselineSkuA, "ACCEPTED-TARGETED"); assert.equal(saved.baselineSkuB, "ACCEPTED-TARGETED");
+});
+
+test("targeted preflight protects a newer target edit from a stale notification", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  h.setSku("A", "NOTIFICATION-SOURCE");
+  let targetReads = 0;
+  h.state.beforeRead = async side => {
+    if (side === "B" && ++targetReads === 2) h.setSku("B", "EDIT-DURING-TARGETED-CHECK");
+  };
+  assert.deepEqual(await h.service.runForVariant("A", h.initial.variantAId), { status: "checked", synced: false });
+  assert.equal(h.sku("B"), "EDIT-DURING-TARGETED-CHECK");
+  assert.equal(h.state.writes.length, 0);
+  assert.equal((await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } })).conflict, true);
+});
+
+test("targeted checks share the same lease as polling and manual resolution", { timeout: 20_000 }, async () => {
+  const h = fixture();
+  const view = await h.service.refresh();
+  h.setSku("A", "ONE-OWNER");
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  h.state.beforeWrite = async () => { entered(); await gate; };
+  const running = h.service.runForVariant("A", h.initial.variantAId);
+  await started;
+  const other = createSkuSyncService(h.dependencies);
+  try {
+    assert.deepEqual(await other.runForVariant("B", h.initial.variantBId), { status: "busy" });
+    const scheduled = await other.run();
+    assert.equal("busy" in scheduled && scheduled.busy, true);
+    await assert.rejects(other.resolve({ mappingId: h.row(view).id, source: "A", expectedSkuA: "ONE-OWNER",
+      expectedSkuB: "MACRO-OLD", expectedVariantAId: h.initial.variantAId, expectedVariantBId: h.initial.variantBId }), /already checking/);
+    assert.equal(h.state.writes.length, 1);
+  } finally { release(); }
+  assert.deepEqual(await running, { status: "checked", synced: true });
+  assert.equal(h.state.writes.length, 1);
+});
+
+test("inventory item indexes follow observed variants and clear when a mapping changes", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  const id = `${h.dependencies.namespace}:1`;
+  let saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id } });
+  assert.equal(saved.inventoryItemAId, "gid://shopify/InventoryItem/11");
+  assert.equal(saved.inventoryItemBId, "gid://shopify/InventoryItem/22");
+  h.state.variants.A.set(h.initial.variantAId, { ...h.state.variants.A.get(h.initial.variantAId)!,
+    inventoryItemId: "gid://shopify/InventoryItem/111" });
+  await h.service.runForVariant("A", h.initial.variantAId);
+  saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id } });
+  assert.equal(saved.inventoryItemAId, "gid://shopify/InventoryItem/111");
+  h.state.variants.A.delete(h.initial.variantAId);
+  await h.service.refresh();
+  saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id } });
+  assert.equal(saved.inventoryItemAId, "gid://shopify/InventoryItem/111", "A failed lookup must not erase a known inventory item ID.");
+  h.state.mappings[0].active = false;
+  await h.service.refresh();
+  saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id } });
+  assert.equal(saved.inventoryItemAId, null); assert.equal(saved.inventoryItemBId, null);
+  h.state.mappings = [mapping(1, 33, 44)];
+  await h.service.refresh();
+  saved = await db.skuSyncPair.findUniqueOrThrow({ where: { id } });
+  assert.equal(saved.inventoryItemAId, null); assert.equal(saved.inventoryItemBId, null);
+});
+
+test("targeted mapping requests respect the caller's deadline and release ownership after timing out", async () => {
+  const h = fixture();
+  await h.service.refresh();
+  const before = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } });
+  const stalled = createSkuSyncService({ ...h.dependencies, fetchMappings: async () => new Promise<Mapping[]>(() => {}) });
+  await assert.rejects(stalled.runForVariant("A", h.initial.variantAId, { timeoutMs: 10 }), /deadline/);
+  assert.deepEqual(await db.skuSyncPair.findUniqueOrThrow({ where: { id: before.id } }), before);
+  assert.equal((await db.skuSyncControl.findUniqueOrThrow({ where: { id: h.dependencies.namespace } })).leaseToken, null);
+  assert.equal(h.state.writes.length, 0);
+});
+
+test("targeted lease loss during provider reads prevents any mutation and retains the replacement lock", { timeout: 20_000 }, async () => {
+  const h = fixture();
+  await h.service.refresh();
+  h.setSku("A", "WAIT-FOR-TARGETED-OWNERSHIP");
+  const before = await db.skuSyncPair.findUniqueOrThrow({ where: { id: `${h.dependencies.namespace}:1` } });
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let once = true;
+  h.state.beforeRead = async side => {
+    if (side === "A" && once) { once = false; entered(); await gate; }
+  };
+  const running = h.service.runForVariant("A", h.initial.variantAId);
+  await started;
+  const replacement = "targeted-replacement-owner";
+  await db.skuSyncControl.update({ where: { id: h.dependencies.namespace }, data: {
+    leaseToken: replacement, leaseUntil: new Date(h.dependencies.now().getTime() + 60_000),
+  } });
+  release();
+  assert.deepEqual(await running, { status: "busy" });
+  assert.deepEqual(await db.skuSyncPair.findUniqueOrThrow({ where: { id: before.id } }), before);
+  assert.equal((await db.skuSyncControl.findUniqueOrThrow({ where: { id: h.dependencies.namespace } })).leaseToken, replacement);
   assert.equal(h.state.writes.length, 0);
 });
