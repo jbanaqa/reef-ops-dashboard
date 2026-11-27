@@ -29,7 +29,7 @@ function productPhoto(product: CampaignEmailProduct, daily: boolean, discount: s
   const style = daily ? "width:100%;height:156px;object-fit:cover;object-position:center;background-color:#4e214e;"
     : "width:100%;height:175px;object-fit:cover;object-position:center;background-color:#392145;";
   const photo = product.image ? `<img class="${daily ? "today-img" : "pick-image"}" src="${escape(product.image)}" width="${daily ? 180 : 275}" height="${daily ? 156 : 175}" alt="${title}" style="display:block;${style}color:#fff9ef;">` : "";
-  const tagStyle = "background-color:#922950;background-image:linear-gradient(135deg,#b83861,#73204f);border:1px solid #f6b67e;border-radius:3px;padding:4px 6px;color:#fff1ab;font-size:11px;font-weight:900;font-style:italic;line-height:14px;white-space:nowrap;";
+  const tagStyle = "background-color:#f8cf7b;background-image:linear-gradient(135deg,#ffe5a5,#efb455);border:1px solid #be8140;border-radius:3px;padding:4px 6px;color:#48213e;font-size:11px;font-weight:900;font-style:italic;line-height:14px;white-space:nowrap;";
   const badge = daily && discount ? `<!--[if !mso]><!--><span class="today-badge" style="position:absolute;top:7px;left:6px;display:inline-block;${tagStyle}">${discount}</span><!--<![endif]-->
     <!--[if mso]><span style="${tagStyle}">${discount}</span><![endif]-->` : "";
   return photo || badge ? `<a href="${url}" style="position:relative;display:block;color:#fff9ef;text-decoration:none;">${badge}${photo}</a>` : "";
@@ -113,12 +113,15 @@ export function renderBlackFridayTodayEmail(source: Content, design: BlackFriday
       .pick-right { padding-left: 5px !important; }
       .pick-image { height: clamp(112px, 39vw, 183px) !important; }
       .pick-info { padding: 9px 8px 11px !important; }
-      .pick-name { font-size: 15px !important; line-height: 17px !important; min-height: 51px !important; }
+      .pick-name {
+        font-size: 15px !important; line-height: 17px !important; min-height: 51px !important;
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+      }
       .pick-flag { font-size: 9px !important; letter-spacing: .42px !important; }
       .footer-scene { padding: 23px 17px 27px !important; }
     }
     @media screen and (max-width: 360px) {
-      .pick-name { font-size: 14px !important; min-height: 68px !important; }
+      .pick-name { font-size: 14px !important; min-height: 68px !important; -webkit-line-clamp: 4; }
       .pick-flag { letter-spacing: .1px !important; }
     }
 
@@ -135,12 +138,10 @@ export function renderBlackFridayTodayEmail(source: Content, design: BlackFriday
       .today-price strong { font-size: 16px !important; }
       .today-price s { display: block; font-size: 10px; line-height: 12px; }
       .pick-flag { font-size: 14px !important; line-height: 17px !important; }
-      .pick-name { min-height: 34px !important; }
       .footer-scene { padding-top: 53px !important; }
     }
     @media screen and (max-width: 360px) {
       .today-name { font-size: 11px !important; line-height: 14px !important; min-height: 42px !important; }
-      .pick-name { min-height: 68px !important; }
     }
     @media screen and (max-width: 600px) {
       .caption-art { width: min(294px, calc(100vw - 44px)) !important; }
